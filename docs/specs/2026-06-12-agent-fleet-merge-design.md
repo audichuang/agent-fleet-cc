@@ -75,6 +75,10 @@ remove 舊三個 marketplace（避免前綴撞名），再 add `agent-fleet`、i
 
 ## 5. 第二階段 — 共享地基（Ports & Adapters）
 
+> 第二階段細部設計(機器層 CLI 合約、統一 Job schema 定稿、指令對齊終局、
+> fleet plugin 提前出生)見《2026-06-12-phase2-shared-foundation-design.md》;
+> 該文件 §11 取代本文件 §11 的第二階段完成定義。
+
 ### 5.1 核心思想
 
 引擎差異只在「怎麼執行、怎麼解析輸出」；job 生命週期、狀態機、觀測、控制是普世的。
