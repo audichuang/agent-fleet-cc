@@ -7,6 +7,13 @@
   },
   "plugins": [
     {
+      "name": "codex",
+      "source": "./plugins/codex",
+      "description": "Use Codex from Claude Code to review code or delegate tasks.",
+      "version": "1.0.18",
+      "author": { "name": "OpenAI" }
+    },
+    {
       "name": "antigravity",
       "source": "./plugins/antigravity",
       "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, generate images, and hand off work — with a liveness watchdog and cross-process-safe job state.",

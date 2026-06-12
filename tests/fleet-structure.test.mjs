@@ -21,3 +21,11 @@ test("marketplace is agent-fleet and every entry is consistent", () => {
     assert.equal(plugin.version, entry.version, `${entry.name}: version mismatch`);
   }
 });
+
+test("marketplace lists exactly the three engine plugins", () => {
+  const marketplace = readJson(path.join(ROOT, ".claude-plugin/marketplace.json"));
+  assert.deepEqual(
+    marketplace.plugins.map((p) => p.name).sort(),
+    ["antigravity", "codex", "delegate"],
+  );
+});

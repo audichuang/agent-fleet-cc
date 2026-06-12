@@ -1,0 +1,131 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import "./helpers.mjs"; // hermetic env isolation (side-effect import)
+import { terminateProcessTree } from "../../plugins/codex/scripts/lib/process.mjs";
+
+// A wedged Codex app-server is NOT a process-group leader (it is spawned inside
+// the broker's group), so kill(-pid) alone cannot reap its MCP/tool children.
+// terminateProcessTree must enumerate the descendant pids (best-effort, via ps)
+// and signal them too, so a graceful broker close from the codex pid — and a
+// watchdog reap from the broker pid — both reap the whole subtree.
+
+function recordingKill() {
+  const calls = [];
+  const kill = (pid, signal) => {
+    calls.push({ pid, signal });
+  };
+  return { kill, calls };
+}
+
+// Fake process table: 500 -> [600, 601]; 600 -> [700]. Descendants of 500 are 600,601,700.
+const PS_TABLE = [
+  { pid: 1, ppid: 0 },
+  { pid: 500, ppid: 1 },
+  { pid: 600, ppid: 500 },
+  { pid: 601, ppid: 500 },
+  { pid: 700, ppid: 600 },
+  { pid: 900, ppid: 1 } // unrelated
+];
+
+test("terminateProcessTree signals descendant pids discovered via ps (POSIX)", () => {
+  const { kill, calls } = recordingKill();
+  terminateProcessTree(500, {
+    platform: "linux",
+    killImpl: kill,
+    psImpl: () => PS_TABLE
+  });
+  const signalled = calls.map((c) => c.pid);
+  // descendants reaped
+  assert.ok(signalled.includes(600), "child 600 must be signalled");
+  assert.ok(signalled.includes(601), "child 601 must be signalled");
+  assert.ok(signalled.includes(700), "grandchild 700 must be signalled");
+  // unrelated process never touched
+  assert.ok(!signalled.includes(900), "unrelated pid 900 must NOT be signalled");
+  // the group/root is still signalled (existing behavior)
+  assert.ok(signalled.includes(-500) || signalled.includes(500), "the root/group must still be signalled");
+});
+
+test("terminateProcessTree still group-kills when ps enumeration fails (graceful degradation)", () => {
+  const { kill, calls } = recordingKill();
+  const outcome = terminateProcessTree(500, {
+    platform: "linux",
+    killImpl: kill,
+    psImpl: () => {
+      throw new Error("ps unavailable");
+    }
+  });
+  assert.deepEqual(calls, [{ pid: -500, signal: "SIGTERM" }], "must fall back to a plain group kill");
+  assert.equal(outcome.method, "process-group");
+  assert.equal(outcome.delivered, true);
+});
+
+test("terminateProcessTree reads the process table with a generous maxBuffer (no truncation on a large table)", () => {
+  // readProcessTable runs `ps -A` with no maxBuffer => the ~1MB spawnSync default,
+  // so a very large process table overflows (ENOBUFS) and silently yields an empty
+  // descendant list. An explicit generous maxBuffer prevents that truncation.
+  let psOptions = null;
+  terminateProcessTree(500, {
+    platform: "linux",
+    killImpl: () => {},
+    runCommandImpl: (command, _args, options) => {
+      if (command === "ps") {
+        psOptions = options;
+      }
+      return { status: 0, stdout: "", stderr: "", error: null };
+    }
+  });
+  assert.ok(psOptions, "ps must be invoked to read the process table");
+  assert.equal(typeof psOptions.maxBuffer, "number", "the ps read must set an explicit maxBuffer");
+  assert.ok(psOptions.maxBuffer >= 8 * 1024 * 1024, "maxBuffer must be large enough for a big process table");
+});
+
+test("terminateProcessTree parses a LARGE ps table through readProcessTable and reaps every descendant", () => {
+  // Behavioral guard (complements the maxBuffer-constant test above): drive the
+  // REAL readProcessTable parse path via runCommandImpl with a multi-thousand-row
+  // `pid ppid` table and assert the sweep enumerates+signals all of them. A parse
+  // or BFS regression (or a silent row cap) would drop descendants here.
+  const N = 3000;
+  const lines = ["1 0", "500 1"];
+  for (let i = 0; i < N; i += 1) {
+    lines.push(`${1000 + i} 500`); // N direct children of 500
+  }
+  const stdout = lines.join("\n") + "\n";
+  const { kill, calls } = recordingKill();
+  terminateProcessTree(500, {
+    platform: "linux",
+    killImpl: kill,
+    runCommandImpl: (command) =>
+      command === "ps"
+        ? { status: 0, stdout, stderr: "", error: null }
+        : { status: 0, stdout: "", stderr: "", error: null }
+  });
+  const signalled = new Set(calls.map((c) => c.pid));
+  let missing = 0;
+  for (let i = 0; i < N; i += 1) {
+    if (!signalled.has(1000 + i)) missing += 1;
+  }
+  assert.equal(missing, 0, `all ${N} descendants must be signalled; ${missing} were dropped`);
+  assert.ok(signalled.has(-500) || signalled.has(500), "the root/group must still be signalled");
+});
+
+test("terminateProcessTree reaps descendants then falls back to a single kill when the child is not a group leader", () => {
+  const calls = [];
+  const outcome = terminateProcessTree(500, {
+    platform: "linux",
+    psImpl: () => PS_TABLE,
+    killImpl: (pid, signal) => {
+      calls.push({ pid, signal });
+      if (pid === -500) {
+        const err = new Error("no such group");
+        err.code = "ESRCH";
+        throw err; // 500 is not a group leader
+      }
+    }
+  });
+  const signalled = calls.map((c) => c.pid);
+  assert.ok(signalled.includes(600) && signalled.includes(601) && signalled.includes(700), "descendants reaped");
+  assert.ok(signalled.includes(-500), "group kill attempted first");
+  assert.ok(signalled.includes(500), "falls back to a direct kill of the non-leader root");
+  assert.equal(outcome.method, "process");
+});
