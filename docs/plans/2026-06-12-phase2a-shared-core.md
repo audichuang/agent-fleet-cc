@@ -16,9 +16,9 @@
 
 ## 基線(Task 0 填寫)
 
-- 既有測試基線:(Task 0 記錄)
-- node 版本:(Task 0 記錄)
-- auth 探測:(Task 0 記錄;失敗不擋 A–C,只影響 Phase 2D 的人工冒煙關卡)
+- 既有測試基線:structure 2 + delegate 91 + antigravity 243 + codex 305 = 641 全 pass(2026-06-12)
+- node 版本:v26.3.0
+- auth 探測:codex = Logged in using ChatGPT;delegate profile = deepseek.json 存在;agy = 1.0.7
 
 ## File Structure
 
@@ -57,7 +57,7 @@ tests/shared/
 **Files:**
 - Modify: `docs/plans/2026-06-12-phase2a-shared-core.md`(回填上方「基線」節)
 
-- [ ] **Step 1: 重驗既有測試基線**
+- [x] **Step 1: 重驗既有測試基線**
 
 ```bash
 cd /home/audichuang/research/agent-fleet-cc && node --version && npm test 2>&1 | tail -20
@@ -65,7 +65,7 @@ cd /home/audichuang/research/agent-fleet-cc && node --version && npm test 2>&1 |
 
 Expected: 四套全 pass(上次基線:structure 2 + delegate 91 + antigravity 243 + codex 305 = 641)。若 codex 套件出現 unref'd-timer cancel(node ≥22.22 上游不相容,見 `.github/workflows/ci.yml` 註解),改用 Node 24 重跑;仍有環境性失敗則把失敗清單原文記入本檔「基線」節作 known-fail 白名單——審查者以白名單為準。
 
-- [ ] **Step 2: auth 探測(記錄,不擋工)**
+- [x] **Step 2: auth 探測(記錄,不擋工)**
 
 ```bash
 codex login status 2>&1 | head -3; ls ~/.claude/plugins/data/delegate/profiles/ 2>/dev/null; command -v agy && agy --version 2>&1 | head -1
@@ -73,7 +73,7 @@ codex login status 2>&1 | head -3; ls ~/.claude/plugins/data/delegate/profiles/ 
 
 Expected: 各引擎狀態記入「基線」節(例:codex logged in / deepseek.json 存在 / agy x.y.z)。**勿印出 profile 檔案內容**(含 key)。任何 fail 只標紅 Phase 2D 的人工冒煙關卡。
 
-- [ ] **Step 3: 切實作分支**
+- [x] **Step 3: 切實作分支**
 
 ```bash
 git checkout -b phase2-shared-foundation && git branch --show-current
@@ -81,7 +81,7 @@ git checkout -b phase2-shared-foundation && git branch --show-current
 
 Expected: `phase2-shared-foundation`
 
-- [ ] **Step 4: 回填基線並 commit**
+- [x] **Step 4: 回填基線並 commit**
 
 ```bash
 git add docs/plans/2026-06-12-phase2a-shared-core.md && git commit -m "docs(plan): phase-2a baseline recorded"
