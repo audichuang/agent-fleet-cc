@@ -619,8 +619,8 @@ Expected: 兩個 repo 顯示 archived；本機 clone 不受影響（第二階段
 
 ## 完成定義（對照 spec §11 第一階段）
 
-- [ ] 新 repo 三 plugin 並存，`npm test` 全綠（structure 2 + delegate 90 + antigravity 全數 + codex 全數）
-- [ ] `diff -r` 驗證各 plugin payload 與來源逐 byte 相同（扣除明文裁定的留下清單）
-- [ ] 從 `agent-fleet` marketplace 實裝三個 plugin，各跑一個真實 job 成功
-- [ ] CI 綠
-- [ ] 三個舊 repo 加遷移橫幅；兩個已發佈的（codex、antigravity）archive，delegate 為本機 repo 僅留橫幅
+- [x] 新 repo 三 plugin 並存，`npm test` 全綠（structure 2 + delegate 90 + antigravity 全數 + codex 全數）
+- [x] `diff -r` 驗證各 plugin payload 與來源逐 byte 相同（扣除明文裁定的留下清單）
+- [x] 從 `agent-fleet` marketplace 實裝三個 plugin，各跑一個真實 job 成功
+- [x] CI 綠
+- [ ] ~~三個舊 repo 加遷移橫幅；兩個已發佈的（codex、antigravity）archive，delegate 為本機 repo 僅留橫幅~~(2026-06-12 使用者取消:舊 repo 不動)
