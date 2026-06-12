@@ -16,8 +16,13 @@
 
 ## 基線(Task 0 填寫)
 
-- 既有測試基線:(Task 0 記錄;Plan A 後 shared 新增 ~60,全套應 ~700)
-- 已知 flaky:`tests/codex/runtime.test.mjs` 曾偶發(expected design-challenger got thr_2),單跑/重跑綠,非本工作引入——審查者遇到時重跑一次確認,不算新失敗。
+- 既有測試基線(Task 0 記錄,`npm test` exit=0,五套全綠,共 717 tests):
+  - structure: tests=2 pass=2 fail=0
+  - shared: tests=76 pass=76 fail=0
+  - delegate: tests=91 pass=91 fail=0
+  - antigravity: tests=243 pass=243 fail=0
+  - codex: tests=305 pass=305 fail=0
+- 已知 flaky:`tests/codex/runtime.test.mjs` 曾偶發(expected design-challenger got thr_2),單跑/重跑綠,非本工作引入——審查者遇到時重跑一次確認,不算新失敗。本次基線跑未觸發,codex 全綠。
 
 ## 鐵律(每個 task 都適用)
 
@@ -76,7 +81,7 @@ tests/delegate/
 
 **Files:** Modify: 本 plan 檔(回填基線)
 
-- [ ] **Step 1: 確認分支與乾淨樹**
+- [x] **Step 1: 確認分支與乾淨樹**
 
 ```bash
 cd /home/audichuang/research/agent-fleet-cc && git branch --show-current && git status --short
@@ -84,7 +89,7 @@ cd /home/audichuang/research/agent-fleet-cc && git branch --show-current && git 
 
 Expected: `phase2b-delegate`、無輸出(乾淨)。
 
-- [ ] **Step 2: 重驗全套基線**
+- [x] **Step 2: 重驗全套基線**
 
 ```bash
 npm test > /tmp/phase2b-baseline.txt 2>&1; echo "exit=$?"; node -e "const s=require('fs').readFileSync('/tmp/phase2b-baseline.txt','utf8');for(const l of s.split('\n'))if(/^# (tests|pass|fail)/.test(l.trim()))console.log(l.trim())"
@@ -92,7 +97,7 @@ npm test > /tmp/phase2b-baseline.txt 2>&1; echo "exit=$?"; node -e "const s=requ
 
 Expected: exit=0。若 `tests/codex/runtime.test.mjs` 偶發紅,重跑一次確認後記入基線節為 known-flaky,不擋工。把五套 pass 數記入本檔「基線」節。
 
-- [ ] **Step 3: 回填基線並 commit**
+- [x] **Step 3: 回填基線並 commit**
 
 ```bash
 git add docs/plans/2026-06-12-phase2b-delegate.md && git commit -m "docs(plan): phase-2b baseline recorded"
