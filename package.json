@@ -1,0 +1,16 @@
+{
+  "name": "agent-fleet-cc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One marketplace for delegation plugins: codex, antigravity (agy), delegate (cheap-model Claude Code)",
+  "engines": { "node": ">=22.3" },
+  "scripts": {
+    "test": "npm run test:structure",
+    "test:structure": "node --test tests/fleet-structure.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^6.0.2"
+  }
+}

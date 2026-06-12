@@ -1,0 +1,9 @@
+{
+  "name": "agent-fleet",
+  "owner": { "name": "audichuang" },
+  "metadata": {
+    "description": "One marketplace for AI-agent delegation plugins: Codex, Antigravity (agy), and cheap-model Claude Code delegation.",
+    "version": "0.1.0"
+  },
+  "plugins": []
+}

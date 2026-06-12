@@ -1,0 +1,14 @@
+node_modules/
+*.log
+.DS_Store
+.env
+.env.*
+coverage/
+*.tgz
+.tmp/
+.cache/
+.antigravitycli/
+.codegraph/
+*.tsbuildinfo
+output/
+plugins/codex/.generated/
