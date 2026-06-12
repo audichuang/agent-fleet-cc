@@ -1,0 +1,11 @@
+{
+  "name": "antigravity",
+  "version": "0.2.0",
+  "description": "Delegate tasks, code reviews, images, and handoffs to Google Antigravity CLI (agy) from Claude Code, Codex CLI, or any ACP-free host — with crash-surviving background jobs.",
+  "author": {
+    "name": "audichuang",
+    "url": "https://github.com/audichuang"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/audichuang/antigravity-plugin"
+}

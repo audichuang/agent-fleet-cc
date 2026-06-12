@@ -1,0 +1,49 @@
+{
+  "name": "antigravity-plugin",
+  "version": "0.2.0",
+  "description": "Multi-host plugin for delegating tasks and code reviews to Google Antigravity CLI (agy). Works inside Claude Code, Codex CLI, agy itself, and standalone via npx.",
+  "type": "module",
+  "bin": {
+    "antigravity-plugin": "./bin/antigravity.mjs"
+  },
+  "scripts": {
+    "test": "node --test --experimental-test-module-mocks tests/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-module-mocks --experimental-test-coverage tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sakibsadmanshajib/antigravity-plugin.git"
+  },
+  "homepage": "https://github.com/sakibsadmanshajib/antigravity-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/sakibsadmanshajib/antigravity-plugin/issues"
+  },
+  "keywords": [
+    "antigravity",
+    "antigravity-cli",
+    "agy",
+    "claude-code",
+    "claude-code-plugin",
+    "codex",
+    "codex-cli",
+    "code-review",
+    "ai-delegation",
+    "gemini-replacement"
+  ],
+  "files": [
+    "bin",
+    "scripts",
+    "commands",
+    "agents",
+    "hooks",
+    ".claude-plugin",
+    ".codex-plugin",
+    "plugin.json",
+    "README.md",
+    "LICENSE"
+  ]
+}

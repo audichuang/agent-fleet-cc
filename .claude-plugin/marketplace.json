@@ -7,6 +7,13 @@
   },
   "plugins": [
     {
+      "name": "antigravity",
+      "source": "./plugins/antigravity",
+      "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, generate images, and hand off work — with a liveness watchdog and cross-process-safe job state.",
+      "version": "0.2.0",
+      "author": { "name": "audichuang" }
+    },
+    {
       "name": "delegate",
       "source": "./plugins/delegate",
       "description": "Delegate execution tasks to cheap-model headless Claude Code via settings profiles",

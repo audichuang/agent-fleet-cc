@@ -1,0 +1,50 @@
+# Codex implicit-invocation interface for antigravity-plugin.
+#
+# Codex's plugin loader reads this file at the plugin install root to learn
+# how to surface the plugin as an implicit `$antigravity` shortcut, and what
+# the default reasoning prompt should be when the user types `$antigravity`.
+#
+# All host surfaces (Claude Code slash commands, Codex `$antigravity`, agy
+# native plugin commands, and the standalone `npx antigravity-plugin <verb>`
+# CLI) shell out to the SAME per-verb runtime modules under
+# `scripts/commands/<verb>.mjs`. The verbs listed below are the public
+# contract — keep them in sync with `commands/` and `scripts/commands/`.
+
+interface:
+  display_name: "Antigravity"
+  short_description: "Hand off to Google Antigravity CLI (agy) for code review, large-context investigation, debugging, or long-running tasks."
+  default_prompt: "Use $antigravity when a task benefits from agy's large-context window or a second-opinion reasoning pass — typical cases include cross-file code review, adversarial review of recent changes, refactor impact analysis, deep debugging, or running a long task in the background while the host continues other work."
+
+policy:
+  allow_implicit_invocation: true
+
+# Verbs exposed under the `$antigravity` shortcut. Each one runs the
+# corresponding `scripts/commands/<verb>.mjs` module via the per-host bridge,
+# so a Codex invocation of `$antigravity review --base main` resolves to the
+# same code path as Claude Code's `/antigravity:review --base main` and
+# agy's `agy plugin run antigravity review --base main`.
+commands:
+  - name: setup
+    description: "One-time agy OAuth wizard. Idempotent — re-run anytime to refresh credentials."
+  - name: review
+    description: "Hand the current git diff (or `--base <ref>`) to agy for a structured code review. Default is background mode; poll with $antigravity status."
+  - name: rescue
+    description: "Delegate an investigation or fix request to agy — e.g. 'why are the tests failing on main'. Returns a job id for $antigravity status / result."
+  - name: task
+    description: "Generic long-running task delegation. Supports --continue / --conversation <id> / --add-dir for follow-up agy conversations."
+  - name: status
+    description: "Show a Markdown table of current and recent agy jobs, with health, last progress, and any pending OAuth URL."
+  - name: result
+    description: "Render the full output of a completed agy job by id."
+  - name: cancel
+    description: "Send SIGTERM to a running agy worker by job id."
+
+# Auth notes (surfaced via SKILL.md too):
+# - agy 1.0.x is OAuth-only — there is no API-key / headless path. The very
+#   first `$antigravity` invocation in a new account will block on an OAuth
+#   URL printed to stdout. Run `$antigravity setup` once, follow the URL in
+#   a browser, then re-issue the original command.
+# - Background workers capture the OAuth URL and surface it on `$antigravity
+#   status` so users in non-interactive sessions can still complete auth.
+
+# See SKILL.md and docs/INSTALL.md for the full invocation contract.
