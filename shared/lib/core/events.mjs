@@ -19,7 +19,10 @@ export function eventsFilePath(jobDir) {
 export function appendEvent(jobDir, type, data = {}) {
   if (!TYPE_SET.has(type)) throw new Error(`unknown event type: ${type}`);
   fs.mkdirSync(jobDir, { recursive: true, mode: 0o700 });
-  const line = JSON.stringify({ ts: new Date().toISOString(), type, ...data });
+  // type は明示的に最後に置き、data 内の同名フィールドで上書きされないようにする。
+  // type must come last — ensures data fields (e.g., raw adapter output) cannot
+  // override the normalized type field; spec §3 requires type=engine-event invariant.
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...data, type });
   fs.appendFileSync(eventsFilePath(jobDir), line + "\n", { mode: 0o600 });
 }
 

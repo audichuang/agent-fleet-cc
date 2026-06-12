@@ -1531,7 +1531,7 @@ git commit -m "feat(shared): ProcessAdapter contract validator + form-agnostic i
 
 職責(吃 adapter 驅動完整生命週期):讀 prompt → CAS 標 running → `buildEngineEnv` 強制消毒 → `spawnEngine` → 逐行 log + `parseEvent` → `extractResult`/`classifyError` → CAS finalize + result/finalized events。cancel 經 SIGTERM 轉發成 pgid kill。timeout 政策在 worker(`job.timeoutMs`)。
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/worker.test.mjs
@@ -1713,12 +1713,12 @@ test("missing prompt file → failed, never spawns", async () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/worker.test.mjs`
 Expected: FAIL — `Cannot find module .../worker.mjs`
 
-- [ ] **Step 3: 實作**
+- [x] **Step 3: 實作**
 
 ```js
 // shared/lib/runtime/worker.mjs
@@ -1940,17 +1940,35 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/worker.test.mjs`
 Expected: PASS(5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/runtime/worker.mjs tests/shared/worker.test.mjs
 git commit -m "feat(shared): generic adapter-driven worker with mandatory env seam"
 ```
+
+> **Round-3 修正(2026-06-12):**
+> 1. lost-CAS 分支加 `TERMINAL_STATUSES` 守衛:`readTerminalLock` 回 `{status:null}`(corrupt/非終態鎖)時,worker 現在檢查 `job.json` status 是否為終態,若不是則安全回退 `'failed'`,絕不寫出 active status。
+> 2. 新增測試「lost-cas with corrupt/non-terminal lock → finalized event status is always terminal」:lock 寫入 `{status:'running'}`(非終態)→ readTerminalLock 回 `{status:null}` → finalized 事件必須為終態(fallback 'failed')。mutation criterion:移除 TERMINAL_STATUSES 守衛 → finalized.status 變成 'running' → 測試紅燈。
+> 3. (low)補充兩個強化測試:「missing prompt file → never spawns (spawned flag supplement)」加 `spawned===false` 斷言;「adapter.buildInvocation() throw → failed, never spawns」覆蓋 buildInvocation throw 路徑。
+>
+> **Round-4 修正(第 1 輪三條審查 issues — 2026-06-12):**
+> 1. **Issue 1(buildEngineEnv 未設 guard)**:把 `buildEngineEnv` 呼叫包進 `try/catch`,失敗時呼叫新的 `earlyFinalize()`(與 `buildInvocation` 路徑對稱),寫終態 `failed` + `errorKind:'adapter'` + `finalized` event。adapter 缺 `recursionMarker` 時 job 不再卡 running。新增測試「adapter missing recursionMarker: buildEngineEnv throw → job reaches failed terminal」。
+> 2. **Issue 2(early-finalize 路徑 lost-CAS 無 finalized event)**:提取共用函式 `earlyFinalize()`,內含完整 finalize + 讀真實終態 + 寫 finalized event 邏輯,與主路徑的 lost-cas 分支完全對稱。兩條早期路徑(prompt missing / buildInvocation throw)統一改呼叫 `earlyFinalize()`。新增兩個 lost-CAS 回歸測試。
+> 3. **Issue 3(installCancelForwarder 無測試)**:新增三個單測驗 (a) SIGTERM 觸發 killGroupWithGrace、(b) terminated 先於 onChild → onChild 時立即 kill、(c) forceExitMs 觸發 exitImpl(0)。所有注入點(fake proc/killImpl/scheduleImpl/exitImpl)均已存在,無需改實作。
+>
+> **Round-5 修正(第 2 輪審查 issues — 2026-06-12):**
+> 1. **Issue 1(timeout/close 永不發生 → job 卡 running,违反 spec §5 不變量(1))**:在 `runWorker` 的 timeout handler 加 `forceTimer`:timeout 觸發後,`killGroupWithGrace` 發送 KILL 訊號,再等 `graceMs + forceResolveExtraMs(預設 200ms)` 後強制 resolve Promise(等同 `finish()`),無論 `close` 是否發生。`finish()` 加 `clearTimeout(forceTimer)` 讓正常 close 路徑取消 force。`deps.scheduleImpl` 與 `deps.forceResolveExtraMs` 注入點供測試控制。新增測試「timeout with stdout-holding grandchild: job must reach timed-out terminal state」:fakeChild stdout 永不結束、close 永不發生 → timeout(100ms)+grace(50ms)+extra(50ms) ≈ 200ms 後 job 必達 timed-out。mutation criterion:移除 forceTimer 區塊 → runWorker Promise 永不 resolve → node:test 1500ms 後 cancel 測試 → 紅燈(已驗)。
+> 2. **Issue 2(early-finalize lost-CAS prompt-missing 測試不咬 by/status)**:新增獨立測試「early-finalize lost-CAS (prompt missing): lost-cas event has by=lost-cas and status=cancelled」,補上 `const lostCas = finalizedEvents.find(e => e.by === 'lost-cas'); assert.ok(lostCas); assert.equal(lostCas.status, 'cancelled')`。mutation criterion:earlyFinalize 的 lost-cas 分支硬寫 `'failed'` → lostCas.status 為 'failed' → 斷言紅燈(已驗)。
+>
+> **Round-6 修正(第 3 輪審查 issues — 2026-06-12):**
+> 1. **Issue 1(timeout test — `.timeout?.(3000)` 是 silent no-op)**:Node v26.3.0 的 `test()` 回傳 Promise,無 `.timeout` method,因此 `.timeout?.(3000)` 永遠不發生。修法:把超時選項移入 `test()` 選項物件:`test('timeout with stdout-holding grandchild: ...', { timeout: 3000 }, async () => { ... })`。已驗證:以此形式 timeout 後確實回報 `'test timed out after 3000ms'` → cancelled/fail;mutation 移除 forceTimer block → Promise 永不 resolve → `{ timeout: 3000 }` 在 3s 後 cancel 測試 → 紅燈。
+> 2. **Issue 2(installCancelForwarder tests (a)(b) — SIGKILL escalation leg 從未被斷言)**:測試 (a)(b) 的 `scheduleImpl: () => ({ unref: () => {} })` stub 從不呼叫 callback,故 `killGroupWithGrace` 的 SIGKILL 升級路徑完全未覆蓋。修法:新增獨立單元測試「killGroupWithGrace: SIGTERM sent immediately then SIGKILL after grace callback fires」,直接測試 spawn.mjs 的 `killGroupWithGrace`;(1)驗 SIGTERM 立即送到 -pgid;(2)捕獲 `scheduleImpl` 的 callback,手動觸發,驗 SIGKILL 送到 -pgid。mutation criterion:把 `killGroupWithGrace` 改成 one-shot SIGTERM(移除 scheduleImpl call)→ scheduledCallback 保持 null → 斷言紅燈。同時在 `tests/shared/worker.test.mjs` 頂部新增 `import { killGroupWithGrace } from "../../shared/lib/runtime/spawn.mjs"` 供新測試使用。
 
 ---
 
