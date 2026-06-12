@@ -5,5 +5,12 @@
     "description": "One marketplace for AI-agent delegation plugins: Codex, Antigravity (agy), and cheap-model Claude Code delegation.",
     "version": "0.1.0"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "delegate",
+      "source": "./plugins/delegate",
+      "description": "Delegate execution tasks to cheap-model headless Claude Code via settings profiles",
+      "version": "0.1.0"
+    }
+  ]
 }

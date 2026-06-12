@@ -6,8 +6,9 @@
   "description": "One marketplace for delegation plugins: codex, antigravity (agy), delegate (cheap-model Claude Code)",
   "engines": { "node": ">=22.3" },
   "scripts": {
-    "test": "npm run test:structure",
-    "test:structure": "node --test tests/fleet-structure.test.mjs"
+    "test": "npm run test:structure && npm run test:delegate",
+    "test:structure": "node --test tests/fleet-structure.test.mjs",
+    "test:delegate": "node --test tests/delegate/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
