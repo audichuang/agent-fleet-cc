@@ -95,7 +95,7 @@ git add docs/plans/2026-06-12-phase2a-shared-core.md && git commit -m "docs(plan
 - Create: `shared/lib/core/job.mjs`
 - Test: `tests/shared/job.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/job.test.mjs
@@ -149,12 +149,12 @@ test("createJobRecord rejects unknown engine-less record", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/job.test.mjs`
 Expected: FAIL — `Cannot find module .../shared/lib/core/job.mjs`
 
-- [ ] **Step 3: 最小實作**
+- [x] **Step 3: 最小實作**
 
 ```js
 // shared/lib/core/job.mjs
@@ -207,12 +207,12 @@ export function createJobRecord({
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/job.test.mjs`
 Expected: PASS(4 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/job.mjs tests/shared/job.test.mjs
