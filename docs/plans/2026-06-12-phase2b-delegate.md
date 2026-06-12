@@ -112,7 +112,7 @@ git add docs/plans/2026-06-12-phase2b-delegate.md && git commit -m "docs(plan): 
 - Create: `tests/shared/args.test.mjs`(自 `tests/delegate/args.test.mjs` 遷移,import 改指 shared)
 - 注意:delegate 舊檔此 task **不刪**(companion 還在用),Task 9 統一清理。
 
-- [ ] **Step 1: 遷移測試(import 指向 shared)**
+- [x] **Step 1: 遷移測試(import 指向 shared)**
 
 把 `tests/delegate/args.test.mjs` 的 4 個測試複製為 `tests/shared/args.test.mjs`,僅改 import:
 
@@ -123,12 +123,12 @@ import { parseArgs, UsageError } from "../../shared/lib/args.mjs";
 
 其餘測試內容逐字保留(4 tests:value/bool/positional、`--` 停止解析、unknown flag throws、缺 value throws)。
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/args.test.mjs`
 Expected: FAIL — `Cannot find module .../shared/lib/args.mjs`
 
-- [ ] **Step 3: 原樣升入**
+- [x] **Step 3: 原樣升入**
 
 ```bash
 cp plugins/delegate/scripts/lib/args.mjs shared/lib/args.mjs
@@ -136,12 +136,12 @@ cp plugins/delegate/scripts/lib/args.mjs shared/lib/args.mjs
 
 檔頭加一行註解:`// 統一旗標解析(spec §5:三 companion 共用同一套,杜絕再分岔)。升入自 delegate。`
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/args.test.mjs`
 Expected: PASS(4 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/args.mjs tests/shared/args.test.mjs
