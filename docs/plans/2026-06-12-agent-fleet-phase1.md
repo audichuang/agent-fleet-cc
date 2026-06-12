@@ -569,7 +569,7 @@ env DELEGATE_PLUGIN_DATA="$HOME/.claude/plugins/data/delegate" \
 # Expected: 回 job id；接著用 status / result <job-id> 取回 PONG
 ```
 
-- [ ] **Step 3: 手動冒煙（需使用者在 Claude Code 介面操作 — 向使用者列出此清單後暫停）**
+- [x] **Step 3: 手動冒煙（需使用者在 Claude Code 介面操作 — 向使用者列出此清單後暫停）**
 
 1. 先移除舊的：uninstall `codex@openai-codex`、`antigravity@antigravity`、`delegate@claude-delegate`，再 remove 三個舊 marketplace（前綴會撞名）。
 2. `/plugin marketplace add audichuang/agent-fleet-cc`
