@@ -1,6 +1,8 @@
 {
   "name": "agent-fleet",
-  "owner": { "name": "audichuang" },
+  "owner": {
+    "name": "audichuang"
+  },
   "metadata": {
     "description": "One marketplace for AI-agent delegation plugins: Codex, Antigravity (agy), and cheap-model Claude Code delegation.",
     "version": "0.1.0"
@@ -11,20 +13,24 @@
       "source": "./plugins/codex",
       "description": "Use Codex from Claude Code to review code or delegate tasks.",
       "version": "1.0.18",
-      "author": { "name": "OpenAI" }
+      "author": {
+        "name": "OpenAI"
+      }
     },
     {
       "name": "antigravity",
       "source": "./plugins/antigravity",
       "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, generate images, and hand off work — with a liveness watchdog and cross-process-safe job state.",
       "version": "0.2.0",
-      "author": { "name": "audichuang" }
+      "author": {
+        "name": "audichuang"
+      }
     },
     {
       "name": "delegate",
       "source": "./plugins/delegate",
       "description": "Delegate execution tasks to cheap-model headless Claude Code via settings profiles",
-      "version": "0.1.0"
+      "version": "0.1.1"
     }
   ]
 }

@@ -19,6 +19,22 @@ test("every command md exists, has frontmatter, forwards to the companion", () =
   }
 });
 
+test("task and execute-plan document the no-profile selection flow", () => {
+  for (const name of ["task", "execute-plan"]) {
+    const text = fs.readFileSync(
+      path.join(REPO_ROOT, "plugins/delegate/commands", `${name}.md`),
+      "utf8",
+    );
+    assert.match(text, /AskUserQuestion/, `${name}.md: missing profile picker`);
+    assert.match(text, /DELEGATE_DEFAULT_PROFILE/, `${name}.md: missing default hint`);
+    assert.match(
+      text,
+      /never re-run a failed job on a\s+different profile/i,
+      `${name}.md: missing no-failover rule`,
+    );
+  }
+});
+
 test("marketplace entry and plugin.json agree for delegate", () => {
   const marketplace = JSON.parse(
     fs.readFileSync(path.join(REPO_ROOT, ".claude-plugin/marketplace.json"), "utf8"),

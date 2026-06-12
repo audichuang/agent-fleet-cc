@@ -1,5 +1,5 @@
 {
   "name": "delegate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Delegate execution tasks to cheap-model headless Claude Code via settings profiles"
 }
