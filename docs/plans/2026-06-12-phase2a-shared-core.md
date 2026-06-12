@@ -1283,7 +1283,7 @@ git commit -m "feat(shared): waitForJob re-entry primitive with event heartbeat"
 - Create: `tests/shared/fixtures/grandchild-spawner.mjs`(測試 fixture)
 - Test: `tests/shared/spawn.test.mjs`
 
-- [ ] **Step 1: 寫測試 fixture(會生孫子的腳本)**
+- [x] **Step 1: 寫測試 fixture(會生孫子的腳本)**
 
 ```js
 // tests/shared/fixtures/grandchild-spawner.mjs
@@ -1296,7 +1296,7 @@ process.stdout.write(JSON.stringify({ childPid: process.pid, grandchildPid: gran
 setInterval(() => {}, 1000); // 自己也常駐
 ```
 
-- [ ] **Step 2: 寫失敗測試**
+- [x] **Step 2: 寫失敗測試**
 
 ```js
 // tests/shared/spawn.test.mjs
@@ -1349,12 +1349,12 @@ test("killProcessGroup never throws on dead/invalid pgid", () => {
 });
 ```
 
-- [ ] **Step 3: 跑測試確認失敗**
+- [x] **Step 3: 跑測試確認失敗**
 
 Run: `node --test tests/shared/spawn.test.mjs`
 Expected: FAIL — `Cannot find module .../spawn.mjs`
 
-- [ ] **Step 4: 最小實作**
+- [x] **Step 4: 最小實作**
 
 ```js
 // shared/lib/runtime/spawn.mjs
@@ -1387,12 +1387,12 @@ export function killGroupWithGrace(pid, { graceMs = 5000, scheduleImpl = setTime
 }
 ```
 
-- [ ] **Step 5: 跑測試確認通過**
+- [x] **Step 5: 跑測試確認通過**
 
 Run: `node --test tests/shared/spawn.test.mjs`
 Expected: PASS(2 tests;第一個測試真實驗證孫子死光)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add shared/lib/runtime/spawn.mjs tests/shared/spawn.test.mjs tests/shared/fixtures/grandchild-spawner.mjs
