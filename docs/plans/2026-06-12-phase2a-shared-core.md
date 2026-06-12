@@ -227,7 +227,7 @@ git commit -m "feat(shared): job state machine constants and unified schema fact
 - Create: `shared/lib/core/events.mjs`
 - Test: `tests/shared/events.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/events.test.mjs
@@ -293,12 +293,12 @@ test("readEvents supports offset for incremental tail", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/events.test.mjs`
 Expected: FAIL — `Cannot find module .../events.mjs`
 
-- [ ] **Step 3: 最小實作**
+- [x] **Step 3: 最小實作**
 
 ```js
 // shared/lib/core/events.mjs
@@ -347,12 +347,12 @@ export function readEvents(jobDir, { afterIndex = -1 } = {}) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/events.test.mjs`
 Expected: PASS(5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/events.mjs tests/shared/events.test.mjs
