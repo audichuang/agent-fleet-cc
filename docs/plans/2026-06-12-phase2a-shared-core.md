@@ -849,7 +849,7 @@ git commit -m "feat(shared): directory-wise prune preserving CAS unlink-order in
 - Create: `shared/lib/core/reconcile.mjs`
 - Test: `tests/shared/reconcile.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/reconcile.test.mjs
@@ -928,12 +928,12 @@ test("terminal jobs are never touched", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/reconcile.test.mjs`
 Expected: FAIL — `Cannot find module .../reconcile.mjs`
 
-- [ ] **Step 3: 最小實作**
+- [x] **Step 3: 最小實作**
 
 ```js
 // shared/lib/core/reconcile.mjs
@@ -1000,17 +1000,29 @@ export function reconcileDeadPids(stateDir, deps = {}) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/reconcile.test.mjs`
 Expected: PASS(5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/reconcile.mjs tests/shared/reconcile.test.mjs
 git commit -m "feat(shared): dead-pid reconcile with lock-repair convergence"
 ```
+
+> **Round-2 修正(2026-06-12):**
+> 1. lock-repair 分支加 re-read 守衛:寫入前 `readJob` 重讀;若回 null(half-prune race)則 skip;若已是終態(winner 已補完 JSON)則 skip,避免以 stale 快照覆蓋 winner 的 resultText/sessionId 等欄位。
+> 2. 新增三個對抗測試固化上述守衛:
+>    - "lock-repair does not overwrite winner's completed payload (stale snapshot race)" — 驗 winner payload 完整性。
+>    - "lock-repair does not resurrect half-pruned job (json deleted, lock still present)" — 驗半 prune 窗口不復活 job。
+>    - "garbage lock content: lock-repair writes status=failed via fallback" — 驗垃圾 lock 走 `?? "failed"` 回退路徑。
+>
+> **Round-3 修正(2026-06-12):**
+> 3. `reconcileDeadPids` 加 `_hooks.beforeFreshRead(jobId)` 測試縫:在 lock-repair 分支、`pid && isAlive` 檢查後、`readJob(fresh)` 之前觸發,讓測試能在 list-snapshot 與 re-read 之間注入競態。
+> 4. "lock-repair does not overwrite winner's completed payload" 改寫:setup = running+dead+lock(status=cancelled, json 仍非終態);`beforeFreshRead` hook 直接 writeJob 寫入終態 JSON(resultText/sessionId),模擬 winner 在中途補完;斷言 reconcile 回 []、payload 完整;mutation criterion:刪 reconcile.mjs 第 47 行守衛 → 測試必須轉紅(已驗:reconciled=[jobId] 且 status 被覆寫)。
+> 5. "lock-repair does not resurrect half-pruned job" 改寫:setup = running+dead+lock(json 仍在,listJobs 能讀到);`beforeFreshRead` hook 呼叫 `fs.unlinkSync(jobFilePath)`,模擬 prune 刪 json 的中間窗口;斷言 reconcile 回 []、readJob 回 null;mutation criterion:刪 reconcile.mjs 第 46 行守衛 → 測試必須轉紅(已驗:TypeError crash,writeJob 觸及 null.status)。
 
 ---
 
