@@ -367,7 +367,7 @@ git commit -m "feat(shared): normalized event log (observability spine)"
 - Create: `shared/lib/core/state-store.mjs`
 - Test: `tests/shared/state-store.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/state-store.test.mjs
@@ -431,12 +431,12 @@ test("listJobs scans job dirs, skips corrupt, sorts newest first", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/state-store.test.mjs`
 Expected: FAIL — `Cannot find module .../state-store.mjs`
 
-- [ ] **Step 3: 最小實作**
+- [x] **Step 3: 最小實作**
 
 ```js
 // shared/lib/core/state-store.mjs
@@ -516,12 +516,12 @@ export function listJobs(stateDir) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/state-store.test.mjs`
 Expected: PASS(3 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/state-store.mjs tests/shared/state-store.test.mjs
