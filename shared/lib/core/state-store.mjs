@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { TERMINAL_STATUSES } from "./job.mjs";
+import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "./job.mjs";
 import { appendEvent } from "./events.mjs";
 
 // 目錄式佈局(spec §3):jobs/<id>/{job.json,prompt.txt,events.ndjson,log}
@@ -153,4 +153,30 @@ export function markJobRunning(stateDir, jobId, patch = {}, hooks = {}) {
   hooks.beforeRecheck?.();
   if (readTerminalLock(stateDir, jobId)) return null;
   return readJob(stateDir, jobId);
+}
+
+// pruneJobs:刪掉最舊的 terminal job 目錄,令總數不超過 max。
+// unlink 順序是 load-bearing:job.json 必須先於 terminal.lock 消失。
+// finalizeJob 在 claim 後 re-read JSON,靠「lock 可被 prune ⇒ JSON 已不在」
+// 偵測並 undo post-prune claim。目錄最後整個移除。
+// active job(queued/running)永遠不碰。
+export function pruneJobs(stateDir, { max = 50 } = {}) {
+  const jobs = listJobs(stateDir);
+  const activeCount = jobs.filter((j) => ACTIVE_STATUSES.has(j.status)).length;
+  const terminal = jobs
+    .filter((j) => TERMINAL_STATUSES.has(j.status))
+    .sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")));
+  const keep = Math.max(0, max - activeCount);
+  for (const job of terminal.slice(keep)) {
+    // 1. job.json 先消失 — finalizeJob re-read 見 null 即 undo 自己的 lock claim。
+    try {
+      fs.unlinkSync(jobFilePath(stateDir, job.id));
+    } catch {}
+    // 2. terminal.lock 次之。
+    try {
+      fs.unlinkSync(lockFilePath(stateDir, job.id));
+    } catch {}
+    // 3. 整目錄最後移除(含 prompt.txt / events.ndjson / log 等殘餘)。
+    fs.rmSync(jobDir(stateDir, job.id), { recursive: true, force: true });
+  }
 }

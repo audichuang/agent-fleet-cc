@@ -743,7 +743,7 @@ git commit -m "feat(shared): O_EXCL CAS terminal transitions (first-terminal-wri
 - Modify: `shared/lib/core/state-store.mjs`(追加 pruneJobs)
 - Test: `tests/shared/prune.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/prune.test.mjs
@@ -793,12 +793,12 @@ test("prune never removes active jobs even when over max", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/prune.test.mjs`
 Expected: FAIL — `pruneJobs is not a function`
 
-- [ ] **Step 3: 實作(追加檔尾)**
+- [x] **Step 3: 實作(追加檔尾)**
 
 ```js
 // shared/lib/core/state-store.mjs — 追加在檔尾
@@ -829,12 +829,12 @@ export function pruneJobs(stateDir, { max = 50 } = {}) {
 
 (實作時把 `ACTIVE_STATUSES` 併進檔頭既有的 `./job.mjs` import,不要重複 import 行。)
 
-- [ ] **Step 4: 跑 shared 全套確認通過**
+- [x] **Step 4: 跑 shared 全套確認通過**
 
 Run: `node --test tests/shared/*.test.mjs`
 Expected: PASS(全部)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/state-store.mjs tests/shared/prune.test.mjs
