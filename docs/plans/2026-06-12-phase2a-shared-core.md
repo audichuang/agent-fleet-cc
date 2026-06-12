@@ -1408,7 +1408,7 @@ git commit -m "feat(shared): process-group spawn/kill (grandchildren must die)"
 - Create: `shared/lib/adapter-api.md`
 - Test: `tests/shared/adapter-api.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/adapter-api.test.mjs
@@ -1440,12 +1440,12 @@ test("missing members are reported by name", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/adapter-api.test.mjs`
 Expected: FAIL — `Cannot find module .../adapter-api.mjs`
 
-- [ ] **Step 3: 實作 validator 與合約文件**
+- [x] **Step 3: 實作 validator 與合約文件**
 
 ```js
 // shared/lib/adapter-api.mjs
@@ -1509,12 +1509,12 @@ export function validateProcessAdapter(adapter) {
 | resumeArgs(sessionId) | fn | → 追加 argv 片段(claude:`-r <id>`;agy:`--conversation <id>`) |
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/adapter-api.test.mjs`
 Expected: PASS(2 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/adapter-api.mjs shared/lib/adapter-api.md tests/shared/adapter-api.test.mjs
