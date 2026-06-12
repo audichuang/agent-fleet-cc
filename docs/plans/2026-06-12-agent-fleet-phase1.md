@@ -37,7 +37,7 @@
 - Create: `package.json`、`.gitignore`、`.claude-plugin/marketplace.json`
 - Test: `tests/fleet-structure.test.mjs`
 
-- [ ] **Step 1: 建 repo**
+- [x] **Step 1: 建 repo**
 
 ```bash
 mkdir -p /home/audichuang/research/agent-fleet-cc
@@ -45,7 +45,7 @@ cd /home/audichuang/research/agent-fleet-cc
 git init -b main
 ```
 
-- [ ] **Step 2: 寫 package.json**
+- [x] **Step 2: 寫 package.json**
 
 ```json
 {
@@ -68,7 +68,7 @@ git init -b main
 
 （devDependencies 給 Task 4 的 `build:codex` 用；現在就放，讓 Step 7 的 lockfile 一次到位。）
 
-- [ ] **Step 3: 寫 .gitignore**（三個來源 .gitignore 的合併精選）
+- [x] **Step 3: 寫 .gitignore**（三個來源 .gitignore 的合併精選）
 
 ```
 node_modules/
@@ -87,7 +87,7 @@ output/
 plugins/codex/.generated/
 ```
 
-- [ ] **Step 4: 寫失敗測試 `tests/fleet-structure.test.mjs`**
+- [x] **Step 4: 寫失敗測試 `tests/fleet-structure.test.mjs`**
 
 ```js
 import test from "node:test";
@@ -115,12 +115,12 @@ test("marketplace is agent-fleet and every entry is consistent", () => {
 });
 ```
 
-- [ ] **Step 5: 跑測試確認失敗**
+- [x] **Step 5: 跑測試確認失敗**
 
 Run: `npm run test:structure`
 Expected: FAIL（`ENOENT .claude-plugin/marketplace.json`）
 
-- [ ] **Step 6: 寫 `.claude-plugin/marketplace.json`（先空 plugins，逐 task 加）**
+- [x] **Step 6: 寫 `.claude-plugin/marketplace.json`（先空 plugins，逐 task 加）**
 
 ```json
 {
@@ -134,14 +134,14 @@ Expected: FAIL（`ENOENT .claude-plugin/marketplace.json`）
 }
 ```
 
-- [ ] **Step 7: 跑測試確認通過 + 產 lockfile**
+- [x] **Step 7: 跑測試確認通過 + 產 lockfile**
 
 Run: `npm run test:structure`
 Expected: PASS（1 test）
 Run: `npm install`
 Expected: 產生 `package-lock.json`（CI 的 `npm ci` 需要）
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add package.json package-lock.json .gitignore .claude-plugin/ tests/
@@ -158,7 +158,7 @@ git commit -m "feat: agent-fleet marketplace skeleton with structure test"
 - Modify: `tests/delegate/plugin-structure.test.mjs`（manifest 斷言改用根 marketplace、解除與 package.json 版號的耦合）
 - Modify: `package.json`、`.claude-plugin/marketplace.json`
 
-- [ ] **Step 1: 用 git archive 搬 plugin 與測試**
+- [x] **Step 1: 用 git archive 搬 plugin 與測試**
 
 ```bash
 cd /home/audichuang/research/agent-fleet-cc
@@ -167,13 +167,13 @@ mkdir -p /tmp/fleet-mv && git -C /home/audichuang/research/delegate-plugin-cc ar
 mv /tmp/fleet-mv/tests tests/delegate && rm -rf /tmp/fleet-mv
 ```
 
-- [ ] **Step 2: 改寫測試 import 深度**
+- [x] **Step 2: 改寫測試 import 深度**
 
 ```bash
 sed -i 's|"\.\./plugins/delegate/|"../../plugins/delegate/|g' tests/delegate/*.mjs
 ```
 
-- [ ] **Step 3: 全文重寫 `tests/delegate/plugin-structure.test.mjs`**
+- [x] **Step 3: 全文重寫 `tests/delegate/plugin-structure.test.mjs`**
 
 ```js
 import "./helpers.mjs";
@@ -217,7 +217,7 @@ test("marketplace entry and plugin.json agree for delegate", () => {
 
 （原版斷言 `plugin.version === pkg.version` — monorepo 根 package.json 不再對應單一 plugin 版號，故解耦。）
 
-- [ ] **Step 4: marketplace.json 加 delegate entry**
+- [x] **Step 4: marketplace.json 加 delegate entry**
 
 `plugins` 陣列改為：
 
@@ -232,7 +232,7 @@ test("marketplace entry and plugin.json agree for delegate", () => {
   ]
 ```
 
-- [ ] **Step 5: package.json 接上 delegate 測試**
+- [x] **Step 5: package.json 接上 delegate 測試**
 
 `scripts` 改為：
 
@@ -244,7 +244,7 @@ test("marketplace entry and plugin.json agree for delegate", () => {
   }
 ```
 
-- [ ] **Step 6: 驗證**
+- [x] **Step 6: 驗證**
 
 Run: `grep -rn '"\.\./plugins/delegate' tests/delegate/ | wc -l`
 Expected: `0`（全部已改成 `../../`）
@@ -253,7 +253,7 @@ Expected: 無輸出（plugin payload 逐 byte 相同 = 零行為改變）
 Run: `npm test`
 Expected: PASS — structure 1 + delegate 90，fail 0
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugins/delegate tests/delegate package.json .claude-plugin/marketplace.json
@@ -270,7 +270,7 @@ git commit -m "feat: import delegate plugin verbatim from delegate-plugin-cc (90
 - Modify: `tests/antigravity/bin.test.mjs:19`（REPO_ROOT 指向）
 - Modify: `package.json`、`.claude-plugin/marketplace.json`
 
-- [ ] **Step 1: git archive 搬入後修剪**
+- [x] **Step 1: git archive 搬入後修剪**
 
 ```bash
 cd /home/audichuang/research/agent-fleet-cc
@@ -285,7 +285,7 @@ rm -f plugins/antigravity/CONTRIBUTING.md plugins/antigravity/SECURITY.md \
 
 （`.claude-plugin/plugin.json` 保留 — 那是安裝必需的 manifest；移除的是舊 marketplace 定義。）
 
-- [ ] **Step 2: 改寫測試路徑**
+- [x] **Step 2: 改寫測試路徑**
 
 ```bash
 sed -i "s|'\.\./scripts|'../../plugins/antigravity/scripts|g" tests/antigravity/*.test.mjs
@@ -300,12 +300,12 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(__dirname, '../../plugins/antigravity');
 ```
 
-- [ ] **Step 3: 殘留路徑掃描**
+- [x] **Step 3: 殘留路徑掃描**
 
 Run: `grep -rn "'\.\./" tests/antigravity/*.test.mjs | grep -v "'\.\./\.\./plugins/antigravity" | grep -v "'\.\./fixtures\|'\./" || echo CLEAN`
 Expected: `CLEAN`（若有殘留，逐筆改成 `'../../plugins/antigravity/...` 後重跑本步驟）
 
-- [ ] **Step 4: marketplace entry + 測試 script**
+- [x] **Step 4: marketplace entry + 測試 script**
 
 marketplace `plugins` 陣列**前面**插入（維持 codex/antigravity/delegate 之外的順序不重要，但本計畫統一加在 delegate 前）：
 
@@ -326,14 +326,14 @@ package.json `scripts`：
     "test:antigravity": "node --test --experimental-test-module-mocks tests/antigravity/*.test.mjs",
 ```
 
-- [ ] **Step 5: 驗證**
+- [x] **Step 5: 驗證**
 
 Run: `for d in commands scripts bin agents .agents .codex-plugin docs; do diff -r /home/audichuang/research/antigravity-plugin/$d plugins/antigravity/$d; done; for f in README.md CHANGELOG.md LICENSE SKILL.md plugin.json package.json; do diff /home/audichuang/research/antigravity-plugin/$f plugins/antigravity/$f; done`
 Expected: 無輸出（搬入的內容逐 byte 相同；若某目錄不存在於來源，該行報 No such file 屬預期，跳過）
 Run: `npm test`
 Expected: PASS — structure + delegate 90 + antigravity 全數，fail 0
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugins/antigravity tests/antigravity package.json .claude-plugin/marketplace.json
@@ -350,7 +350,7 @@ git commit -m "feat: import antigravity plugin verbatim (multi-host files kept; 
 - Create: `tsconfig.app-server.json`（自 codex repo 根）
 - Modify: `package.json`、`.claude-plugin/marketplace.json`
 
-- [ ] **Step 1: 寫失敗斷言** — `tests/fleet-structure.test.mjs` 末尾加：
+- [x] **Step 1: 寫失敗斷言** — `tests/fleet-structure.test.mjs` 末尾加：
 
 ```js
 test("marketplace lists exactly the three engine plugins", () => {
@@ -362,12 +362,12 @@ test("marketplace lists exactly the three engine plugins", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `npm run test:structure`
 Expected: FAIL（目前只有 antigravity、delegate 兩個）
 
-- [ ] **Step 3: git archive 搬入**
+- [x] **Step 3: git archive 搬入**
 
 ```bash
 cd /home/audichuang/research/agent-fleet-cc
@@ -379,7 +379,7 @@ rm -rf /tmp/fleet-mv
 rm tests/codex/bump-version.test.mjs   # 裁定 2：版本工具不搬
 ```
 
-- [ ] **Step 4: 改寫測試路徑**
+- [x] **Step 4: 改寫測試路徑**
 
 ```bash
 sed -i 's|"\.\./plugins/codex/|"../../plugins/codex/|g' tests/codex/*.mjs
@@ -388,7 +388,7 @@ sed -i 's|"\.\./plugins/codex/|"../../plugins/codex/|g' tests/codex/*.mjs
 Run: `grep -rn '"\.\./plugins/codex' tests/codex/ | wc -l`
 Expected: `0`
 
-- [ ] **Step 5: marketplace entry + scripts**
+- [x] **Step 5: marketplace entry + scripts**
 
 marketplace `plugins` 陣列最前面插入：
 
@@ -418,7 +418,7 @@ package.json `scripts`（最終形）：
 
 （檢查 `tsconfig.app-server.json` 內的路徑都是 `plugins/codex/...` 相對 repo 根 — 版面未變，應原樣可用；若有 `tests/` 引用改成 `tests/codex/`。）
 
-- [ ] **Step 6: 驗證**
+- [x] **Step 6: 驗證**
 
 Run: `diff -r -x .generated /home/audichuang/research/codex-plugin-cc/plugins/codex plugins/codex`
 Expected: 無輸出
@@ -427,7 +427,7 @@ Expected: PASS — 四段全綠（structure 2、delegate 90、antigravity 全數
 Run: `npm run build:codex`
 Expected: 成功（需本機 codex CLI；產出 `plugins/codex/.generated/`，已被 gitignore）
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/fleet-structure.test.mjs plugins/codex tests/codex tsconfig.app-server.json package.json .claude-plugin/marketplace.json
