@@ -2432,7 +2432,7 @@ git commit -m "test(shared): adversarial race attacks on first-terminal-writer-w
 - Modify: `package.json`(scripts)
 - Modify: `docs/plans/2026-06-12-phase2a-shared-core.md`(勾進度)
 
-- [ ] **Step 1: 把 shared 套件串進 npm test**
+- [x] **Step 1: 把 shared 套件串進 npm test**
 
 `package.json` 的 scripts 區改為(只動這兩行):
 
@@ -2441,26 +2441,26 @@ git commit -m "test(shared): adversarial race attacks on first-terminal-writer-w
     "test:shared": "node --test tests/shared/*.test.mjs tests/shared/conformance/*.test.mjs",
 ```
 
-- [ ] **Step 2: 全套驗證**
+- [x] **Step 2: 全套驗證**
 
 Run: `npm test 2>&1 | tail -15`
 Expected: 五套全 pass —— structure 2 + shared(本 plan 新增 ≈48)+ delegate 91 + antigravity 243 + codex 305。任何紅燈用 superpowers:systematic-debugging,不准改既有測試。
 
-- [ ] **Step 3: 對照 Task 0 基線**
+- [x] **Step 3: 對照 Task 0 基線**
 
 確認既有四套的 pass 數與基線一致(本 plan 不准動到三個 plugin 的任何檔案:`git status` 應只見 `shared/`、`tests/shared/`、`package.json`、本 plan 檔)。
 
 Run: `git status --short -- plugins/`
 Expected: 空輸出
 
-- [ ] **Step 4: 勾掉本 plan 全部 checkbox 並 commit**
+- [x] **Step 4: 勾掉本 plan 全部 checkbox 並 commit**
 
 ```bash
 git add package.json docs/plans/2026-06-12-phase2a-shared-core.md
 git commit -m "feat(shared): wire shared+conformance suites into npm test — phase 2A complete"
 ```
 
-- [ ] **Step 5: 收工狀態回報**
+- [x] **Step 5: 收工狀態回報**
 
 回報:分支名、`npm test` 末 15 行、`git log --oneline main..HEAD`。push 與 PR 由使用者決定。
 
