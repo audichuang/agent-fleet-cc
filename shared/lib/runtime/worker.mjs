@@ -111,8 +111,8 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
   }
   // 消毒是強制縫(spec §5):adapter 的 env 只算「顯式注入」,繼承剝除與
   // 遞迴標記由這裡保證,adapter 不可繞過。
-  // adapter に recursionMarker がない場合 buildEngineEnv が throw する — 隣の
-  // buildInvocation パスと対称に try/catch + finalize で受ける(spec §5 不変量 1)。
+  // adapter 缺 recursionMarker 時 buildEngineEnv 會 throw — 與 buildInvocation
+  // 路徑對稱,用 try/catch + earlyFinalize 接住(spec §5 不變量 1:job 必達終態)。
   let env;
   try {
     env = buildEngineEnv({
@@ -205,16 +205,12 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
         parsed = null; // parseEvent 永不 fatal
       }
       if (parsed) {
-        // 'type: "engine-event"' は最後に置く。parseEvent が engine 固有の
-        // type フィールド(例: {type:"result",...})を返した場合でも、
-        // 正規化 type が常に "engine-event" になる(spec §3)。
-        // parsed fields are spread first so extractResult can still access
-        // e.g. e.kind / e.text directly; raw holds the original line for
-        // replay/audit; type: "engine-event" overrides any parsed .type.
+        // type: "engine-event" 最後覆蓋 — parseEvent 若回傳引擎自訂的 type 欄位
+        // (如 {type:"result",...}),正規化 type 仍必須是 "engine-event"(spec §3)。
+        // parsed fields 先攤平,讓 extractResult 能直接存取 e.kind / e.text 等;
+        // raw 保存原始行供稽核重播;type: "engine-event" 放最後覆蓋任何 parsed.type。
         const engineEvent = { ...parsed, raw: line, type: "engine-event" };
         events.push(engineEvent);
-        // appendEvent already puts type last (events.mjs), but we pass
-        // parsed+raw explicitly to keep the same override guarantee.
         appendEvent(dir, "engine-event", { ...parsed, raw: line });
       }
     });
@@ -237,16 +233,20 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
   try {
     result = { ...result, ...adapter.extractResult(events, outcome.exitCode) };
   } catch {}
+  // stdinError 只在 exitCode 非 0 時才算失敗。引擎若提前關閉 stdin(EPIPE)
+  // 但正常退出(exitCode 0),這是合法行為(引擎不需要讀完整個 stdin)。
+  // 把 EPIPE + exitCode=0 誤判為失敗會讓移植的 adapter 出現假紅燈。
+  const stdinFailed = Boolean(outcome.stdinError) && outcome.exitCode !== 0;
   const failed =
     Boolean(outcome.spawnError) ||
-    Boolean(outcome.stdinError) ||
+    stdinFailed ||
     outcome.exitCode !== 0 ||
     !result.ok;
   const status = outcome.timedOut ? "timed-out" : failed ? "failed" : "completed";
   let error = null;
   let errorKind = null;
   if (status !== "completed") {
-    error = outcome.stdinError
+    error = stdinFailed
       ? `stdin: ${outcome.stdinError.code ?? outcome.stdinError.message}`
       : (outcome.spawnError || outcome.stderrTail || "engine exited nonzero").slice(-500);
     try {
@@ -272,12 +272,11 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
   // 不能記 worker 自己算的 status — 否則 events 會跟 job.json 說兩套話。
   //
   // 優先順位:
-  //   (1) terminal.lock の status(有効な終態のみ採用 — readTerminalLock は
-  //       corrupt/非終態内容を {status:null} で返すので、null なら無視)
-  //   (2) job.json の status が終態ならそれを採用
-  //   (3) どちらも終態を提供できない場合(例: lock が corrupt、job.json が stale
-  //       "running" のまま)→ 安全な終態フォールバック "failed" を使う。
-  //       reconcile と一致するフォールバック;絶対に active status を書かない。
+  //   (1) terminal.lock 的 status(只採用有效終態 — readTerminalLock 對
+  //       corrupt/非終態內容回傳 {status:null},null 時忽略)
+  //   (2) job.json 的 status 若已是終態則採用
+  //   (3) 兩者都無法提供終態時(如 lock corrupt、job.json 仍是 stale "running")
+  //       → 安全終態回退 "failed";與 reconcile 一致;絕不寫出 active status。
   let finalStatus;
   if (won) {
     finalStatus = status;

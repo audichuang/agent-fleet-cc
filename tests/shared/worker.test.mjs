@@ -695,3 +695,121 @@ test("early-finalize lost-CAS (prompt missing): lost-cas event has by=lost-cas a
     "lost-cas finalized event must record the winner's status, not the worker's own patch",
   );
 });
+
+// ─── stdinError behaviour (Task 12 worker.mjs deviation) ─────────────────────
+// Covers the stdinFailed = Boolean(stdinError) && exitCode !== 0 logic introduced
+// alongside the conformance suite commit.
+//
+// New behaviour:
+//   stdinError + exitCode===0  → completed (EPIPE on a clean-exit engine is NOT a failure)
+//   stdinError + exitCode!==0  → failed    (stdinError confirms what the nonzero exit suggests)
+//
+// mutation criterion for case 1: remove `&& outcome.exitCode !== 0` from stdinFailed
+// expression → job.status becomes "failed" instead of "completed" → assert turns red.
+//
+// mutation criterion for case 2: replace `stdinFailed` with `false` in the failed
+// expression → stdinError is ignored → job.error becomes stderrTail-based → assert
+// checking error message containing "stdin:" turns red.
+
+test("stdinError + exitCode===0 → completed (EPIPE on clean exit is not a failure)", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 5000 });
+  createJob(stateDir, record, "the prompt");
+
+  // Build a fakeChild whose stdin.write throws an EPIPE-like error, but the
+  // process itself exits with code 0 and produces a valid result line.
+  const child = new EventEmitter();
+  child.pid = 3333;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const stdinError = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  child.stdin = {
+    on() {},
+    write() { throw stdinError; },
+    end() {},
+  };
+  child.kill = () => {};
+
+  // Engine emits a valid result and exits 0
+  const resultLine = '{"type":"result","kind":"result","text":"clean-exit","session":"s-ok"}';
+  setImmediate(() => {
+    child.stdout.write(resultLine + "\n");
+    child.stderr.end();
+    child.stdout.on("end", () =>
+      setImmediate(() => child.emit("close", 0, null)),
+    );
+    child.stdout.end();
+  });
+
+  const adapter = makeAdapter({
+    parseEvent: (line) => {
+      try { const e = JSON.parse(line); return e && e.kind ? e : null; } catch { return null; }
+    },
+    extractResult: (events) => {
+      const r = events.find((e) => e.type === "engine-event" && e.kind === "result");
+      return r ? { ok: true, resultText: r.text, sessionId: r.session ?? null } : { ok: false };
+    },
+  });
+
+  await runWorker({
+    stateDir,
+    jobId: record.id,
+    adapter,
+    deps: { spawnImpl: () => child },
+  });
+
+  const job = readJob(stateDir, record.id);
+  assert.equal(
+    job.status,
+    "completed",
+    "stdinError with exitCode=0 must NOT be treated as failure (EPIPE on clean-exit engine)",
+  );
+  assert.equal(job.resultText, "clean-exit");
+});
+
+test("stdinError + exitCode!==0 → failed with stdin: error message", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 5000 });
+  createJob(stateDir, record, "the prompt");
+
+  // Build a fakeChild whose stdin.write throws an error AND the process exits nonzero
+  const child = new EventEmitter();
+  child.pid = 4444;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const stdinError = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  child.stdin = {
+    on() {},
+    write() { throw stdinError; },
+    end() {},
+  };
+  child.kill = () => {};
+
+  // Engine emits nothing and exits with code 1
+  setImmediate(() => {
+    child.stderr.end();
+    child.stdout.on("end", () =>
+      setImmediate(() => child.emit("close", 1, null)),
+    );
+    child.stdout.end();
+  });
+
+  await runWorker({
+    stateDir,
+    jobId: record.id,
+    adapter: makeAdapter(),
+    deps: { spawnImpl: () => child },
+  });
+
+  const job = readJob(stateDir, record.id);
+  assert.equal(
+    job.status,
+    "failed",
+    "stdinError with exitCode!=0 must produce a failed job",
+  );
+  assert.match(
+    job.error,
+    /stdin:/,
+    "error message must include 'stdin:' prefix when stdinError caused the failure",
+  );
+});
