@@ -442,7 +442,7 @@ git commit -m "feat: import codex plugin verbatim (bump-version tooling left beh
 - Create: `README.md`、`.github/workflows/ci.yml`
 - Create: `docs/specs/2026-06-12-agent-fleet-merge-design.md`（自 delegate repo 複製）
 
-- [ ] **Step 1: 寫 README.md**
+- [x] **Step 1: 寫 README.md**
 
 ```markdown
 # agent-fleet — one marketplace for AI-agent delegation plugins
@@ -494,7 +494,7 @@ real network). Roadmap (shared job-runtime base, fleet status) lives in
 `docs/specs/2026-06-12-agent-fleet-merge-design.md`.
 ```
 
-- [ ] **Step 2: 寫 `.github/workflows/ci.yml`**
+- [x] **Step 2: 寫 `.github/workflows/ci.yml`**
 
 ```yaml
 name: CI
@@ -526,14 +526,14 @@ jobs:
 
 （Node 矩陣先單押 22；antigravity 舊 CI 驗過 22/24，codex 舊 CI 只驗過 22 — 等三套合流穩定後再擴。）
 
-- [ ] **Step 3: 複製 spec**
+- [x] **Step 3: 複製 spec**
 
 ```bash
 mkdir -p docs/specs
 cp /home/audichuang/research/delegate-plugin-cc/docs/superpowers/specs/2026-06-12-agent-fleet-merge-design.md docs/specs/
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md .github docs

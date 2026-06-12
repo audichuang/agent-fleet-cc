@@ -16,7 +16,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # 24, not 22: the codex suite's unref'd-timer tests fail on node >= 22.22
+          # ("Promise resolution is still pending but the event loop has already
+          # resolved") — reproduced in the standalone codex repo too, so it is an
+          # upstream incompatibility, not a migration regression. 24 (active LTS)
+          # runs all four suites green and matches antigravity's old CI matrix.
+          node-version: 24
           cache: npm
       - run: npm ci
       - name: Install Codex CLI (codex suite + typecheck prereq)
