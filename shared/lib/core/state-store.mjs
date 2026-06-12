@@ -73,3 +73,84 @@ export function listJobs(stateDir) {
     String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")),
   );
 }
+
+// --- CAS 區段:O_EXCL lock,first terminal writer wins ---
+//
+// Cross-process CAS:O_EXCL lock,first terminal writer wins。lock 內容記
+// intended status,讓修復路徑(reconcile)能在 winner 死於 claim 與寫 JSON
+// 之間時把轉移補完。
+
+function claimTerminalTransition(stateDir, jobId, status) {
+  fs.mkdirSync(jobDir(stateDir, jobId), { recursive: true, mode: 0o700 });
+  try {
+    fs.writeFileSync(
+      lockFilePath(stateDir, jobId),
+      JSON.stringify({ pid: process.pid, status, at: new Date().toISOString() }),
+      { flag: "wx", mode: 0o600 },
+    );
+    return true;
+  } catch (error) {
+    if (error.code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+// null = 無 lock;{ status } = 已被 claim。內容可能是垃圾 — JSON.parse("12345")
+// 是合法 JSON(數字),guard 必須驗「物件且帶已知終態」。
+export function readTerminalLock(stateDir, jobId) {
+  let raw;
+  try {
+    raw = fs.readFileSync(lockFilePath(stateDir, jobId), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && TERMINAL_STATUSES.has(parsed.status)) {
+      return { status: parsed.status };
+    }
+  } catch {}
+  return { status: null };
+}
+
+// _hooks 是測試縫:afterClaim() 在 O_EXCL claim 成功後、fresh re-read 之前
+// 觸發,讓測試能構造「claim 成功後才發生的競態」(pid stamp 寫入、prune 刪 JSON)。
+// 生產路徑不傳 _hooks,行為與原始實作完全相同。
+export function finalizeJob(stateDir, jobId, patch, _hooks = {}) {
+  if (!TERMINAL_STATUSES.has(patch.status)) {
+    throw new Error(`finalizeJob requires a terminal status, got ${patch.status}`);
+  }
+  // 終態 JSON 表示有人已贏過 CAS — 即使 lock 被 prune 掉也要拒絕,
+  // 讓 stale finalizer 永遠無法復活已 prune 的 job。
+  const existing = readJob(stateDir, jobId);
+  if (!existing || TERMINAL_STATUSES.has(existing.status)) return false;
+  if (!claimTerminalTransition(stateDir, jobId, patch.status)) return false;
+  // afterClaim hook:測試縫——在 claim 與 fresh 讀之間注入競態(pid stamp 或 prune)。
+  _hooks.afterClaim?.();
+  // claim 後重讀:prune 若在中間刪了 JSON,undo 自己的 lock 並退出。
+  // 安全性依賴 prune 的 unlink 順序(json 先於 lock,見 pruneJobs)。
+  const fresh = readJob(stateDir, jobId);
+  if (!fresh) {
+    try {
+      fs.unlinkSync(lockFilePath(stateDir, jobId));
+    } catch {}
+    return false;
+  }
+  // fresh-merge 保住 claim 後才寫入的欄位(如 worker 的 pid stamp)—
+  // cancelJob 靠它找到要 signal 的 pid。
+  writeJob(stateDir, { ...fresh, ...patch });
+  return true;
+}
+
+// queued → running,防著並發 canceller。回傳 running job;null 表示
+// job 不在/已終態/lock 已被 claim — 呼叫端絕不可在 null 時 spawn。
+// hooks.beforeRecheck 是測試縫。
+export function markJobRunning(stateDir, jobId, patch = {}, hooks = {}) {
+  if (readTerminalLock(stateDir, jobId)) return null;
+  const job = readJob(stateDir, jobId);
+  if (!job || TERMINAL_STATUSES.has(job.status)) return null;
+  writeJob(stateDir, { ...job, ...patch, status: "running" });
+  hooks.beforeRecheck?.();
+  if (readTerminalLock(stateDir, jobId)) return null;
+  return readJob(stateDir, jobId);
+}

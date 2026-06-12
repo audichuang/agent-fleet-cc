@@ -538,7 +538,7 @@ git commit -m "feat(shared): per-job directory state store (CRUD layer)"
 
 CAS 不變量沿地基母體 delegate(`plugins/delegate/scripts/lib/state.mjs`)逐條保留:lock 內容記 intended status 供修復;finalize 前後雙重讀;fresh-merge 保住 worker 的 pid stamp;`markJobRunning` 寫後重查 lock。
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/state-store-cas.test.mjs
@@ -628,12 +628,12 @@ test("finalize after prune removed job.json undoes its own lock", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/state-store-cas.test.mjs`
 Expected: FAIL — `finalizeJob is not a function`(等 export)
 
-- [ ] **Step 3: 在 state-store.mjs 追加 CAS 區段**
+- [x] **Step 3: 在 state-store.mjs 追加 CAS 區段**
 
 ```js
 // shared/lib/core/state-store.mjs — 追加在檔尾
@@ -712,17 +712,28 @@ export function markJobRunning(stateDir, jobId, patch = {}, hooks = {}) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/state-store-cas.test.mjs tests/shared/state-store.test.mjs`
-Expected: PASS(6 + 3 tests)
+Expected: PASS(7 + 3 tests)(Round-2 修正後:CAS 測試增至 7 個,補 EEXIST loser 案例)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/state-store.mjs tests/shared/state-store-cas.test.mjs
 git commit -m "feat(shared): O_EXCL CAS terminal transitions (first-terminal-writer-wins)"
 ```
+
+> **Round-2 修正(2026-06-12):**
+> 1. `finalizeJob` 加 `_hooks.afterClaim` 測試縫,讓測試能構造 claim 成功後才發生的競態。
+> 2. fresh-merge 測試改用 afterClaim 寫 pid stamp,驗 existing(pid=null)→ fresh-merge → 終態保住 pid=4242。
+> 3. prune-undo 測試改用 afterClaim 刪 job.json(post-claim prune 場景),驗 undo-own-lock 分支真正執行。
+> 4. markJobRunning pre-check 改用 queued + 預置 lock 隔離兩個 guard 的責任。
+> 5. 新增 EEXIST loser 案例(lock-present + non-terminal JSON → finalize 回 false)。
+>
+> **Round-3 修正(2026-06-12):**
+> 6. markJobRunning pre-check 測試在 `markJobRunning` 回 null 後加 `assert.equal(readJob(s, a.id).status, 'queued')` 與 `assert.equal(readJob(s, a.id).pid, null)`,確認 pre-check 在「寫 running」之前攔下(mutation: 拿掉 pre-check → status 被寫成 running → 兩斷言紅燈)。
+> 7. 新增 "terminal JSON guard: rejects finalize even when lock is pruned away" 案例:finalize 成功 → unlinkSync lock(模擬 prune 刪 lock)→ 再 finalize 回 false 且 status 不變,隔離 state-store.mjs line 126 `TERMINAL_STATUSES.has(existing.status)` 守衛(mutation: 弱化成只剩 `!existing` → 第二次 finalize 得以覆蓋終態 → 斷言紅燈)。
 
 ---
 
