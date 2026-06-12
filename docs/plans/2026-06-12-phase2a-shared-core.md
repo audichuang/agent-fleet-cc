@@ -1159,7 +1159,7 @@ git commit -m "feat(shared): mandatory env sanitization seam with recursion guar
 - Create: `shared/lib/core/wait.mjs`
 - Test: `tests/shared/wait.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/wait.test.mjs
@@ -1216,12 +1216,12 @@ test("missing job resolves done=true with job=null (nothing to wait for)", async
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/wait.test.mjs`
 Expected: FAIL — `Cannot find module .../wait.mjs`
 
-- [ ] **Step 3: 最小實作**
+- [x] **Step 3: 最小實作**
 
 ```js
 // shared/lib/core/wait.mjs
@@ -1262,12 +1262,12 @@ export function waitForJob({
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/wait.test.mjs`
 Expected: PASS(3 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/wait.mjs tests/shared/wait.test.mjs
