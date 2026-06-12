@@ -556,7 +556,7 @@ Expected: repo 建立、main 推上去。
 Run: `gh run watch --exit-status`（或稍候 `gh run list --limit 1`）
 Expected: CI 綠。
 
-- [ ] **Step 2: 腳本化冒煙 — delegate 真實 job（驗證搬遷後 companion 可用 + 既有 profile 原地存活）**
+- [x] **Step 2: 腳本化冒煙 — delegate 真實 job（驗證搬遷後 companion 可用 + 既有 profile 原地存活）**
 
 ```bash
 env DELEGATE_PLUGIN_DATA="$HOME/.claude/plugins/data/delegate" \
