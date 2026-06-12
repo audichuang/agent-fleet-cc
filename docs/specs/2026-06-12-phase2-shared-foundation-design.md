@@ -42,7 +42,8 @@ Claude Code 原生 Workflow 逐 task 執行(實作 agent 組 prompt 驅動外部
 
 ## 2. 機器層統一 CLI 合約(核心交付物)
 
-統一子指令:`task` / `status` / `result` / `cancel` / `setup`。
+統一子指令:`task` / `wait` / `logs` / `status` / `result` / `cancel` / `setup`
+(`wait` 與 `logs` 為本輪編排審閱新增,見 §2.3)。
 
 ### 2.1 task 旗標映射
 
@@ -54,7 +55,8 @@ Claude Code 原生 Workflow 逐 task 執行(實作 agent 組 prompt 驅動外部
 | `--json` | 結構化輸出 | ✓ | ✓ | ✗ | **三引擎必支援,schema 統一(§2.2)** |
 | `--write` / `--read-only` | 權限 | `--write`(預設唯讀) | sandbox 機制 | env 預設 bypassPermissions | **旗標名統一、預設沿革各自保留**(改 delegate 預設會破壞跑腿用例;workflow 一律顯式傳) |
 | `--resume-job <id>` / `--resume-last` | 以 job 為單位續跑 | thread 機制 | `--conversation <id>` | `--resume-id` / `--resume-last` | **統一 job 維度**:引擎從 job 的 `sessionId` 自組 resume 參數(= ProcessAdapter `resumeArgs` 合約)。delegate 的 `--resume-id` 改名 `--resume-job`;引擎原生 id 旗標(如 agy `--conversation`)保留為引擎特定 |
-| 引擎特定 | | `--model` `--effort` | `--model` `--add-dir` | `--profile` `--settings` `--timeout-ms` | 保留,文件標明「特定」 |
+| `--model <id>` | 指定模型 | ✓ | ✓ | ✗ | **升級為三引擎一致**(delegate 補,透傳 `claude -p --model`;與 `--profile` 正交——profile 管 endpoint/key,model 管模型名) |
+| 引擎特定 | | `--effort` | `--add-dir` | `--profile` `--settings` `--timeout-ms` | 保留,文件標明「特定」;不加引擎前綴(prompt 模板中本就置於引擎特定段) |
 
 權限旗標的引擎映射:`--write` → delegate `bypassPermissions` / codex `--write` /
 agy 無 sandbox;`--read-only` → delegate `--permission-mode default`(headless
@@ -72,7 +74,21 @@ agy 無 sandbox;`--read-only` → delegate `--permission-mode default`(headless
 最小保證欄位集;引擎可附加額外欄位(如 codex launch 的 `signalFile`),機器
 消費者以最小集為準。`status` / `cancel` 的 `--json` 同樣輸出核心欄位投影(§3)。
 
-### 2.3 companion 穩定路徑 recipe
+### 2.3 wait 與 logs:編排 re-entry 動詞
+
+Bash 工具單次上限 10 分鐘,大任務(Codex 級 review / 實作)經常超過;缺少事後
+等待動詞時,編排者只能前景賭超時、或輪詢 status 燒 turn。新增兩個統一動詞
+(實作在 shared core,各 companion 薄轉發,三引擎一致):
+
+- `wait <jobId> [--timeout-s <n>] [--json]` — 阻塞到 job 終態或超時;阻塞期間
+  把新增的 events 行透傳 stdout(進度心跳)。超時不是錯誤:輸出當前狀態後退出,
+  exit code 區分(0 = 已終態、專用碼 = 仍在跑)。編排迴圈因此是乾淨 re-entry:
+  `task --background` → `wait --timeout-s 540` → 未完就再 `wait`。
+- `logs <jobId> [--follow]` — `events.ndjson` 的 tail 投影,`--follow` 跟隨至
+  終態。codex 既有 `attach` 即其前身,保留為其特化(原生 stream),`logs` 為
+  跨引擎統一動詞。
+
+### 2.4 companion 穩定路徑 recipe
 
 cache 路徑含版本號(`~/.claude/plugins/cache/agent-fleet/<plugin>/<ver>/`),
 workflow hardcode 必隨升版斷裂。裁定:**不做 symlink**(plugin 更新不保證重跑
@@ -86,7 +102,7 @@ COMPANION=$(ls -d ~/.claude/plugins/cache/agent-fleet/<plugin>/*/scripts/<plugin
 統一補一個單一入口 `scripts/antigravity-companion.mjs` 轉發子指令,使三引擎的
 解析 recipe 同形。)
 
-### 2.4 delegate profile 選擇流程:不下沉
+### 2.5 delegate profile 選擇流程:不下沉
 
 機器層必須無互動可腳本化(workflow 不能被 AskUserQuestion 卡住)。互動式選
 profile 是人類層的事——delegate 0.1.1 的 command-md 層設計正確,維持原樣;
@@ -106,11 +122,15 @@ profile 是人類層的事——delegate 0.1.1 的 command-md 層設計正確,�
   status, createdAt, updatedAt,
   title,                      // 統一 agy 的 title 與 dlg 的 promptPreview
   cwd, pid, sessionId,        // sessionId = resume 根基(ProcessAdapter 合約)
-  exitCode, error, errorKind, // errorKind 收編 agy 的 healthStatus,
+  exitCode, error, errorKind, // exitCode 可為 null(session 型引擎無單一退出碼);
+                              //   errorKind 收編 agy 的 healthStatus,
                               //   = classifyError 輸出('auth'|'not-installed'|'endpoint'|…)
   phase,                      // optional,收編 agy 的子階段標籤
   resultText, durationMs,
-  request: { ... }            // 引擎特定參數整包(profile/model/effort/addDirs…)
+  model, usage,               // 成本遙測;usage = { inputTokens, outputTokens } | null
+                              //   引擎報不齊就 null —— 這是模型路由決策(便宜端點
+                              //   vs 貴模型)的數據基礎,現在加零成本,日後加要動三 adapter
+  request: { ... }            // 引擎特定參數整包(profile/effort/addDirs…)
 }
 ```
 
@@ -119,6 +139,11 @@ profile 是人類層的事——delegate 0.1.1 的 command-md 層設計正確,�
 unlink 順序的既有不變量(delegate `state.mjs` 的 lock-after-json 邏輯)隨之搬進
 目錄。舊平鋪檔案不遷移——新 job 用新 schema,舊 job 隨 prune 自然淘汰(藍圖 §9
 已核准)。
+
+**證據鏈合約**:任何 reviewer job 只需 `jobId` 即可從 `jobs/<id>/` 重建全部證據
+(prompt 原文、cwd、events、result、log)——互相監督的單位是 artifacts,不是
+實作者的文字自述。搭配 `--resume-job`,「審查不過 → 帶 issues resume 同一
+session 修正」的多輪迴圈是 schema 的副產品。
 
 `events.ndjson` 事件型別最小集:`job-created` / `spawned` / `engine-event`
 (引擎原始輸出進 `raw` 欄透傳)/ `result` / `finalized`(記錄誰寫的終態)。
@@ -173,6 +198,22 @@ job 資料按 plugin 分目錄 + reconcile 雙保險(§5.7)。
   範圍,不膨脹。
 - **SessionAdapter 維持無限期延後**(藍圖 §5.6):codex 只移植 job-state 層;
   `--resume-job` 在 codex 的實作走既有 thread 機制查表,不碰 broker。
+- **Adapter 形態無關不變量(現在寫死,防合約被隱含「一次性程序」假設綁架)**:
+  無論 Process 或 Session 形態——(1) job 必達終態;(2) 事件必寫 events.ndjson;
+  (3) cancel 必殺乾淨(process group);(4) result 必冪等;(5) `exitCode` 可為
+  null。conformance suite 驗的是這五條;SessionAdapter 日後落地時不得要求重簽
+  合約(若兩個 ProcessAdapter 驗證出的合約隱含 exitCode 必存在之類的假設,到
+  codex 移植時就是 breaking change)。
+- **防遞迴與 env 消毒上移 core**:`runtime/worker.mjs` 在 spawn 前對 adapter
+  回傳的 env 強制套用 core 的 `sanitizeEnv()`(剝除自父環境繼承的 `CLAUDE_*` /
+  `ANTHROPIC_*` 注入變數、設遞迴守衛標記),adapter 不可繞過;profile / adapter
+  顯式提供的 env 在消毒後疊加(delegate「env 完全重建」邏輯的一般化)。
+  「Claude Code 指揮 delegate 跑 claude -p」是主用例,遞迴炸彈是地基級風險,
+  不是單引擎特性。
+- **cancel 殺 process group**:`runtime/spawn.mjs` 以 `detached: true` 讓引擎
+  child 自成 process group;cancel 與 timeout 的 kill 路徑一律 `kill(-pgid)`。
+  引擎會帶起孫子程序(claude -p 的 MCP server 等),只殺 worker/child 會留下
+  殭屍引擎繼續燒 API 錢。
 - 統一 CLI 的參數解析進 shared(`shared/lib` 的 args 工具),三 companion 共用
   同一套旗標定義,杜絕再分岔。
 
@@ -195,7 +236,9 @@ SKILL.md 內容(使用者現役 `plan-codex-opus` 方法論的一般化):
    代工實作 + 獨立把關、全程自動推進時。
 2. **引擎角色決策表**:寫手(codex = GPT 強模型 / antigravity = Gemini /
    delegate `--profile` = 任意 Anthropic-compatible 端點如 minimax)、審查者
-   (opus 原生 agent / codex 對抗性審查)。
+   (opus 原生 agent / codex 對抗性審查)。**成本結構預設**(實戰驗證):driver
+   用最便宜模型(haiku 級,只組 prompt + spawn CLI)、實作交外部引擎、把貴的
+   花在審查上——審查品質決定整條鏈的下限。
 3. **機器層合約速查**:companion 動態路徑解析(§2.3)、
    `task --prompt-file --wait --write --json` 用法、`--json` 輸出怎麼 parse。
 4. **workflow 骨架**:逐 task → 實作(便宜 model agent 組 prompt 驅動引擎)→
@@ -211,7 +254,7 @@ args(writer/reviewer 參數),prompt 組裝與呼叫行零修改——做不到�
 
 | 層 | 內容 |
 |---|---|
-| conformance suite(藍圖 §5.4) | 七劇本 × 兩個 ProcessAdapter(claude / agy),fake binary fixture |
+| conformance suite(藍圖 §5.4 擴充) | **十劇本** × 兩個 ProcessAdapter(claude / agy),fake binary fixture——藍圖七種 + 本輪新增三種:超長輸出(數十 KB result 的 stream 與截斷)、auth 在 job 中途過期(classifyError 不只管啟動時)、cancel 後孫子程序必須死光(§5 process group) |
 | **companion CLI 合約測試(本次新增)** | 同一套參數化測試跑三引擎:`--prompt-file` / `--json` schema 驗證 / `--wait` / `--background` / `--resume-job`——「指令對齊」的機器驗收 |
 | 各引擎既有 hermetic 測試 | 每個 plugin 移植完跑自己整套,綠了才動下一個(既定鐵則) |
 | structure 測試 | marketplace.json / plugin.json 完整性,涵蓋第 4 個 plugin(fleet) |
@@ -229,14 +272,16 @@ args(writer/reviewer 參數),prompt 組裝與呼叫行零修改——做不到�
    ——失敗不擋開發步,只把 §7 人工關卡提前標紅。
 1. shared/lib core 先行(純單測,零 I/O 假設)+ core 競態對抗審查(§7)。
 2. **delegate**(地基母體):搬上 shared、CLI 合約補齊(`--prompt-file` /
-   `--json` / `--wait` 顯式旗標 / `--resume-id`→`--resume-job`)、刪 execute-plan。
+   `--json` / `--wait` 顯式旗標 / `--model` / `--resume-id`→`--resume-job` /
+   統一 `wait` `logs` 動詞)、刪 execute-plan。
 3. **antigravity**:搬上 ProcessAdapter;拆 multi-host(`host-detect.mjs`、
    `.codex-plugin/`、`.agents/`、`bin/`、package.json `bin` 欄位);task 預設改
-   前景;補單一入口 companion;CLI 合約補 `--prompt-file`;保留 image / handoff /
-   review / adversarial-review / rescue。
+   前景;補單一入口 companion;CLI 合約補 `--prompt-file` 與統一 `wait` `logs`
+   動詞;保留 image / handoff / review / adversarial-review / rescue。
 4. **codex**:只換 job-state 層(state / CAS / liveness / cancel);+`task.md`、
-   −`execute-plan.md`、機器層補 `--resume-job`;broker / app-server / attach /
-   review-gate 不動。
+   −`execute-plan.md`、機器層補 `--resume-job` 與統一 `wait` `logs` 動詞
+   (attach 保留為 logs 的原生 stream 特化);broker / app-server / review-gate
+   不動。
 5. **fleet plugin**:skill + example + marketplace.json 登錄。
 6. 文件收尾:handoff 分岔標注、對齊矩陣終局化、各 README 更新(§4 第 5–6 項)。
 7. 真實冒煙(§7 最後一列,人工關卡)。
@@ -289,3 +334,9 @@ delegate 驗證過的 adapter 合約、codex 依賴兩個一次性引擎驗證�
 - 不做舊 job 資料 migration(新 job 新 schema,舊 job 隨 prune 淘汰)。
 - 角色型動詞不擴散(delegate 不補 review / adversarial-review / rescue / handoff)。
 - 不在第二階段給 fleet plugin 任何 command(/fleet:status、/fleet:cancel 仍屬第三階段)。
+- 不做 per-engine 並發上限(Workflow 編排層已有併發控制;若日後需要,地基加
+  「檢查並拒絕」式上限即可,不做排隊機制)。
+- 不做 `cost_estimate` 計算欄位(價目表維護是無底坑;`usage` 原始 token 數已足
+  以支撐路由決策)。
+- 引擎獨有旗標不加引擎前綴(`--effort` 不改 `--codex-effort`:醜、breaking,
+  且 prompt 模板中獨有旗標本就置於引擎特定段,無誤傳風險)。
