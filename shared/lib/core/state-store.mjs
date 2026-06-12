@@ -160,7 +160,10 @@ export function markJobRunning(stateDir, jobId, patch = {}, hooks = {}) {
 // finalizeJob 在 claim 後 re-read JSON,靠「lock 可被 prune ⇒ JSON 已不在」
 // 偵測並 undo post-prune claim。目錄最後整個移除。
 // active job(queued/running)永遠不碰。
-export function pruneJobs(stateDir, { max = 50 } = {}) {
+// _hooks 是測試縫:onUnlink(filePath) 在每次 unlinkSync 之前呼叫,
+// 讓測試能觀察並斷言 unlink 順序(json 先於 lock)是 load-bearing 不變量。
+// 生產路徑不傳 _hooks,行為與原始實作完全相同。
+export function pruneJobs(stateDir, { max = 50 } = {}, _hooks = {}) {
   const jobs = listJobs(stateDir);
   const activeCount = jobs.filter((j) => ACTIVE_STATUSES.has(j.status)).length;
   const terminal = jobs
@@ -170,10 +173,12 @@ export function pruneJobs(stateDir, { max = 50 } = {}) {
   for (const job of terminal.slice(keep)) {
     // 1. job.json 先消失 — finalizeJob re-read 見 null 即 undo 自己的 lock claim。
     try {
+      _hooks.onUnlink?.(jobFilePath(stateDir, job.id));
       fs.unlinkSync(jobFilePath(stateDir, job.id));
     } catch {}
     // 2. terminal.lock 次之。
     try {
+      _hooks.onUnlink?.(lockFilePath(stateDir, job.id));
       fs.unlinkSync(lockFilePath(stateDir, job.id));
     } catch {}
     // 3. 整目錄最後移除(含 prompt.txt / events.ndjson / log 等殘餘)。

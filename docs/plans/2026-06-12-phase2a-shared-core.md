@@ -2322,7 +2322,7 @@ git commit -m "test(shared): parameterized 10-scenario conformance suite + refer
 
 spec §7:以攻擊視角專門構造違反劇本。三個攻擊全綠 = 不變量守住;任何紅燈 = 先修 core 再固化該劇本。**執行本 task 的 agent 額外責任:讀完 state-store.mjs 後,再自行構造至少一個本檔未列的交錯劇本**(提示方向:writeJob 與 claimTerminalTransition 之間、listJobs 掃描中途的目錄移除、同 pid 重用)。構造成功即在本檔加測試並修 core;構造失敗在 commit message 記錄嘗試過什麼。
 
-- [ ] **Step 1: 寫三個攻擊測試**
+- [x] **Step 1: 寫三個攻擊測試**
 
 ```js
 // tests/shared/adversarial-races.test.mjs
@@ -2403,21 +2403,21 @@ test("attack 3 — claim-then-die plus a racing markJobRunning: reconcile must c
 });
 ```
 
-- [ ] **Step 2: 跑攻擊測試**
+- [x] **Step 2: 跑攻擊測試**
 
 Run: `node --test tests/shared/adversarial-races.test.mjs`
 Expected: PASS(3 attacks repelled)。任何 FAIL = 真 bug:用 superpowers:systematic-debugging 修 core,**不准改測試遷就實作**。
 
-- [ ] **Step 3: 自行構造第四個攻擊(agent 的對抗責任,見 task 開頭)**
+- [x] **Step 3: 自行構造第四個攻擊(agent 的對抗責任,見 task 開頭)**
 
 讀 `shared/lib/core/state-store.mjs` 全文,構造一個未列劇本。構造出違反 → 加測試 + 修 core;構造不出 → 在 commit message 記錄嘗試的交錯(至少兩種)。
 
-- [ ] **Step 4: 跑 shared 全套**
+- [x] **Step 4: 跑 shared 全套**
 
 Run: `node --test tests/shared/*.test.mjs tests/shared/conformance/*.test.mjs`
 Expected: 全 PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/shared/adversarial-races.test.mjs
