@@ -1034,7 +1034,7 @@ git commit -m "feat(shared): dead-pid reconcile with lock-repair convergence"
 
 來源邏輯:`plugins/delegate/scripts/lib/env.mjs`(buildDelegateEnv)一般化——deny prefixes、preserved keys、遞迴標記全部參數化,worker 在 spawn 前強制套用(Task 11)。
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/shared/env.test.mjs
@@ -1095,12 +1095,12 @@ test("recursionMarker is required — adapters cannot opt out", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/env.test.mjs`
 Expected: FAIL — `Cannot find module .../env.mjs`
 
-- [ ] **Step 3: 最小實作**
+- [x] **Step 3: 最小實作**
 
 ```js
 // shared/lib/core/env.mjs
@@ -1139,12 +1139,12 @@ export function buildEngineEnv({
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/env.test.mjs`
 Expected: PASS(4 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/env.mjs tests/shared/env.test.mjs
