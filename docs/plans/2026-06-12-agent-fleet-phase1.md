@@ -544,7 +544,7 @@ git commit -m "docs: README with install + migration; CI workflow; founding desi
 
 ### Task 6: 推上 GitHub + 實裝冒煙
 
-- [ ] **Step 1: 建遠端並推送**
+- [x] **Step 1: 建遠端並推送**
 
 ```bash
 cd /home/audichuang/research/agent-fleet-cc
