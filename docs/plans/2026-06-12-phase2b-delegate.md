@@ -158,7 +158,7 @@ git commit -m "feat(shared): promote unified flag parser from delegate"
 
 cancel 是兩段式殺(spec §5):cancelJob 對 **worker pid** 發單一 SIGTERM(worker 與引擎 child 各自是獨立 process group,殺 -workerPgid 殺不到 child 群);worker 的 `installCancelForwarder` 收到 SIGTERM 後以 `killGroupWithGrace` 殺整個引擎 child 群(含孫子)。cancelJob 的職責是 CAS-先行 + 安全 pid + 單發 SIGTERM。
 
-- [ ] **Step 1: 遷移 cancelJob 測試**
+- [x] **Step 1: 遷移 cancelJob 測試**
 
 把 `tests/delegate/job-control.test.mjs` 中以下 7 個案例複製為 `tests/shared/job-control.test.mjs`,import 改為 shared 路徑,job 建立改用 `createJobRecord({engine:"delegate"})` + `createJob`(目錄式佈局):
 
@@ -178,12 +178,12 @@ import { createJob, readJob, writeJob, finalizeJob, lockFilePath } from "../../s
 import { cancelJob } from "../../shared/lib/core/job-control.mjs";
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/shared/job-control.test.mjs`
 Expected: FAIL — `Cannot find module .../job-control.mjs`
 
-- [ ] **Step 3: 實作(自 delegate job-control.mjs 的 cancelJob 升入,store 呼叫改 shared)**
+- [x] **Step 3: 實作(自 delegate job-control.mjs 的 cancelJob 升入,store 呼叫改 shared)**
 
 ```js
 // shared/lib/core/job-control.mjs
@@ -225,12 +225,12 @@ export function cancelJob(stateDir, jobId, deps = {}) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/shared/job-control.test.mjs tests/shared/state-store-cas.test.mjs`
 Expected: PASS(7 + 既有 6)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add shared/lib/core/job-control.mjs tests/shared/job-control.test.mjs
