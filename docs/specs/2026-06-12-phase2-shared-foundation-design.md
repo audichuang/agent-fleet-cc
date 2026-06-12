@@ -216,25 +216,34 @@ args(writer/reviewer 參數),prompt 組裝與呼叫行零修改——做不到�
 | 各引擎既有 hermetic 測試 | 每個 plugin 移植完跑自己整套,綠了才動下一個(既定鐵則) |
 | structure 測試 | marketplace.json / plugin.json 完整性,涵蓋第 4 個 plugin(fleet) |
 | drift check | vendor 同步,CI `git diff --exit-code`(藍圖 §5.5) |
-| 真實冒煙 | 三引擎各一真實 job(deepseek profile / agy / codex)+ 依 skill 生成的 workflow 跑一個 2-task 迷你 plan |
+| **core 競態對抗審查** | shared/lib core 落地後,安排專門的對抗 agent 構造「first-terminal-writer-wins 被違反」的劇本(cancel vs 自然完成、prune vs finalize、lock 寫入與 JSON 寫入間死亡)——構造成功即紅燈,修復後該劇本固化進 conformance |
+| 真實冒煙(**人工關卡**) | 三引擎各一真實 job(deepseek profile / agy / codex)+ 依 skill 生成的 workflow 跑一個 2-task 迷你 plan;需要三家 auth 與真實端點,由使用者在場執行,不交給自動化編排 |
 
 ## 8. 移植順序(藍圖 §5.6 細化)
 
-0. shared/lib core 先行(純單測,零 I/O 假設)。
-1. **delegate**(地基母體):搬上 shared、CLI 合約補齊(`--prompt-file` /
+0. **Pre-flight(基線與環境,開工第一步)**:跑 `npm test` 重驗 641 全綠並記錄
+   基線——若出現環境性失敗,釘 known-fail 白名單再開工,審查者以白名單為準,
+   不把既有失敗誤判為新工作弄壞的。確認 node 版本(CI 押 Node 24 的 codex 上游
+   不相容見 `.github/workflows/ci.yml` 註解;本機 /tmp 的 node 二進位重開機會
+   消失)。探測三引擎 auth(codex 登入狀態 / agy auth / deepseek profile 存在性)
+   ——失敗不擋開發步,只把 §7 人工關卡提前標紅。
+1. shared/lib core 先行(純單測,零 I/O 假設)+ core 競態對抗審查(§7)。
+2. **delegate**(地基母體):搬上 shared、CLI 合約補齊(`--prompt-file` /
    `--json` / `--wait` 顯式旗標 / `--resume-id`→`--resume-job`)、刪 execute-plan。
-2. **antigravity**:搬上 ProcessAdapter;拆 multi-host(`host-detect.mjs`、
+3. **antigravity**:搬上 ProcessAdapter;拆 multi-host(`host-detect.mjs`、
    `.codex-plugin/`、`.agents/`、`bin/`、package.json `bin` 欄位);task 預設改
    前景;補單一入口 companion;CLI 合約補 `--prompt-file`;保留 image / handoff /
    review / adversarial-review / rescue。
-3. **codex**:只換 job-state 層(state / CAS / liveness / cancel);+`task.md`、
+4. **codex**:只換 job-state 層(state / CAS / liveness / cancel);+`task.md`、
    −`execute-plan.md`、機器層補 `--resume-job`;broker / app-server / attach /
    review-gate 不動。
-4. **fleet plugin**:skill + example + marketplace.json 登錄。
-5. 文件收尾:handoff 分岔標注、對齊矩陣終局化、各 README 更新(§4 第 5–6 項)。
-6. 真實冒煙(§7 最後一列)。
+5. **fleet plugin**:skill + example + marketplace.json 登錄。
+6. 文件收尾:handoff 分岔標注、對齊矩陣終局化、各 README 更新(§4 第 5–6 項)。
+7. 真實冒煙(§7 最後一列,人工關卡)。
 
-每步全套測試綠才進下一步。
+每步全套測試綠才進下一步。**串行是刻意的,編排時勿平行移植**:antigravity 依賴
+delegate 驗證過的 adapter 合約、codex 依賴兩個一次性引擎驗證過的 state 層。
+可平行的只有 conformance 劇本級 fan-out、同一步內的獨立檔案工作、與文件收尾。
 
 ## 9. 風險與緩解
 
@@ -262,8 +271,8 @@ args(writer/reviewer 參數),prompt 組裝與呼叫行零修改——做不到�
 2. 機器層 CLI 合約測試三引擎全綠;conformance suite 兩 adapter 全綠;drift
    check 上 CI。
 3. multi-host 拆除;人類層指令變更六項(§4)落地。
-4. fleet plugin 出生(skill + example);真實冒煙:三引擎各一 job + 依 skill
-   生成的 workflow 跑 2-task 迷你 plan。
+4. fleet plugin 出生(skill + example);真實冒煙(人工關卡,使用者在場):
+   三引擎各一 job + 依 skill 生成的 workflow 跑 2-task 迷你 plan。
 5. 單一 `npm test` 全綠(四 plugin structure + 三套 hermetic + shared 單測 +
    conformance + CLI 合約)。
 
