@@ -1328,3 +1328,20 @@ git commit -m "feat(delegate): phase 2B complete — delegate on shared foundati
 - `result --json` 對「格式合法但不存在的 job id」回 `{error:"no jobs"}`,與「空 workspace」同訊息(plan 原碼如此)。可細分為 `{error:"no job <id>"}` 更精確。
 - `result --last` 旗標仍 parse 但無顯式分支(`positionals[0] ?? listJobs()[0]` 已涵蓋,行為正確);純 cosmetic dead-parse。
 - `--wait`/`--background` 互斥守衛在 `--prompt-file` 讀檔**之後**才觸發(會先讀檔再報錯);可把守衛前移至 parseArgs 之後、prompt 解析之前。
+
+---
+
+## ✅ Phase 2B COMPLETE(2026-06-17)
+
+全部 11 個 task(0–11)完成。最終 HEAD `1a0fff4`。**全套 npm test exit 0**:structure 2 / shared 87 / delegate 69 / antigravity 243 / codex 305。drift OK(vendored == source)。鐵律:`main..HEAD` 對 codex/antigravity 零改動。delegate `v0.2.0`(plugin.json == marketplace)。
+
+每個 task 走 SDD(implementer → controller 驗證 → 多視角對抗 Workflow 審查 → fix loop);另跑 3 次 holistic 整支 Workflow 審查(Task 3/4、Task 5/6/7、最終 Task 0–10)。最終 holistic 審查 **5 視角一致 RELEASE-READY、0 confirmed-material**。審查驅動修正:adapter null-result(批准偏離)、parseEvent precedence 鎖測、`--wait`/`--background` 互斥、cmdWait null-job crash 守衛、conformance huge-output flush。
+
+**Task 8–11 最終審查 cosmetic follow-ups(非阻擋,皆 by-design 或已記錄):**
+- `resumeArgs` 為 ProcessAdapter 合約成員但 delegate runtime 不經它 resume(delegate 走 `buildClaudeArgs` 的 `resumeSessionId` → `-r`);合約仍滿足,屬合約層設計觀察(Plan A 範疇)。
+- `result --last` 為 vestigial no-op boolFlag(`positionals[0] ?? listJobs()[0]` 已涵蓋,行為正確)。
+- `wait --json` 抑制 event heartbeat = 刻意(保持輸出為單一乾淨 JSON 投影)。
+- `cmdWait` mid-wait prune 的 null-job race 未做 deterministic 測試(守衛已鏡像 cmdLogs + shared wait.test 合約證明;flaky 測試不寫)。
+- `logs` 印全部 events(非 tail)、`extractResult` 簽名丟 exitCode、`result --json` unknown-id 與空 workspace 同訊息、前景 cancel 無 forceExitMs — 同前述章節,皆 cosmetic/已記錄。
+
+**人工關卡(不在自動化範圍):** push、開 PR、真實端點冒煙(deepseek profile 真 job)。
