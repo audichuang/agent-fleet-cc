@@ -1273,3 +1273,23 @@ git commit -m "feat(delegate): phase 2B complete — delegate on shared foundati
 - 機器層合約中 `--write` 旗標:接受但為 no-op 同義詞(預設即 bypass)——Task 6 的 TASK_FLAGS 含 write,行為由 read-only 反向定義,plan 如此設計避免雙旗標衝突矩陣。
 - 刻意不在本 plan:fleet skill、真實冒煙(人工關卡)、antigravity/codex 的 wait/logs(Plan C/D)。
 - 型別一致:resultProjection 欄位 ↔ spec §2.2;adapter usage 欄位 ↔ shared worker 的 `result.usage ?? null`;conformance 斷言值 ↔ fake-claude conf-* 輸出已逐字對齊。
+
+---
+
+## Phase 2B 最終審查 follow-ups(Task 3/4 對抗式審查,2026-06-17)
+
+5 視角對抗審查 + 對抗式驗證結論:Task 3(vendor)+ Task 4(adapter)合規、conformance-ready(10 劇本逐一追蹤皆會過)、鐵律未碰 codex/antigravity、全套綠。**0 blocking。** 一個 confirmed should-fix 與數個 minor 皆為 latent / 跨任務,鍵結到對應後續 task:
+
+**→ Task 5(conformance)實作時注意:**
+- `conf-instant-exit`(`process.exit(7)`)必須放在「讀 stdin」之前(比照既有 `early-exit`),否則 EPIPE 行為不一致。Task 5 step 1 註解已提及,審查再次確認為 conformance 風險。
+
+**→ Task 6(companion 重構)一併處理(confirmed should-fix 的正確歸宿):**
+- adapter `buildInvocation` 目前 `resolveProfile({ settingsPath: request.settingsPath })` 只轉 settingsPath。by-name profile 解析依設計是 companion 的職責(adapter 只消費已解析路徑),但若 request 無 settingsPath,resolveProfile 落入 by-name 分支會因 `dataRoot=undefined` 丟原始 `TypeError` 而非 `ProfileError`(**latent**:companion 一律存明確 `profile.path`,目前不可達;job 仍達終態,不變量不破)。Task 6 建 companion 解析流時:(a) 確保 adapter 收到的 settingsPath 為已解析的 `profile.path`;(b) 考慮在 `buildInvocation` 對缺 settingsPath 給明確 precondition 錯誤。
+- 連帶:`buildClaudeArgs` 在 settingsPath undefined 時會 push `--settings null`(同根因,目前被上述 TypeError 遮蔽);Task 6 確立 settingsPath 來源後一併避免。
+
+**→ 低優先強化(任一後續 task 順手可做,非必須,皆 minor):**
+- `classifyError` 正則為子字串比對(`'401'` 命中 `'1401'` 等);僅在**已失敗** job 上 mislabel errorKind、不會翻轉成敗。可加 word boundary(`\b401\b` 等),不影響 conf-auth-expire-midway。
+- `extractResult(events)` 丟掉合約宣告的第二參數 `exitCode`(claude stream-json 的 `is_error` 已涵蓋);可改 `extractResult(events, _exitCode)` 或加註解澄清,無行為變更。
+- `binaryArgv`(來自 request)無 `Array.isArray` 型別檢查;stateDir 0700 / job.json 0600 已限本人,低風險。
+- `parseEvent` 的 `Boolean(is_error)` 與接受空 `session_id` — 沿襲前身 `claude.mjs` 行為,真實 claude 不會觸發,非回歸。
+- `sync-shared` 的 `VENDORED.md` 於 `cpSync` 後寫;cpSync 中途失敗會留不完整副本,但 CI drift check 會抓到(可接受)。
