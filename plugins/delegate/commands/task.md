@@ -1,6 +1,6 @@
 ---
 description: Delegate an execution task to a cheap-model headless Claude Code instance
-argument-hint: "<prompt> [--profile <name>|--settings <path>] [--background] [--resume-last|--resume-id <job>] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--prompt-file <path>] [--profile <name>|--settings <path>] [--background] [--json] [--model <id>] [--read-only] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 ---
 
 Run the delegate companion with the user's arguments and relay its output:
@@ -9,9 +9,14 @@ Run the delegate companion with the user's arguments and relay its output:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/delegate-companion.mjs" task $ARGUMENTS
 ```
 
-- For long tasks add `--background`, then poll with /delegate:status.
 - The prompt must be a complete, self-contained instruction — the delegate
   is a cheap model: spell out files, constraints, and the definition of done.
+- For long tasks use `--background`, then poll with `/delegate:status` (or, for an
+  orchestrator, use the companion `wait <id>` verb to block until completion).
+- Use `--json` to receive machine-readable output (job id, status, exit code).
+- Use `--prompt-file <path>` to pass a prompt stored in a file instead of inline.
+- Use `--read-only` to run the delegate without write permissions.
+- Use `--resume-job <job>` or `--resume-last` to continue a previous job.
 - Report the companion's output back to the user verbatim.
 
 ## Profile selection (no --profile given)

@@ -33,6 +33,19 @@ test("task documents the no-profile selection flow", () => {
   );
 });
 
+test("task.md documents the machine-contract flags and drops execute-plan/--resume-id", () => {
+  const text = fs.readFileSync(
+    path.join(REPO_ROOT, "plugins/delegate/commands", "task.md"),
+    "utf8",
+  );
+  assert.match(text, /--prompt-file/, "task.md: missing --prompt-file flag");
+  assert.match(text, /--json/, "task.md: missing --json flag");
+  assert.match(text, /--resume-job/, "task.md: missing --resume-job flag");
+  assert.match(text, /--read-only/, "task.md: missing --read-only flag");
+  assert.ok(!text.includes("execute-plan"), "task.md: must not mention execute-plan");
+  assert.ok(!text.includes("--resume-id"), "task.md: must not mention --resume-id");
+});
+
 test("marketplace entry and plugin.json agree for delegate", () => {
   const marketplace = JSON.parse(
     fs.readFileSync(path.join(REPO_ROOT, ".claude-plugin/marketplace.json"), "utf8"),
