@@ -813,3 +813,50 @@ test("stdinError + exitCode!==0 → failed with stdin: error message", async () 
     "error message must include 'stdin:' prefix when stdinError caused the failure",
   );
 });
+
+// ─── Fix A: spawn-failure ENOENT → errorKind must be "not-installed" ─────────
+// Before Fix A, classifyError received only outcome.stderrTail, which is empty on
+// a spawn failure (the process never started) — so classifyError returned "unknown".
+// After Fix A, classifyError receives outcome.spawnError (which contains the ENOENT
+// message) when spawnError is truthy, so ClaudeAdapter.classifyError can match /ENOENT/
+// and return "not-installed".
+//
+// This test drives runWorker with a deps.spawnImpl that throws an Error whose message
+// contains "spawn /no/such/bin ENOENT" — exactly what Node's child_process emits when
+// the binary is missing. The adapter's classifyError is wired to return "not-installed"
+// when the input matches /ENOENT/ (mimicking ClaudeAdapter.classifyError behaviour).
+//
+// mutation criterion: revert Fix A (change back to `outcome.stderrTail`) →
+// classifyError receives "" → returns "unknown" → assert.equal(job.errorKind, "not-installed") turns red.
+test("spawn failure (ENOENT) → errorKind is not-installed, not unknown", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 5000 });
+  createJob(stateDir, record, "the prompt");
+
+  // Adapter whose classifyError mirrors ClaudeAdapter: /ENOENT/ → "not-installed"
+  const adapter = makeAdapter({
+    classifyError: (text) => {
+      if (text && /ENOENT/.test(text)) return "not-installed";
+      return "unknown";
+    },
+  });
+
+  // spawnImpl that throws synchronously with an ENOENT-like error message,
+  // modelling what Node emits when the binary does not exist.
+  const spawnImpl = () => {
+    const err = new Error("spawn /no/such/bin ENOENT");
+    err.code = "ENOENT";
+    throw err;
+  };
+
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: { spawnImpl } });
+
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.status, "failed", "spawn failure must produce a failed job");
+  assert.equal(
+    job.errorKind,
+    "not-installed",
+    "errorKind must be 'not-installed' when spawnError contains ENOENT (Fix A)",
+  );
+  assert.match(job.error, /ENOENT/, "error field must contain the spawn error message");
+});

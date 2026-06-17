@@ -252,7 +252,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     try {
       errorKind = outcome.timedOut
         ? "timeout"
-        : adapter.classifyError(outcome.stderrTail, outcome.exitCode);
+        : adapter.classifyError(outcome.spawnError || outcome.stderrTail, outcome.exitCode);
     } catch {
       errorKind = "unknown";
     }
