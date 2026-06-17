@@ -106,9 +106,17 @@ test("status --json emits an array of core-field projections", async () => {
   assert.equal(code, 0);
   const arr = JSON.parse(out.join("\n"));
   assert.ok(Array.isArray(arr));
-  if (arr.length) {
-    assert.ok("engine" in arr[0] && "jobId" in arr[0] && "status" in arr[0]);
-  }
+  assert.ok(arr.length >= 1, "expected at least one job in the array");
+  assert.ok("engine" in arr[0] && "jobId" in arr[0] && "status" in arr[0]);
+});
+
+test("cancel --json on unknown job emits {ok:false} and exits 1", async () => {
+  const { out, deps } = setup();
+  const code = await runCompanion(["cancel", "delegate-nope", "--json"], deps);
+  assert.equal(code, 1);
+  const payload = JSON.parse(out.join("\n"));
+  assert.equal(payload.ok, false);
+  assert.ok(typeof payload.message === "string" && payload.message.length > 0);
 });
 
 test("result --json emits the unified result projection; cancel --json emits {ok,message}", async () => {
