@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CLI entry. Commands: setup | task | execute-plan | status | result | cancel
+// CLI entry. Commands: setup | task | execute-plan | status | result | cancel | wait | logs
 // Testable via runCompanion(argv, deps) with injectable seams.
 //
 // Job runtime (state/worker/cancel/reconcile) lives in the vendored shared lib;
@@ -20,9 +20,12 @@ import {
   pruneJobs,
   promptFilePath,
   logFilePath,
+  jobDir,
 } from "./lib/shared/core/state-store.mjs";
 import { reconcileDeadPids } from "./lib/shared/core/reconcile.mjs";
 import { cancelJob } from "./lib/shared/core/job-control.mjs";
+import { waitForJob } from "./lib/shared/core/wait.mjs";
+import { readEvents } from "./lib/shared/core/events.mjs";
 import { runWorker, installCancelForwarder } from "./lib/shared/runtime/worker.mjs";
 import { makeClaudeAdapter, resolveDataRoot, workspaceStateDir } from "./lib/adapter.mjs";
 import { resolveProfile, listProfiles, ProfileError } from "./lib/profiles.mjs";
@@ -35,7 +38,9 @@ const USAGE = `usage: delegate-companion <command> [...]
   execute-plan <plan-file> [same flags as task]
   status
   result [<job-id>|--last]
-  cancel <job-id>`;
+  cancel <job-id>
+  wait <job-id> [--timeout-s <n>] [--json]
+  logs <job-id> [--follow]`;
 
 const TASK_FLAGS = {
   valueFlags: ["profile", "settings", "resume-job", "timeout-ms", "prompt-file", "model"],
@@ -109,6 +114,10 @@ export async function runCompanion(argv, deps = {}) {
         return cmdResult({ argv: rest, out, stateDir });
       case "cancel":
         return cmdCancel({ argv: rest, out, stateDir });
+      case "wait":
+        return await cmdWait({ argv: rest, out, stateDir });
+      case "logs":
+        return await cmdLogs({ argv: rest, out, stateDir });
       default:
         out(USAGE);
         return command ? 1 : 0;
@@ -341,6 +350,71 @@ function cmdCancel({ argv, out, stateDir }) {
   const result = cancelJob(stateDir, safeJobId(positionals[0]));
   out(flags.json ? JSON.stringify(result) : result.message);
   return result.ok ? 0 : 1;
+}
+
+// Timeout exit code for wait: not an error — lets an orchestrator cleanly re-enter (spec §2.3)
+const WAIT_TIMEOUT_EXIT = 10;
+
+async function cmdWait({ argv, out, stateDir }) {
+  const { flags, positionals } = parseArgs(argv, {
+    valueFlags: ["timeout-s"],
+    boolFlags: ["json"],
+  });
+  if (!positionals[0]) throw new UsageError("wait requires a job id");
+  const jobId = safeJobId(positionals[0]);
+  if (!readJob(stateDir, jobId)) {
+    out(
+      flags.json
+        ? JSON.stringify({ error: `no job ${jobId}` })
+        : `No job ${jobId} in this workspace.`,
+    );
+    return 1;
+  }
+  const timeoutS = flags["timeout-s"] ? Number(flags["timeout-s"]) : 540;
+  if (!Number.isFinite(timeoutS) || timeoutS <= 0) {
+    throw new UsageError(
+      `--timeout-s must be a positive number, got: ${flags["timeout-s"]}`,
+    );
+  }
+  reconcileDeadPids(stateDir);
+  const { done, job } = await waitForJob({
+    stateDir,
+    jobId,
+    timeoutMs: timeoutS * 1000,
+    onEvent: (e) => {
+      if (!flags.json)
+        out(`[${e.ts}] ${e.type}${e.kind ? ":" + e.kind : ""}`);
+    },
+  });
+  out(flags.json ? JSON.stringify(resultProjection(job)) : renderResult(job, ""));
+  if (!done) return WAIT_TIMEOUT_EXIT;
+  return job.status === "completed" ? 0 : 1;
+}
+
+async function cmdLogs({ argv, out, stateDir }) {
+  const { flags, positionals } = parseArgs(argv, { boolFlags: ["follow"] });
+  if (!positionals[0]) throw new UsageError("logs requires a job id");
+  const jobId = safeJobId(positionals[0]);
+  if (!readJob(stateDir, jobId)) {
+    out(`No job ${jobId} in this workspace.`);
+    return 1;
+  }
+  const dir = jobDir(stateDir, jobId);
+  if (!flags.follow) {
+    // Without --follow: print all events as JSON lines and return
+    for (const e of readEvents(dir)) out(JSON.stringify(e));
+    return 0;
+  }
+  // With --follow: do NOT static-print first (avoids double-print).
+  // waitForJob's onEvent drain starts at index 0, emitting all events
+  // including history, until terminal.
+  const { job } = await waitForJob({
+    stateDir,
+    jobId,
+    timeoutMs: 24 * 60 * 60 * 1000,
+    onEvent: (e) => out(JSON.stringify(e)),
+  });
+  return TERMINAL_STATUSES.has(job?.status) ? 0 : 1;
 }
 
 const isCliEntry =
