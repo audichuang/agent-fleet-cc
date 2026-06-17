@@ -279,6 +279,9 @@ async function cmdTask({ argv, env, out, cwd, dataRoot, stateDir, deps }) {
     prompt = positionals.join(" ").trim();
   }
   if (!prompt) throw new UsageError("task requires a prompt or --prompt-file");
+  if (flags.wait && flags.background) {
+    throw new UsageError("--wait and --background are mutually exclusive");
+  }
   return startJob({ prompt, flags, env, out, cwd, dataRoot, stateDir, deps });
 }
 

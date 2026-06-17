@@ -445,3 +445,14 @@ test("execute-plan with missing file fails cleanly", async () => {
   assert.notEqual(code, 0);
   assert.match(out.join("\n"), /plan file/i);
 });
+
+test("--wait and --background are mutually exclusive", async () => {
+  const { deps, out, stateDir } = setup();
+  const code = await runCompanion(
+    ["task", "hi", "--profile", "kimi", "--wait", "--background"],
+    deps,
+  );
+  assert.notEqual(code, 0);
+  assert.equal(listJobs(stateDir).length, 0);
+  assert.match(out.join("\n"), /mutually exclusive/);
+});
