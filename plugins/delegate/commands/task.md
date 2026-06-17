@@ -1,6 +1,6 @@
 ---
 description: Delegate an execution task to a cheap-model headless Claude Code instance
-argument-hint: "<prompt> [--prompt-file <path>] [--profile <name>|--settings <path>] [--background] [--json] [--model <id>] [--read-only] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--prompt-file <path>] [--profile <name>|--settings <path>] [--background|--wait] [--json] [--model <id>] [--read-only] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 ---
 
 Run the delegate companion with the user's arguments and relay its output:
