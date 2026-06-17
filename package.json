@@ -12,6 +12,7 @@
     "test:delegate": "node --test tests/delegate/*.test.mjs",
     "test:antigravity": "node --test --experimental-test-module-mocks tests/antigravity/*.test.mjs",
     "test:codex": "node --test tests/codex/*.test.mjs",
+    "sync-shared": "node scripts/sync-shared.mjs",
     "prebuild:codex": "mkdir -p plugins/codex/.generated/app-server-types && codex app-server generate-ts --out plugins/codex/.generated/app-server-types",
     "build:codex": "tsc -p tsconfig.app-server.json"
   },
