@@ -87,7 +87,9 @@ export function makeClaudeAdapter() {
           text:
             typeof event.result === "string"
               ? event.result
-              : JSON.stringify(event.result ?? ""),
+              : event.result == null
+                ? ""
+                : JSON.stringify(event.result),
           isError: Boolean(event.is_error),
           usage,
         };

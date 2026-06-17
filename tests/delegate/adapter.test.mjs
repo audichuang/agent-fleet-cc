@@ -2,7 +2,6 @@
 import "./helpers.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import os from "node:os";
 import path from "node:path";
 import { validateProcessAdapter } from "../../plugins/delegate/scripts/lib/shared/adapter-api.mjs";
 import {
@@ -60,6 +59,14 @@ test("parseEvent: session + result mapped, junk and irrelevant events → null",
   assert.deepEqual(a.parseEvent('{"type":"system","session_id":"s1"}'), { kind: "session", sessionId: "s1" });
   const r = a.parseEvent('{"type":"result","result":"done","is_error":false,"usage":{"input_tokens":10,"output_tokens":5}}');
   assert.deepEqual(r, { kind: "result", text: "done", isError: false, usage: { inputTokens: 10, outputTokens: 5 } });
+  // a result line that also carries session_id must map to result, not session
+  // (locks the type-precedence guard in parseEvent)
+  assert.deepEqual(
+    a.parseEvent('{"type":"result","session_id":"s9","result":"done","is_error":false}'),
+    { kind: "result", text: "done", isError: false, usage: null },
+  );
+  // null/missing result → "" (not '""')
+  assert.equal(a.parseEvent('{"type":"result","is_error":false}').text, "");
   assert.equal(a.parseEvent("not json"), null);
   assert.equal(a.parseEvent('{"type":"assistant","message":"..."}'), null);
 });
