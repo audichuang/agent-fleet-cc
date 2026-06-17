@@ -6,10 +6,10 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runCompanion } from "../../plugins/delegate/scripts/delegate-companion.mjs";
 import {
-  workspaceStateDir,
   writeJob,
   readJob,
-} from "../../plugins/delegate/scripts/lib/state.mjs";
+} from "../../plugins/delegate/scripts/lib/shared/core/state-store.mjs";
+import { workspaceStateDir } from "../../plugins/delegate/scripts/lib/adapter.mjs";
 
 const FIXTURE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
