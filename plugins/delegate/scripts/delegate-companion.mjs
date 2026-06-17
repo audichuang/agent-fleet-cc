@@ -386,6 +386,10 @@ async function cmdWait({ argv, out, stateDir }) {
         out(`[${e.ts}] ${e.type}${e.kind ? ":" + e.kind : ""}`);
     },
   });
+  if (!job) {
+    out(flags.json ? JSON.stringify({ error: `job ${jobId} no longer exists` }) : `Job ${jobId} no longer exists.`);
+    return 1;
+  }
   out(flags.json ? JSON.stringify(resultProjection(job)) : renderResult(job, ""));
   if (!done) return WAIT_TIMEOUT_EXIT;
   return job.status === "completed" ? 0 : 1;

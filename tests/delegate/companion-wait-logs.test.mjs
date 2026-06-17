@@ -215,9 +215,11 @@ test("logs prints events.ndjson tail; --follow follows to terminal then exits", 
     assert.ok("type" in evt, `event line missing type: ${line}`);
   }
 
-  // Should include job-created at least
+  // Should include the full canonical event sequence for a completed job
   const types = logsOut.map((l) => JSON.parse(l).type);
   assert.ok(types.includes("job-created"), `expected job-created in: ${types}`);
+  assert.ok(types.includes("spawned"), `expected spawned in: ${types}`);
+  assert.ok(types.includes("finalized"), `expected finalized in: ${types}`);
 
   // logs --follow on an already-completed job: should also exit cleanly (terminal reached)
   const followOut = [];
