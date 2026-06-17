@@ -421,31 +421,6 @@ test("job artifacts are owner-only (no group/world access)", async () => {
   }
 });
 
-test("execute-plan wraps the plan file into the prompt", async () => {
-  const { deps, cwd, stateDir } = setup();
-  const planPath = path.join(cwd, "plan.md");
-  fs.writeFileSync(planPath, "# The Plan\n1. do X");
-  const code = await runCompanion(
-    ["execute-plan", planPath, "--profile", "kimi"],
-    deps,
-  );
-  assert.equal(code, 0);
-  const job = listJobs(stateDir)[0];
-  const prompt = fs.readFileSync(promptFilePath(stateDir, job.id), "utf8");
-  assert.match(prompt, /pre-approved implementation plan/);
-  assert.match(prompt, /# The Plan/);
-});
-
-test("execute-plan with missing file fails cleanly", async () => {
-  const { deps, out } = setup();
-  const code = await runCompanion(
-    ["execute-plan", "/no/such/plan.md", "--profile", "kimi"],
-    deps,
-  );
-  assert.notEqual(code, 0);
-  assert.match(out.join("\n"), /plan file/i);
-});
-
 test("--wait and --background are mutually exclusive", async () => {
   const { deps, out, stateDir } = setup();
   const code = await runCompanion(

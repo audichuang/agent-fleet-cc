@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CLI entry. Commands: setup | task | execute-plan | status | result | cancel | wait | logs
+// CLI entry. Commands: setup | task | status | result | cancel | wait | logs
 // Testable via runCompanion(argv, deps) with injectable seams.
 //
 // Job runtime (state/worker/cancel/reconcile) lives in the vendored shared lib;
@@ -29,13 +29,14 @@ import { readEvents } from "./lib/shared/core/events.mjs";
 import { runWorker, installCancelForwarder } from "./lib/shared/runtime/worker.mjs";
 import { makeClaudeAdapter, resolveDataRoot, workspaceStateDir } from "./lib/adapter.mjs";
 import { resolveProfile, listProfiles, ProfileError } from "./lib/profiles.mjs";
-import { resolveTimeoutMs } from "./lib/claude.mjs";
 import { renderStatus, renderResult } from "./lib/render.mjs";
+
+// Job timeout default (1h) — inlined from the retired claude helper module.
+const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: delegate-companion <command> [...]
   setup
   task <prompt...>|--prompt-file <path> [--profile <name>|--settings <path>] [--background|--wait] [--json] [--model <id>] [--read-only|--write] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
-  execute-plan <plan-file> [same flags as task]
   status
   result [<job-id>|--last]
   cancel <job-id>
@@ -56,7 +57,10 @@ function safeJobId(value) {
 }
 
 function parseTimeoutMs(value, env) {
-  if (value === undefined) return resolveTimeoutMs(env);
+  if (value === undefined) {
+    const raw = Number(env.DELEGATE_JOB_TIMEOUT_MS);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
+  }
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
     // Unvalidated NaN would become setTimeout(NaN) ≈ a 1ms timeout.
@@ -80,15 +84,6 @@ function resultProjection(job) {
   };
 }
 
-const EXECUTE_PLAN_TEMPLATE = (plan) => `You are executing a pre-approved implementation plan. Read it carefully, then implement it COMPLETELY:
-- Follow the plan's tasks in order; run every verification step it specifies.
-- Do not redesign or skip steps. If a step is impossible, finish what you can and report the blocker in your final summary.
-- Commit as the plan instructs.
-
-<plan>
-${plan}
-</plan>`;
-
 export async function runCompanion(argv, deps = {}) {
   const env = deps.env ?? process.env;
   const out = deps.out ?? ((line) => process.stdout.write(line + "\n"));
@@ -106,8 +101,6 @@ export async function runCompanion(argv, deps = {}) {
         return cmdSetup({ env, out, dataRoot, deps });
       case "task":
         return await cmdTask({ argv: rest, env, out, cwd, dataRoot, stateDir, deps });
-      case "execute-plan":
-        return await cmdExecutePlan({ argv: rest, env, out, cwd, dataRoot, stateDir, deps });
       case "status":
         return cmdStatus({ argv: rest, out, stateDir });
       case "result":
@@ -292,23 +285,6 @@ async function cmdTask({ argv, env, out, cwd, dataRoot, stateDir, deps }) {
     throw new UsageError("--wait and --background are mutually exclusive");
   }
   return startJob({ prompt, flags, env, out, cwd, dataRoot, stateDir, deps });
-}
-
-async function cmdExecutePlan({ argv, env, out, cwd, dataRoot, stateDir, deps }) {
-  const { flags, positionals } = parseArgs(argv, TASK_FLAGS);
-  const planPath = positionals[0];
-  if (!planPath) throw new UsageError("execute-plan requires a plan file path");
-  let plan;
-  try {
-    plan = fs.readFileSync(path.resolve(cwd, planPath), "utf8");
-  } catch {
-    throw new UsageError(`plan file not readable: ${planPath}`);
-  }
-  return startJob({
-    prompt: EXECUTE_PLAN_TEMPLATE(plan),
-    title: `execute-plan ${path.basename(planPath)}`,
-    flags, env, out, cwd, dataRoot, stateDir, deps,
-  });
 }
 
 function readLogTail(stateDir, jobId, lines = 30) {
