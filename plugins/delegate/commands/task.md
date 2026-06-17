@@ -16,6 +16,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/delegate-companion.mjs" task $ARGUMENTS
 - Use `--json` to receive machine-readable output (job id, status, exit code).
 - Use `--prompt-file <path>` to pass a prompt stored in a file instead of inline.
 - Use `--read-only` to run the delegate without write permissions.
+- Use `--model <id>` to override the model the delegate runs (defaults to the profile's model).
 - Use `--resume-job <job>` or `--resume-last` to continue a previous job.
 - Report the companion's output back to the user verbatim.
 
