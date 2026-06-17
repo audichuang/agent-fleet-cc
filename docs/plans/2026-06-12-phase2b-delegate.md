@@ -1345,3 +1345,22 @@ git commit -m "feat(delegate): phase 2B complete — delegate on shared foundati
 - `logs` 印全部 events(非 tail)、`extractResult` 簽名丟 exitCode、`result --json` unknown-id 與空 workspace 同訊息、前景 cancel 無 forceExitMs — 同前述章節,皆 cosmetic/已記錄。
 
 **人工關卡(不在自動化範圍):** push、開 PR、真實端點冒煙(deepseek profile 真 job)。
+
+---
+
+## 深度實證對抗探測 follow-ups(ultracode probe,2026-06-17)
+
+Codex handoff 因認證失效(refresh token 已用)改走 ultracode-only。5 視角**實證**探測(各自寫並跑 /tmp 重現腳本打真實模組,含 8 detached procs × 20 iters 的真實 O_EXCL 多程序競態):**1 confirmed、2 refuted、8 minors**。CAS/prune/reconcile 與 worker 生命週期經實證**全 robust**(並發 finalize、prune unlink 順序、lock-repair 收斂、markRunning recheck、EPIPE+exit0、timeout+孫子佔 pipe 的 force-resolve、lost-CAS 終態皆正確)。
+
+**已修(commit 064cf38,shared core,已 re-vendor):**
+- worker 把 spawn 失敗(ENOENT 沒裝 claude)誤標 errorKind `unknown` → 改餵 `spawnError` 給 classifyError → 正確得 `not-installed`(orchestrator 診斷)。+ tests/shared 新增 ENOENT 測試。
+- spawn.mjs 註解誇大(宣稱 -pgid 殺得到 MCP server)→ 誠實化為「殺共用 pgid 的子孫;detached/setsid 自成 pgid 的孫子逃逸」。
+
+**⚠️ 高優先 follow-up(headline,先前所有審查全漏;need-to-verify + 非平凡設計):**
+- `killGroupWithGrace` 的 `kill(-pgid)` **殺不到 detached 孫子**(自成 pgid)——實證重現:detached 孫子在 SIGTERM/SIGKILL 到 engine pgid 後存活。conformance fixture 的孫子沒用 detached(共用 pgid)故測試過,但**真實 claude -p 的 MCP server 若以 detached/setsid spawn,cancel/timeout 會留殭屍引擎燒 API 錢**(正是此機制要防的)。**待辦:**(1) 驗證 claude 的 MCP server 是否真 detach;(2) 若是,加 process-tree 收尾(/proc ppid 鏈、`pkill -P`、或 session/cgroup)或 reconcile sweep 殺孤兒後代。這是跨引擎 shared 議題(Plan A/D 範疇)。
+
+**minor follow-ups(非阻擋,皆 by-design/OS-guarded/防禦性):**
+- queued 狀態被 cancel 的 job 達終態但 events.ndjson **無 finalized 事件**(cancelJob 不寫事件;worker 沒跑)——觀測脊椎小缺口(job.json 仍為真相、wait 靠 job.json 偵測終態)。乾淨修法需 events-model 決策(避免 running-cancel 的雙 finalized 事件:cancelJob 寫 + worker lost-cas 寫),故留待審慎處理。
+- `safePid` 放行 pid=2(kthreadd)——OS 對 `kill(2)`/`kill(-2)` 回 ESRCH/EPERM,無實害;可收緊為 >2。
+- `installCancelForwarder.onChild` 無雙呼叫守衛(第一個 child 的 pgid 會被覆蓋遺漏)——實務只呼叫一次,防禦性。
+- `buildEngineEnv` 不 coerce 非字串 baseEnv 值(OS env 恆為字串,無實害);`DENY_PREFIXES` 不含裸 `ANTHROPIC`(無此變數);`worker-entry.mjs` 不驗 argv 的 jobId(companion 已傳 safeJobId 過的 id,內部呼叫);`extractResult` 對 null/非陣列 events 會 throw(worker 呼叫點已 try/catch 包住)。
