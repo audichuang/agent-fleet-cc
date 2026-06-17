@@ -1293,3 +1293,20 @@ git commit -m "feat(delegate): phase 2B complete — delegate on shared foundati
 - `binaryArgv`(來自 request)無 `Array.isArray` 型別檢查;stateDir 0700 / job.json 0600 已限本人,低風險。
 - `parseEvent` 的 `Boolean(is_error)` 與接受空 `session_id` — 沿襲前身 `claude.mjs` 行為,真實 claude 不會觸發,非回歸。
 - `sync-shared` 的 `VENDORED.md` 於 `cpSync` 後寫;cpSync 中途失敗會留不完整副本,但 CI drift check 會抓到(可接受)。
+
+---
+
+## Phase 2B Task 6 審查 follow-ups(companion 遷移對抗式審查,2026-06-17)
+
+5 視角對抗審查 + 對抗驗證:**行為保全 PASS**(九項既有安全/行為全保留、無測試被弱化、cmdStatus/result/cancel 與前景路徑逐字保留),全套綠。5 個被標 important 的發現經對抗驗證全數下修。已當場修:`--wait` + `--background` 互斥守衛(spec §2.1,commit c227b16)。以下延後:
+
+**→ Task 9(render 適配統一 schema)務必一併處理(審查確認的 should-fix):**
+- `render.mjs` 現讀舊扁平欄位:renderStatus 讀 `job.profile`(新 job 顯示 `profile=?`)與 `job.promptPreview`(新 job 無此欄、preview 欄消失);renderResult 讀 `job.profile`。Task 9 改讀 `job.request?.profile ?? "?"` 與 `job.title`。**中間態(Task 6~9)CLI status/result 會顯示 `profile=?`** — 屬 plan 既定延後,非缺陷。
+- `renderResult` 的續接提示仍寫 `--resume-id`(本階段已改名 `--resume-job`),Task 9 一併改。
+- **連帶:`tests/delegate/render.test.mjs` 目前斷言舊字串 `/--resume-id/`(把過時字串固化了)**;Task 9 改 render 時必須同步把該斷言改為 `/--resume-job/`,否則測試會擋住正確修正。
+
+**→ Task 7 順手 hygiene(cosmetic):**
+- `companion-control.test.mjs` 的手建 fixtures 用舊 `dlg-` 前綴 id(`dlg-z`/`dlg-r`)。能運作(writeJsonAtomic 自建目錄;reconcile/cancel 只讀 status/pid),但為與新 `delegate-` engine 前綴一致,Task 7 觸碰該檔時順手改為 `delegate-z`/`delegate-r`。
+
+**→ 一般 follow-up(pre-existing,非本階段回歸,需審慎設計):**
+- 前景 cancel 路徑的 `installCancelForwarder({})` 無 `forceExitMs`(沿襲遷移前行為)。若前景 job 被 cancel 且有孫子程序佔住 stdout pipe,`child.on("close")` 可能不觸發 → companion 會 hang 到孫子釋放或 job-timeout(預設 1h)才解。注意:runWorker 的 forceTimer 只在 **job-timeout** callback 內武裝,**不會**因 SIGTERM 觸發(審查更正了「5200ms」說法)。修法(前景加 forceExitMs)有「可能跳過 renderResult」的取捨,宜在 Task 8(wait/logs,會重訪前景/cancel 互動)或專門強化回合審慎處理。
