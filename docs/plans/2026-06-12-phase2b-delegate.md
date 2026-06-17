@@ -1310,3 +1310,21 @@ git commit -m "feat(delegate): phase 2B complete — delegate on shared foundati
 
 **→ 一般 follow-up(pre-existing,非本階段回歸,需審慎設計):**
 - 前景 cancel 路徑的 `installCancelForwarder({})` 無 `forceExitMs`(沿襲遷移前行為)。若前景 job 被 cancel 且有孫子程序佔住 stdout pipe,`child.on("close")` 可能不觸發 → companion 會 hang 到孫子釋放或 job-timeout(預設 1h)才解。注意:runWorker 的 forceTimer 只在 **job-timeout** callback 內武裝,**不會**因 SIGTERM 觸發(審查更正了「5200ms」說法)。修法(前景加 forceExitMs)有「可能跳過 renderResult」的取捨,宜在 Task 8(wait/logs,會重訪前景/cancel 互動)或專門強化回合審慎處理。
+
+---
+
+## Phase 2B Task 5/6/7 最終整支審查 follow-ups(2026-06-17)
+
+5 視角對抗審查 + 對抗驗證:**0 confirmed-material、1 refuted(誤報)、全 lens PASS、IRONCLAD PASS**,Task 5/6/7 merge-ready。當場補上兩個 NEW Task 7 行為的測試覆蓋缺口(cancel --json 失敗路徑 + status --json 非空跑,commit 3ddd65a,程式碼本已正確)。以下為非阻擋觀察:
+
+**→ Task 10(人類層 md)務必涵蓋:**
+- `plugins/delegate/commands/task.md` 仍寫 `--resume-id`(現會硬失敗 `Unknown flag`)。與 render 同類的中間態 drift;plan Task 10 重寫 task.md 已用 `--resume-job`/新旗標 → **確認 Task 10 涵蓋**,完成前勿讓使用者照舊 md 操作。
+
+**→ 設計已定(記錄以免未來重複誤報,非缺陷):**
+- `cancel --json` 回 `{ok,message}` 而非 resultProjection——刻意:cancel 是動作非 job 查詢,要 job 投影請用 `result <id> --json`(plan Task 7 明定)。
+- `--prompt-file` 與 positionals 同給時靜默以檔案優先(spec §2.1「--prompt-file wins」,不強制告警)。
+
+**→ 低優先 polish(任一後續 task 順手,非必須):**
+- `result --json` 對「格式合法但不存在的 job id」回 `{error:"no jobs"}`,與「空 workspace」同訊息(plan 原碼如此)。可細分為 `{error:"no job <id>"}` 更精確。
+- `result --last` 旗標仍 parse 但無顯式分支(`positionals[0] ?? listJobs()[0]` 已涵蓋,行為正確);純 cosmetic dead-parse。
+- `--wait`/`--background` 互斥守衛在 `--prompt-file` 讀檔**之後**才觸發(會先讀檔再報錯);可把守衛前移至 parseArgs 之後、prompt 解析之前。
