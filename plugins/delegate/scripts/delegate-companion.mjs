@@ -104,7 +104,7 @@ export async function runCompanion(argv, deps = {}) {
       case "execute-plan":
         return await cmdExecutePlan({ argv: rest, env, out, cwd, dataRoot, stateDir, deps });
       case "status":
-        return cmdStatus({ out, stateDir });
+        return cmdStatus({ argv: rest, out, stateDir });
       case "result":
         return cmdResult({ argv: rest, out, stateDir });
       case "cancel":
@@ -311,33 +311,35 @@ function readLogTail(stateDir, jobId, lines = 30) {
   }
 }
 
-function cmdStatus({ out, stateDir }) {
+function cmdStatus({ argv, out, stateDir }) {
+  const { flags } = parseArgs(argv, { boolFlags: ["json"] });
   reconcileDeadPids(stateDir);
-  out(renderStatus(listJobs(stateDir)));
+  const jobs = listJobs(stateDir);
+  out(flags.json ? JSON.stringify(jobs.map(resultProjection)) : renderStatus(jobs));
   return 0;
 }
 
 function cmdResult({ argv, out, stateDir }) {
-  const { flags, positionals } = parseArgs(argv, { boolFlags: ["last"] });
+  const { flags, positionals } = parseArgs(argv, { boolFlags: ["last", "json"] });
   reconcileDeadPids(stateDir);
-  const job = flags.last
-    ? listJobs(stateDir)[0]
-    : positionals[0]
-      ? readJob(stateDir, safeJobId(positionals[0]))
-      : listJobs(stateDir)[0];
+  const job = positionals[0]
+    ? readJob(stateDir, safeJobId(positionals[0]))
+    : listJobs(stateDir)[0];
   if (!job) {
-    out("No delegate jobs in this workspace.");
+    out(flags.json ? JSON.stringify({ error: "no jobs" }) : "No delegate jobs in this workspace.");
     return 1;
   }
-  out(renderResult(job, job.status === "completed" ? "" : readLogTail(stateDir, job.id)));
+  out(flags.json
+    ? JSON.stringify(resultProjection(job))
+    : renderResult(job, job.status === "completed" ? "" : readLogTail(stateDir, job.id)));
   return job.status === "completed" ? 0 : 1;
 }
 
 function cmdCancel({ argv, out, stateDir }) {
-  const { positionals } = parseArgs(argv, {});
+  const { flags, positionals } = parseArgs(argv, { boolFlags: ["json"] });
   if (!positionals[0]) throw new UsageError("cancel requires a job id");
   const result = cancelJob(stateDir, safeJobId(positionals[0]));
-  out(result.message);
+  out(flags.json ? JSON.stringify(result) : result.message);
   return result.ok ? 0 : 1;
 }
 
