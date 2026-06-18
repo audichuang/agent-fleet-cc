@@ -18,6 +18,7 @@ import {
   readJob,
   listJobs,
   pruneJobs,
+  finalizeJob,
   promptFilePath,
   logFilePath,
   jobDir,
@@ -226,11 +227,31 @@ async function startJob({ prompt, title, flags, env, out, cwd, dataRoot, stateDi
       "worker-entry.mjs",
     );
     const spawnImpl = deps.workerSpawnImpl ?? spawn;
-    const child = spawnImpl(
-      process.execPath,
-      [workerPath, stateDir, record.id],
-      { detached: true, stdio: "ignore", env: { ...env } },
-    );
+    // F3:detached spawn 同步 throw(execPath 不存在、資源耗盡等)時不能把
+    // queued job 留著爛 — reconcile 只救「有死 pid」的 job,而此時 worker-entry
+    // 根本沒起來 stamp pid。直接 finalize failed 並回報,exit 1。
+    let child;
+    try {
+      child = spawnImpl(
+        process.execPath,
+        [workerPath, stateDir, record.id],
+        { detached: true, stdio: "ignore", env: { ...env } },
+      );
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      finalizeJob(stateDir, record.id, {
+        status: "failed",
+        error: message,
+        errorKind: "spawn",
+      });
+      const finished = readJob(stateDir, record.id);
+      out(
+        flags.json
+          ? JSON.stringify(resultProjection(finished))
+          : `delegate: failed to launch background worker: ${message}`,
+      );
+      return 1;
+    }
     child.unref();
     if (flags.json) {
       out(JSON.stringify({ engine: "delegate", jobId: record.id, status: "queued" }));
@@ -357,6 +378,8 @@ async function cmdWait({ argv, out, stateDir }) {
     stateDir,
     jobId,
     timeoutMs: timeoutS * 1000,
+    // F1:每輪 poll reconcile,worker 中途死亡時不卡到 timeout。
+    reconcile: reconcileDeadPids,
     onEvent: (e) => {
       if (!flags.json)
         out(`[${e.ts}] ${e.type}${e.kind ? ":" + e.kind : ""}`);
@@ -392,6 +415,8 @@ async function cmdLogs({ argv, out, stateDir }) {
     stateDir,
     jobId,
     timeoutMs: 24 * 60 * 60 * 1000,
+    // F1:--follow 最長等 24h;worker 中途死亡時必須靠 reconcile 收斂,否則卡滿。
+    reconcile: reconcileDeadPids,
     onEvent: (e) => out(JSON.stringify(e)),
   });
   return TERMINAL_STATUSES.has(job?.status) ? 0 : 1;

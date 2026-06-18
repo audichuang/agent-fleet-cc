@@ -93,6 +93,55 @@ test("background task: writes queued job + prompt file and spawns detached worke
   assert.match(out.join("\n"), new RegExp(jobs[0].id));
 });
 
+// ─── F3: background spawn throws → job finalized failed, not left queued ──────
+// The detached worker spawn can throw synchronously (execPath missing, resource
+// exhaustion). worker-entry never starts, so it never stamps a pid — reconcile
+// alone (which needs a dead pid) cannot save a pid-less queued job. The companion
+// must finalize the job failed itself and return 1.
+//
+// mutation criterion: remove the try/catch around the detached spawnImpl → the
+// throw escapes runCompanion (rejected promise) and the job stays "queued" → both
+// the exit-code assertion and the status assertion turn red.
+test("F3: background spawn throw finalizes the job failed (not left queued) and exits 1", async () => {
+  const { deps, out, stateDir } = setup();
+  deps.workerSpawnImpl = () => {
+    const err = new Error("spawn EAGAIN");
+    err.code = "EAGAIN";
+    throw err;
+  };
+  const code = await runCompanion(
+    ["task", "boom", "--profile", "kimi", "--background"],
+    deps,
+  );
+  assert.equal(code, 1, "spawn failure must exit 1");
+  const jobs = listJobs(stateDir);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].status, "failed", "job must be finalized failed, not left queued");
+  assert.equal(jobs[0].errorKind, "spawn");
+  assert.match(jobs[0].error, /EAGAIN/);
+  assert.match(out.join("\n"), /EAGAIN/);
+});
+
+test("F3: background spawn throw with --json emits the failed result projection", async () => {
+  const { deps, stateDir } = setup();
+  const lines = [];
+  deps.out = (line) => lines.push(line);
+  deps.workerSpawnImpl = () => {
+    throw new Error("spawn ENOMEM");
+  };
+  const code = await runCompanion(
+    ["task", "boom", "--profile", "kimi", "--background", "--json"],
+    deps,
+  );
+  assert.equal(code, 1);
+  const payload = JSON.parse(lines.join("\n"));
+  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.errorKind, "spawn");
+  assert.match(payload.error, /ENOMEM/);
+  assert.equal(listJobs(stateDir)[0].status, "failed");
+});
+
 test("task without profile or default fails with guidance, creates no job", async () => {
   const { deps, out, stateDir } = setup();
   const code = await runCompanion(["task", "hi"], deps);

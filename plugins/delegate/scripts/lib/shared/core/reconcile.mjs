@@ -57,7 +57,11 @@ export function reconcileDeadPids(stateDir, deps = {}) {
       reconciled.push(job.id);
       continue;
     }
-    if (job.status !== "running" || !pid) continue;
+    // F3:queued job 也要 cover。background spawn 後 worker-entry 會先 stamp
+    // 自己的 pid;若 launcher 在 markJobRunning 之前就崩潰,job 停在 "queued"
+    // 但帶了一個死 pid → 視同 running 死 pid 一併 finalize。無 pid 的 queued
+    // (剛寫入、worker 尚未 stamp)仍 continue,不誤殺正常排隊中的 job。
+    if ((job.status !== "running" && job.status !== "queued") || !pid) continue;
     if (isAlive(pid)) continue;
     if (
       finalizeJob(stateDir, job.id, {

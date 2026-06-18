@@ -165,6 +165,55 @@ test("lock-repair does not resurrect half-pruned job (json deleted, lock still p
   assert.equal(readJob(s, j.id), null); // job.json must not have been recreated
 });
 
+// ─── F3: queued job with a dead STAMPED pid → reconciled to failed ───────────
+// worker-entry stamps its own pid the instant it starts (before markJobRunning).
+// If the launcher crashes after that stamp but before markJobRunning, the job is
+// stuck "queued" with a dead pid. reconcile must finalize it failed (status guard
+// extended from "running" to also cover "queued").
+//
+// mutation criterion: revert the guard to `job.status !== "running"` → the queued
+// branch never enters finalize → reconciled is empty and status stays "queued" → red.
+test("F3: queued job with dead stamped pid is reconciled to failed", () => {
+  const s = tmp();
+  const j = createJobRecord({ engine: "delegate" });
+  createJob(s, j, "p");
+  // Job is still "queued" (createJobRecord default) but carries a stamped dead pid.
+  writeJob(s, { ...readJob(s, j.id), status: "queued", pid: 99999 });
+  const reconciled = reconcileDeadPids(s, { isAlive: () => false });
+  assert.deepEqual(reconciled, [j.id]);
+  const final = readJob(s, j.id);
+  assert.equal(final.status, "failed");
+  assert.match(final.error, /reconciled dead pid/);
+});
+
+// F3: a queued job with NO pid (just written, worker-entry hasn't stamped yet) must
+// be left untouched — this is a normally-queuing job, not a crashed launcher.
+// mutation criterion: drop the `|| !pid` clause → a pid-less queued job would be
+// treated as dead and finalized → reconciled non-empty / status flips → red.
+test("F3: queued job with NO pid is left untouched (normal queuing)", () => {
+  const s = tmp();
+  const j = createJobRecord({ engine: "delegate" });
+  createJob(s, j, "p");
+  // No pid stamped — exactly the window between createJob and worker-entry start.
+  // createJobRecord seeds pid:null, so safePid(null) → null → reconcile's `!pid`
+  // guard fires and the job is left alone.
+  assert.equal(readJob(s, j.id).status, "queued");
+  assert.equal(readJob(s, j.id).pid ?? null, null, "no live pid stamped yet");
+  assert.deepEqual(reconcileDeadPids(s, { isAlive: () => false }), []);
+  assert.equal(readJob(s, j.id).status, "queued");
+});
+
+// F3: a queued job with an ALIVE pid (worker-entry stamped, hasn't reached running
+// yet) must be left untouched — the launcher is alive and will converge it itself.
+test("F3: queued job with an alive pid is left untouched", () => {
+  const s = tmp();
+  const j = createJobRecord({ engine: "delegate" });
+  createJob(s, j, "p");
+  writeJob(s, { ...readJob(s, j.id), status: "queued", pid: process.pid });
+  assert.deepEqual(reconcileDeadPids(s, { isAlive: () => true }), []);
+  assert.equal(readJob(s, j.id).status, "queued");
+});
+
 // Adversarial: garbage lock content (non-object JSON or unknown status) must yield
 // { status: null } from readTerminalLock, and lock-repair must write status "failed"
 // (the ?? "failed" fallback) without crashing.

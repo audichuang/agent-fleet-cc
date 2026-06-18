@@ -43,14 +43,18 @@ export function installCancelForwarder({
       scheduleImpl(() => exitImpl(0), forceExitMs)?.unref?.();
     }
   };
-  proc.once("SIGTERM", handler);
+  // F4:引擎 child 是 detached(自己的 pgid),終端的 SIGINT(Ctrl-C)只送到
+  // foreground companion,不會到引擎 — 不轉發就孤兒化。SIGHUP(終端關閉)同理。
+  // 三個訊號共用同一 handler:kill child group(+ optional forceExit)。
+  const CANCEL_SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
+  for (const sig of CANCEL_SIGNALS) proc.once(sig, handler);
   return {
     onChild(child) {
       childPid = child.pid;
-      if (terminated) killSequence(childPid); // SIGTERM 先於 spawn 到達
+      if (terminated) killSequence(childPid); // signal 先於 spawn 到達
     },
     dispose() {
-      proc.removeListener("SIGTERM", handler);
+      for (const sig of CANCEL_SIGNALS) proc.removeListener(sig, handler);
     },
   };
 }
