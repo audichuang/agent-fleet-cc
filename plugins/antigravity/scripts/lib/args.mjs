@@ -7,6 +7,13 @@
  * @typedef {{ options: Record<string, string | boolean>, positionals: string[] }} ParsedArgs
  */
 
+const FALSY_FLAG_VALUES = new Set(["false", "0", "no", "off", ""]);
+
+function parseBooleanFlagValue(inlineValue) {
+  if (inlineValue === undefined) return true;
+  return !FALSY_FLAG_VALUES.has(String(inlineValue).trim().toLowerCase());
+}
+
 /**
  * Parse argv-style arguments into options and positionals.
  *
@@ -45,7 +52,7 @@ export function parseArgs(argv, schema = {}) {
           options[key] = argv[i] ?? "";
         }
       } else if (booleanSet.has(key)) {
-        options[key] = inlineValue === undefined ? true : inlineValue !== "false";
+        options[key] = parseBooleanFlagValue(inlineValue);
       } else if (inlineValue !== undefined) {
         options[key] = inlineValue;
       } else {

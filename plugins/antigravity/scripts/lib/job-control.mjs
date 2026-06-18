@@ -288,11 +288,16 @@ export function resolveCancelableJob(cwd, reference) {
 
   if (activeJobs.length > 1) {
     const ids = activeJobs.map((j) => j.id).join(", ");
-    const exact = reference ? activeJobs.find((job) => job.id === reference) : null;
-    if (exact) return { workspaceRoot, job: exact };
-    throw new Error(
-      `Multiple active antigravity jobs; pass a job id (full id required). Active jobs: ${ids}`
-    );
+    if (!reference) {
+      throw new Error(
+        `Multiple active antigravity jobs; pass a job id. Active jobs: ${ids}`
+      );
+    }
+    const selected = matchJobReference(activeJobs, reference);
+    if (!selected) {
+      throw new Error(`No active job matched "${reference}". Active jobs: ${ids}`);
+    }
+    return { workspaceRoot, job: selected };
   }
 
   const selected = matchJobReference(activeJobs, reference);

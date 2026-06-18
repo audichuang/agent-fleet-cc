@@ -236,7 +236,7 @@ describe('resolveCancelableJob', () => {
     assert.equal(job.id, 'only-active');
   });
 
-  it('requires a job id when multiple active jobs exist', async () => {
+  it('still refuses to guess with no reference when multiple active jobs exist', async () => {
     await seedJob({ id: 'active-one', status: 'running' });
     await seedJob({ id: 'active-two', status: 'queued' });
     assert.throws(
@@ -250,13 +250,24 @@ describe('resolveCancelableJob', () => {
     );
   });
 
-  it('does not accept positional indexes as job ids when multiple active jobs exist', async () => {
-    await seedJob({ id: 'idx-one', status: 'running' });
-    await seedJob({ id: 'idx-two', status: 'queued' });
-    assert.throws(
-      () => resolveCancelableJob(workCwd, '1'),
-      /pass a job id/,
-    );
+  it('accepts a 1-based positional index when multiple active jobs exist', async () => {
+    await seedJob({ id: 'idx-one', status: 'running', updatedAt: '2024-01-01T00:00:01Z' });
+    await seedJob({ id: 'idx-two', status: 'queued', updatedAt: '2024-01-01T00:00:02Z' });
+    const { job } = resolveCancelableJob(workCwd, '1');
+    assert.equal(job.id, 'idx-two');
+  });
+
+  it('accepts a unique substring/prefix when multiple active jobs exist', async () => {
+    await seedJob({ id: 'agy-c1-active', status: 'running' });
+    await seedJob({ id: 'agy-d2-active', status: 'queued' });
+    const { job } = resolveCancelableJob(workCwd, 'c1');
+    assert.equal(job.id, 'agy-c1-active');
+  });
+
+  it('refuses an ambiguous fragment that matches more than one active job', async () => {
+    await seedJob({ id: 'agy-ambiguous-one', status: 'running' });
+    await seedJob({ id: 'agy-ambiguous-two', status: 'queued' });
+    assert.throws(() => resolveCancelableJob(workCwd, 'agy'), /No active job matched/);
   });
 
   it('errors when there are no active jobs', () => {

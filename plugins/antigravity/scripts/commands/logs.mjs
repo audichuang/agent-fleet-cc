@@ -10,6 +10,7 @@
  */
 
 import fs from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 
 import { parseCommandInput } from "../lib/args.mjs";
 import { runAsMain } from "../lib/cli-entry.mjs";
@@ -83,24 +84,31 @@ async function followLog(initialSnapshot, cwd, timeoutMs) {
   let snapshot = initialSnapshot;
   const jobId = snapshot.job.id;
   const deadline = Date.now() + timeoutMs;
-  let { text, offset } = readFullLog(snapshot.workspaceRoot, jobId);
-  if (text) process.stdout.write(text);
+  const decoder = new StringDecoder("utf8");
+  let { bytes, offset } = readFullLogBytes(snapshot.workspaceRoot, jobId);
+  if (bytes.length) process.stdout.write(decoder.write(bytes));
 
+  let timedOut = false;
   while (!TERMINAL_STATUSES.has(snapshot.job.status)) {
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
-      return { snapshot, timedOut: true };
+      timedOut = true;
+      break;
     }
     await sleep(Math.min(POLL_MS, remainingMs));
-    const appended = readAppendedLog(snapshot.workspaceRoot, jobId, offset);
+    const appended = readAppendedBytes(snapshot.workspaceRoot, jobId, offset);
     offset = appended.offset;
-    if (appended.text) process.stdout.write(appended.text);
+    if (appended.bytes.length) process.stdout.write(decoder.write(appended.bytes));
     snapshot = buildSingleJobSnapshot(cwd, jobId);
   }
 
-  const appended = readAppendedLog(snapshot.workspaceRoot, jobId, offset);
-  if (appended.text) process.stdout.write(appended.text);
-  return { snapshot, timedOut: false };
+  if (!timedOut) {
+    const appended = readAppendedBytes(snapshot.workspaceRoot, jobId, offset);
+    if (appended.bytes.length) process.stdout.write(decoder.write(appended.bytes));
+  }
+  const tail = decoder.end();
+  if (tail) process.stdout.write(tail);
+  return { snapshot, timedOut };
 }
 
 async function waitForTerminal(cwd, jobId, timeoutMs) {
@@ -143,30 +151,30 @@ function parseTimeoutMs(value) {
   return parsed;
 }
 
-function readFullLog(workspaceRoot, jobId) {
+function readFullLogBytes(workspaceRoot, jobId) {
   const filePath = resolveJobLogFile(workspaceRoot, jobId);
   try {
     const bytes = fs.readFileSync(filePath);
-    return { text: bytes.toString("utf8"), offset: bytes.length };
+    return { bytes, offset: bytes.length };
   } catch {
-    return { text: "", offset: 0 };
+    return { bytes: Buffer.alloc(0), offset: 0 };
   }
 }
 
-function readAppendedLog(workspaceRoot, jobId, offset) {
+function readAppendedBytes(workspaceRoot, jobId, offset) {
   const filePath = resolveJobLogFile(workspaceRoot, jobId);
   let fd;
   try {
     const stat = fs.statSync(filePath);
-    if (stat.size <= offset) return { text: "", offset: stat.size };
+    if (stat.size <= offset) return { bytes: Buffer.alloc(0), offset: stat.size };
 
     fd = fs.openSync(filePath, "r");
     const length = stat.size - offset;
     const bytes = Buffer.alloc(length);
     fs.readSync(fd, bytes, 0, length, offset);
-    return { text: bytes.toString("utf8"), offset: stat.size };
+    return { bytes, offset: stat.size };
   } catch {
-    return { text: "", offset };
+    return { bytes: Buffer.alloc(0), offset };
   } finally {
     if (fd !== undefined) {
       try {
@@ -180,6 +188,14 @@ function readAppendedLog(workspaceRoot, jobId, offset) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Test seam: prove the streaming decoder reassembles characters split across chunks.
+export function decodeStreamForTest(chunks) {
+  const decoder = new StringDecoder("utf8");
+  let out = "";
+  for (const chunk of chunks) out += decoder.write(Buffer.from(chunk));
+  return out + decoder.end();
 }
 
 export default run;

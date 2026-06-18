@@ -12,7 +12,7 @@
  * with carefully constructed jobs persisted on disk.
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -620,4 +620,14 @@ describe('slash command wrappers', () => {
       );
     });
   }
+});
+
+test("logs --follow does not corrupt multibyte UTF-8 split across a poll boundary", async () => {
+  // unit-level guard on the decoder seam: feed bytes split mid-character
+  const { decodeStreamForTest } = await import("../../plugins/antigravity/scripts/commands/logs.mjs");
+  const full = Buffer.from("héllo 中文 🚀 done\n", "utf8");
+  const cut = 2; // splits the 'é' (0xC3 0xA9) across chunks
+  const out = decodeStreamForTest([full.subarray(0, cut), full.subarray(cut)]);
+  assert.equal(out, "héllo 中文 🚀 done\n");
+  assert.ok(!out.includes("�"), "no replacement char");
 });
