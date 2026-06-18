@@ -215,6 +215,62 @@ function checkAntigravity(deps) {
   };
 }
 
+// Mirrors plugins/delegate/scripts/lib/profiles.mjs PROFILE_NAME_RE — re-declared
+// inline so fleet-doctor stays self-contained (no sibling-plugin import).
+export const PROFILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
+// A top-level `env`, if present, must be a PLAIN object whose every value is a
+// scalar (string|number|boolean|null). An ARRAY env is invalid (Array.isArray
+// rejected); so is any nested object/array value.
+function envIsScalarOnly(parsed) {
+  if (!parsed || parsed.env === undefined || parsed.env === null) return true;
+  if (typeof parsed.env !== "object" || Array.isArray(parsed.env)) return false;
+  for (const value of Object.values(parsed.env)) {
+    if (value !== null && typeof value === "object") return false; // object or array value
+  }
+  return true;
+}
+
+// Enumerate <dataRoot>/profiles/*.json. Returns invalid entries (name+error)
+// and the sorted names of valid profiles. Validation order per spec §5.3:
+//   1) basename regex (skip before parse), 2) JSON parse, 3) env scalar-only.
+function discoverProfiles(dataRoot) {
+  const dir = path.join(dataRoot, "profiles");
+  let entries;
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return { invalid: [], validNames: [] };
+  }
+  const names = entries
+    .filter((n) => n.endsWith(".json"))
+    .map((n) => n.slice(0, -".json".length))
+    .sort();
+
+  const invalid = [];
+  const validNames = [];
+  for (const name of names) {
+    if (!PROFILE_NAME_RE.test(name)) {
+      invalid.push({ name, error: "invalid-name" });
+      continue; // skip before parse
+    }
+    const file = path.join(dir, `${name}.json`);
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      invalid.push({ name, error: "unparseable-json" });
+      continue;
+    }
+    if (!envIsScalarOnly(parsed)) {
+      invalid.push({ name, error: "non-scalar-env" });
+      continue;
+    }
+    validNames.push(name);
+  }
+  return { invalid, validNames };
+}
+
 function resolveDataRoot(env) {
   if (env.DELEGATE_PLUGIN_DATA) return env.DELEGATE_PLUGIN_DATA;
   if (env.CLAUDE_PLUGIN_DATA) return env.CLAUDE_PLUGIN_DATA;
@@ -251,21 +307,48 @@ function checkDelegate(deps) {
     };
   }
 
-  // CLI ok. Profile discovery is added in Task 7; for now report not-ready with
-  // zero profiles as a placeholder (finalized next task).
+  // CLI ok — discover + validate local profiles (no network).
+  const dataRoot = resolveDataRoot(env);
+  const { invalid, validNames } = discoverProfiles(dataRoot);
+  const validProfileCount = validNames.length;
+  const firstValidProfile = validProfileCount ? validNames[0] : null;
+  const anyFiles = invalid.length + validProfileCount > 0;
+
+  if (validProfileCount >= 1) {
+    return {
+      engine: "delegate",
+      status: "ready",
+      authVerified: false,
+      reason: null,
+      summary: `delegate ready (${binaryName} ${cliVersion}, ${validProfileCount} valid profile(s)) — token not checked`,
+      deepFixCommand: null,
+      binaryName,
+      cliRunnable: true,
+      cliVersion,
+      dataRoot,
+      profiles: invalid,
+      validProfileCount,
+      firstValidProfile,
+    };
+  }
+
+  const reason = anyFiles ? "no-valid-profiles" : "no-profiles";
+  const summary = anyFiles
+    ? "claude CLI ready but no valid profiles (fix the listed file(s))"
+    : `claude CLI ready but no profiles found in ${path.join(dataRoot, "profiles")}`;
   return {
     engine: "delegate",
     status: "not-ready",
     authVerified: false,
-    reason: "no-profiles",
-    summary: "delegate CLI ready (profile discovery pending)",
+    reason,
+    summary,
     deepFixCommand: "/delegate:setup",
     binaryName,
     cliRunnable: true,
     cliVersion,
-    dataRoot: resolveDataRoot(env),
-    profiles: [],
-    validProfileCount: 0,
+    dataRoot,
+    profiles: invalid,
+    validProfileCount,
     firstValidProfile: null,
   };
 }

@@ -2,6 +2,8 @@ import "./helpers.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runDoctor } from "../../plugins/fleet/scripts/fleet-doctor.mjs";
+import { writeProfile, makeDataRoot } from "./helpers.mjs";
+import { PROFILE_NAME_RE } from "../../plugins/fleet/scripts/fleet-doctor.mjs";
 
 // A spawn stub that returns "ready" for any binary, so arg-parsing tests
 // are independent of per-engine logic. Returns exit 0 with a version line.
@@ -450,4 +452,105 @@ test("delegate honors DELEGATE_CLAUDE_BIN override for binaryName and spawn", ()
   );
   assert.equal(doc.engines.delegate.binaryName, "/opt/bin/claude");
   assert.equal(lastBin(), "/opt/bin/claude");
+});
+
+// ---------------------------------------------------------------------------
+// Task 7: delegate profile discovery + validation + readiness gate
+// ---------------------------------------------------------------------------
+
+function delegateWith(dataRoot, spawnResult = { status: 0, stdout: "claude 1.2.3\n", stderr: "" }) {
+  return JSON.parse(
+    runDoctor(["--json", "--only", "delegate"], {
+      spawnSyncImpl: () => spawnResult,
+      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: dataRoot },
+    }).stdout,
+  ).engines.delegate;
+}
+
+test("PROFILE_NAME_RE rejects leading . _ - and spaces; accepts normal names", () => {
+  assert.ok(PROFILE_NAME_RE.test("work"));
+  assert.ok(PROFILE_NAME_RE.test("work.prod-1_x"));
+  assert.ok(!PROFILE_NAME_RE.test(".hidden"));
+  assert.ok(!PROFILE_NAME_RE.test("_foo"));
+  assert.ok(!PROFILE_NAME_RE.test("-foo"));
+  assert.ok(!PROFILE_NAME_RE.test("a b"));
+});
+
+test("delegate ready: CLI ok + 1 valid profile (authVerified false)", () => {
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "work", { env: { ANTHROPIC_BASE_URL: "https://x", ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_MODEL: "m" } });
+  const d = delegateWith(dataRoot);
+  assert.equal(d.status, "ready");
+  assert.equal(d.reason, null);
+  assert.equal(d.cliRunnable, true);
+  assert.equal(d.cliVersion, "claude 1.2.3");
+  assert.equal(d.validProfileCount, 1);
+  assert.equal(d.firstValidProfile, "work");
+  assert.deepEqual(d.profiles, []);
+  assert.equal(d.deepFixCommand, null);
+  assert.equal(d.authVerified, false);
+});
+
+test("delegate no-profiles: CLI ok, empty dir", () => {
+  const dataRoot = makeDataRoot();
+  const d = delegateWith(dataRoot);
+  assert.equal(d.status, "not-ready");
+  assert.equal(d.reason, "no-profiles");
+  assert.equal(d.validProfileCount, 0);
+  assert.equal(d.firstValidProfile, null);
+});
+
+test("delegate no-valid-profiles: nested-object env, ARRAY env, unparseable JSON", () => {
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "nested", { env: { X: {} } });
+  writeProfile(dataRoot, "arr", { env: ["x"] }); // an ARRAY env is invalid
+  writeProfile(dataRoot, "broken", "{ not json");
+  const d = delegateWith(dataRoot);
+  assert.equal(d.status, "not-ready");
+  assert.equal(d.reason, "no-valid-profiles");
+  assert.equal(d.validProfileCount, 0);
+  const byName = Object.fromEntries(d.profiles.map((p) => [p.name, p.error]));
+  assert.equal(byName.nested, "non-scalar-env");
+  assert.equal(byName.arr, "non-scalar-env"); // Array.isArray(env) rejected
+  assert.equal(byName.broken, "unparseable-json");
+});
+
+test("delegate invalid-name: leading-underscore basename skipped before parse", () => {
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "_foo", { env: { X: "ok" } }); // would be valid if parsed
+  writeProfile(dataRoot, "good", { env: { X: "ok" } });
+  const d = delegateWith(dataRoot);
+  assert.equal(d.status, "ready"); // "good" is valid
+  assert.equal(d.validProfileCount, 1);
+  assert.equal(d.firstValidProfile, "good");
+  const bad = d.profiles.find((p) => p.name === "_foo");
+  assert.equal(bad.error, "invalid-name");
+});
+
+test("delegate firstValidProfile is basename-sorted", () => {
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "zeta", { env: { X: "ok" } });
+  writeProfile(dataRoot, "alpha", { env: { X: "ok" } });
+  const d = delegateWith(dataRoot);
+  assert.equal(d.firstValidProfile, "alpha");
+  assert.equal(d.validProfileCount, 2);
+});
+
+test("delegate scalar env values (string/number/boolean/null) are valid", () => {
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "scalars", { env: { S: "x", N: 1, B: true, Z: null } });
+  const d = delegateWith(dataRoot);
+  assert.equal(d.status, "ready");
+  assert.equal(d.validProfileCount, 1);
+});
+
+test("delegate default dataRoot derives from env.HOME, not os.homedir()", () => {
+  const fakeHome = makeDataRoot(); // any temp dir path
+  const d = JSON.parse(
+    runDoctor(["--json", "--only", "delegate"], {
+      spawnSyncImpl: () => ({ status: 0, stdout: "claude 1\n", stderr: "" }),
+      env: { HOME: fakeHome }, // no DELEGATE_PLUGIN_DATA / CLAUDE_PLUGIN_DATA
+    }).stdout,
+  ).engines.delegate;
+  assert.equal(d.dataRoot, `${fakeHome}/.claude/plugins/data/delegate`);
 });
