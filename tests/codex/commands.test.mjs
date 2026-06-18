@@ -78,12 +78,41 @@ test("continue is not exposed as a user-facing command", () => {
     "cancel.md",
     "execute-plan.md",
     "handoff.md",
+    "logs.md",
     "rescue.md",
     "result.md",
     "review.md",
     "setup.md",
-    "status.md"
+    "status.md",
+    "task.md",
+    "wait.md"
   ]);
+});
+
+test("task wait and logs commands expose Codex companion runtime entrypoints", () => {
+  const task = read("commands/task.md");
+  const wait = read("commands/wait.md");
+  const logs = read("commands/logs.md");
+
+  assert.match(task, /disable-model-invocation:\s*true/);
+  assert.match(task, /codex-companion\.mjs" task "\$ARGUMENTS"/);
+  assert.match(task, /Return the command stdout verbatim/i);
+  assert.match(task, /Do not paraphrase, summarize, rewrite, or add commentary/i);
+
+  assert.match(wait, /disable-model-invocation:\s*true/);
+  assert.match(wait, /argument-hint:\s*'<job-id>/);
+  assert.match(wait, /codex-companion\.mjs" wait "\$ARGUMENTS"/);
+  assert.match(wait, /requires a job id/i);
+  assert.match(wait, /equivalent to `\/codex:status <job-id> --wait`/i);
+  assert.match(wait, /Present the full command output to the user/i);
+  assert.match(wait, /Do not paraphrase, summarize, rewrite, condense, or add commentary/i);
+
+  assert.match(logs, /disable-model-invocation:\s*true/);
+  assert.match(logs, /codex-companion\.mjs" logs "\$ARGUMENTS"/);
+  assert.match(logs, /delegates to the existing attach implementation/i);
+  assert.match(logs, /Preserve Codex native live log behavior/i);
+  assert.match(logs, /Present the streamed log output to the user as-is/i);
+  assert.match(logs, /Do not paraphrase, summarize, rewrite, condense, or add commentary/i);
 });
 
 test("handoff builds a GPT-5.5 prompt and sends it to Codex by default, with --print to only emit it", () => {

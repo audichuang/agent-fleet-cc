@@ -103,6 +103,8 @@ function printUsage() {
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
+      "  node scripts/codex-companion.mjs wait <job-id> [--json]",
+      "  node scripts/codex-companion.mjs logs [job-id]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
     ].join("\n")
@@ -963,6 +965,28 @@ async function handleStatus(argv) {
   outputResult(renderStatusPayload(report, options.json), options.json);
 }
 
+async function handleWait(argv) {
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"],
+    booleanOptions: ["json"]
+  });
+
+  const cwd = resolveCommandCwd(options);
+  const reference = positionals[0] ?? "";
+  if (!reference) {
+    throw new Error("`wait` requires a job id.");
+  }
+  if (positionals.length !== 1) {
+    throw new Error("`wait` accepts exactly one job id.");
+  }
+
+  const snapshot = await waitForSingleJobSnapshot(cwd, reference, {
+    timeoutMs: options["timeout-ms"],
+    pollIntervalMs: options["poll-interval-ms"]
+  });
+  outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
+}
+
 function handleResult(argv) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
@@ -1237,6 +1261,10 @@ export async function handleAttach(argv, deps = {}) {
   });
 }
 
+export async function handleLogs(argv, deps = {}) {
+  return handleAttach(argv, deps);
+}
+
 async function main() {
   const [subcommand, ...argv] = process.argv.slice(2);
   if (!subcommand || subcommand === "help" || subcommand === "--help") {
@@ -1265,8 +1293,14 @@ async function main() {
     case "status":
       await handleStatus(argv);
       break;
+    case "wait":
+      await handleWait(argv);
+      break;
     case "attach":
       await handleAttach(argv);
+      break;
+    case "logs":
+      await handleLogs(argv);
       break;
     case "result":
       handleResult(argv);

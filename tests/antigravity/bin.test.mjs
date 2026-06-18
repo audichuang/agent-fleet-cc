@@ -99,6 +99,23 @@ export async function run(argv, ctx) {
     assert.match(res.stdout, /image/);
   });
 
+  it('lists wait and logs in top-level help and per-command help', () => {
+    const top = run([]);
+    assert.equal(top.status, 0);
+    assert.match(top.stdout, /wait/);
+    assert.match(top.stdout, /logs/);
+
+    const wait = run(['help', 'wait']);
+    assert.equal(wait.status, 0, wait.stderr);
+    assert.match(wait.stdout, /antigravity-plugin wait/);
+    assert.match(wait.stdout, /--timeout-ms/);
+
+    const logs = run(['logs', '--help']);
+    assert.equal(logs.status, 0, logs.stderr);
+    assert.match(logs.stdout, /antigravity-plugin logs/);
+    assert.match(logs.stdout, /--follow/);
+  });
+
   it('unknown command suggests closest match and exits 2', () => {
     const res = run(['reviw']);
     assert.equal(res.status, 2);

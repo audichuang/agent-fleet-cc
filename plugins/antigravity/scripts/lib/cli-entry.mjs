@@ -8,7 +8,18 @@
  * that block in one place so every command behaves identically.
  */
 
-import { pathToFileURL } from "node:url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+function normalizeMainPath(filePath) {
+  const resolved = path.resolve(filePath);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
 
 /**
  * Invoke `run` when `moduleUrl` is the process entry point.
@@ -19,7 +30,11 @@ import { pathToFileURL } from "node:url";
  */
 export function runAsMain(moduleUrl, run, name) {
   const entry = process.argv[1];
-  if (!entry || moduleUrl !== pathToFileURL(entry).href) return;
+  if (!entry) return;
+
+  const modulePath = normalizeMainPath(fileURLToPath(moduleUrl));
+  const entryPath = normalizeMainPath(entry);
+  if (modulePath !== entryPath) return;
 
   Promise.resolve(run(process.argv.slice(2), { host: "claude-code", cwd: process.cwd() }))
     .then((code) => process.exit(typeof code === "number" ? code : 0))

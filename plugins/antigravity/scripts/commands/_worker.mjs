@@ -29,7 +29,9 @@ async function main() {
     process.exit(2);
   }
 
-  const workspaceRoot = resolveWorkspaceRoot(process.cwd());
+  const workspaceRoot = resolveWorkspaceRoot(
+    process.env.ANTIGRAVITY_WORKSPACE_ROOT ?? process.cwd(),
+  );
   const stored = readJobFile(workspaceRoot, jobId);
   if (!stored) {
     process.stderr.write(`worker: no job file for ${jobId}\n`);

@@ -8,6 +8,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { runAgyPrint, spawnAgyDetached, resolveAgyBin, resolveAgyTimeouts } from "./agent-runtime.mjs";
 import { deriveSummary, trimToNull } from "./text.mjs";
@@ -244,6 +245,7 @@ export async function startBackgroundJob({
   cwd,
   request = null,
   env = process.env,
+  watchdog = true,
 }) {
   const job = await createTrackedJob({
     workspaceRoot,
@@ -261,13 +263,17 @@ export async function startBackgroundJob({
     env,
   });
 
-  const workerPath = new URL("../commands/_worker.mjs", import.meta.url).pathname;
+  const workerPath = fileURLToPath(new URL("../commands/_worker.mjs", import.meta.url));
   const { spawn } = await import("node:child_process");
   const child = spawn(process.execPath, [workerPath, job.id], {
     cwd: workspaceRoot,
     detached: true,
     stdio: ["ignore", "ignore", "ignore"],
-    env: { ...env, [SESSION_ID_ENV]: env[SESSION_ID_ENV] ?? "" },
+    env: {
+      ...env,
+      [SESSION_ID_ENV]: env[SESSION_ID_ENV] ?? "",
+      ANTIGRAVITY_WORKSPACE_ROOT: workspaceRoot,
+    },
   });
   child.unref();
 
@@ -279,14 +285,21 @@ export async function startBackgroundJob({
   // Best-effort: spawn a detached liveness watchdog that reaps this job if the
   // worker dies or wedges, without anyone needing to poll /antigravity:status.
   try {
-    const watchdogPath = new URL("../commands/_watchdog.mjs", import.meta.url).pathname;
-    const watchdog = spawn(process.execPath, [watchdogPath, workspaceRoot, job.id], {
+    if (!watchdog) {
+      return { job, pid: child.pid ?? null };
+    }
+    const watchdogPath = fileURLToPath(new URL("../commands/_watchdog.mjs", import.meta.url));
+    const watchdogChild = spawn(process.execPath, [watchdogPath, workspaceRoot, job.id], {
       cwd: workspaceRoot,
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
-      env: { ...env, [SESSION_ID_ENV]: env[SESSION_ID_ENV] ?? "" },
+      env: {
+        ...env,
+        [SESSION_ID_ENV]: env[SESSION_ID_ENV] ?? "",
+        ANTIGRAVITY_WORKSPACE_ROOT: workspaceRoot,
+      },
     });
-    watchdog.unref();
+    watchdogChild.unref();
   } catch {
     // The watchdog is a safety net; never block job launch on its failure.
   }

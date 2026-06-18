@@ -28,15 +28,19 @@ test("fleet plugin.json has the minimal shape and agrees with the marketplace", 
   assert.equal(entry.version, plugin.version);
 });
 
-test("fleet plugin ships setup.md and fleet-doctor.mjs", () => {
-  assert.ok(
-    fs.existsSync(path.join(REPO_ROOT, "plugins/fleet/commands/setup.md")),
-    "setup.md missing",
-  );
-  assert.ok(
-    fs.existsSync(path.join(REPO_ROOT, "plugins/fleet/scripts/fleet-doctor.mjs")),
-    "fleet-doctor.mjs missing",
-  );
+test("fleet plugin ships setup/doctor/status commands and scripts", () => {
+  for (const command of ["setup.md", "doctor.md", "status.md"]) {
+    assert.ok(
+      fs.existsSync(path.join(REPO_ROOT, "plugins/fleet/commands", command)),
+      `${command} missing`,
+    );
+  }
+  for (const script of ["fleet-doctor.mjs", "fleet-status.mjs"]) {
+    assert.ok(
+      fs.existsSync(path.join(REPO_ROOT, "plugins/fleet/scripts", script)),
+      `${script} missing`,
+    );
+  }
 });
 
 test("setup.md drives the GUIDE-ONLY flow per spec §6", () => {
@@ -86,4 +90,33 @@ test("setup.md drives the GUIDE-ONLY flow per spec §6", () => {
   // consume its re-check output. Pin the absence of the old in-flow phrasings.
   assert.doesNotMatch(text, /rely on its re-check output/i);
   assert.doesNotMatch(text, /delegate-companion\.mjs/);
+});
+
+test("doctor.md and status.md are safe read-only CLI wrappers", () => {
+  const doctor = fs.readFileSync(
+    path.join(REPO_ROOT, "plugins/fleet/commands/doctor.md"),
+    "utf8",
+  );
+  const status = fs.readFileSync(
+    path.join(REPO_ROOT, "plugins/fleet/commands/status.md"),
+    "utf8",
+  );
+
+  assert.match(doctor, /disable-model-invocation:\s*true/);
+  assert.match(doctor, /!\`node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/fleet-doctor\.mjs"`/);
+  assert.doesNotMatch(doctor, /\$ARGUMENTS/);
+  assert.doesNotMatch(doctor, /<<'/);
+  assert.doesNotMatch(doctor, /--raw-args-stdin/);
+  assert.match(doctor, /does not inject user-provided text into a shell command/i);
+  assert.doesNotMatch(doctor, /!\`[^\n]*\$ARGUMENTS/);
+  assert.match(doctor, /does not verify auth/i);
+  assert.match(status, /disable-model-invocation:\s*true/);
+  assert.match(status, /!\`node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/fleet-status\.mjs"`/);
+  assert.doesNotMatch(status, /\$ARGUMENTS/);
+  assert.doesNotMatch(status, /<<'/);
+  assert.doesNotMatch(status, /--raw-args-stdin/);
+  assert.match(status, /does not inject user-provided text into a shell command/i);
+  assert.doesNotMatch(status, /!\`[^\n]*\$ARGUMENTS/);
+  assert.match(status, /compact CLI board/i);
+  assert.match(status, /not a full TUI/i);
 });

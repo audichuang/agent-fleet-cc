@@ -6,7 +6,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const COMMANDS = ["task", "status", "result", "cancel", "setup"];
+const COMMANDS = ["task", "status", "result", "cancel", "setup", "wait", "logs"];
+const COMMAND_FORWARDS = new Map(
+  COMMANDS.map((name) => [
+    name,
+    `node "\${CLAUDE_PLUGIN_ROOT}/scripts/delegate-companion.mjs" ${name}${
+      name === "setup" ? "" : " $ARGUMENTS"
+    }`,
+  ]),
+);
 
 test("every command md exists, has frontmatter, forwards to the companion", () => {
   for (const name of COMMANDS) {
@@ -16,6 +24,7 @@ test("every command md exists, has frontmatter, forwards to the companion", () =
     assert.ok(text.startsWith("---"), `${name}.md missing frontmatter`);
     assert.match(text, /description:/);
     assert.match(text, /delegate-companion\.mjs/);
+    assert.ok(text.includes(COMMAND_FORWARDS.get(name)), `${name}.md wrong forward`);
   }
 });
 

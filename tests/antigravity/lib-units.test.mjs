@@ -72,6 +72,24 @@ describe('args.parseArgs', () => {
     const out = parseArgs(['--scope'], { valueOptions: ['scope'] });
     assert.equal(out.options.scope, '');
   });
+
+  it('supports --flag=value for value options and unknown options', () => {
+    const out = parseArgs(['--scope=branch', '--timeout-ms=-1', '--custom=value'], {
+      valueOptions: ['scope', 'timeout-ms'],
+    });
+    assert.equal(out.options.scope, 'branch');
+    assert.equal(out.options['timeout-ms'], '-1');
+    assert.equal(out.options.custom, 'value');
+  });
+
+  it('parses inline boolean false as false, not a truthy string', () => {
+    const out = parseArgs(['--json=false', '--wait=true', '--follow'], {
+      booleanOptions: ['json', 'wait', 'follow'],
+    });
+    assert.equal(out.options.json, false);
+    assert.equal(out.options.wait, true);
+    assert.equal(out.options.follow, true);
+  });
 });
 
 describe('args.splitRawArgumentString', () => {

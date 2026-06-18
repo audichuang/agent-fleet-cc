@@ -27,6 +27,25 @@ test("--only delegate,codex canonical re-sorts to codex,delegate", () => {
   assert.ok(!("antigravity" in doc.engines), "antigravity must be absent");
 });
 
+test("raw quoted slash arguments are split in-process", () => {
+  const r = runDoctor(["--json --only delegate,codex"], {
+    spawnSyncImpl: readySpawn,
+    env: baseEnv(),
+  });
+  assert.equal(r.exitCode, 0);
+  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "delegate"]);
+});
+
+test("--raw-args-stdin reads safely quoted slash arguments from stdin", () => {
+  const r = runDoctor(["--raw-args-stdin"], {
+    spawnSyncImpl: readySpawn,
+    env: baseEnv(),
+    readStdinImpl: () => "--json --only delegate,codex\n",
+  });
+  assert.equal(r.exitCode, 0);
+  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "delegate"]);
+});
+
 test("--only codex,codex dedupes to a single codex", () => {
   const r = runDoctor(["--json", "--only", "codex,codex"], {
     spawnSyncImpl: readySpawn,
@@ -44,6 +63,31 @@ test("unknown engine under --json writes {error} to stdout and exits 2", () => {
   const r = runDoctor(["--json", "--only", "foo"], {
     spawnSyncImpl: readySpawn,
     env: baseEnv(),
+  });
+  assert.equal(r.exitCode, 2);
+  assert.equal(r.stderr, "");
+  assert.deepEqual(JSON.parse(r.stdout), {
+    error: "unknown engine: foo; allowed: codex,antigravity,delegate",
+  });
+});
+
+test("raw quoted slash usage errors still honor --json", () => {
+  const r = runDoctor(["--json --only foo"], {
+    spawnSyncImpl: readySpawn,
+    env: baseEnv(),
+  });
+  assert.equal(r.exitCode, 2);
+  assert.equal(r.stderr, "");
+  assert.deepEqual(JSON.parse(r.stdout), {
+    error: "unknown engine: foo; allowed: codex,antigravity,delegate",
+  });
+});
+
+test("--raw-args-stdin usage errors still honor --json", () => {
+  const r = runDoctor(["--raw-args-stdin"], {
+    spawnSyncImpl: readySpawn,
+    env: baseEnv(),
+    readStdinImpl: () => "--json --only foo\n",
   });
   assert.equal(r.exitCode, 2);
   assert.equal(r.stderr, "");
@@ -621,6 +665,11 @@ function assertSchemaInvariants(doc) {
   for (const name of doc.checkedEngines) {
     const e = doc.engines[name];
     assert.equal(e.engine, name);
+    assert.equal(e.category, "core");
+    assert.equal(typeof e.fixHint, "string");
+    assert.ok(e.fixHint.length > 0);
+    assert.ok(e.fixCommand === null || typeof e.fixCommand === "string");
+    assert.equal(e.fixCommand, e.deepFixCommand);
     assert.ok(e.status === "ready" || e.status === "not-ready");
     // authVerified is ALWAYS present and ALWAYS false (never true, even when ready).
     assert.equal(e.authVerified, false);

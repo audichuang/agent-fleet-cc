@@ -9,6 +9,64 @@ const CANONICAL = ["codex", "antigravity", "delegate"];
 
 class UsageError extends Error {}
 
+function normalizeArgv(argv, deps = {}) {
+  return argv.flatMap((arg) => {
+    if (arg === "--raw-args-stdin") {
+      const readStdinImpl = deps.readStdinImpl ?? (() => fs.readFileSync(0, "utf8"));
+      return splitRawArgumentString(String(readStdinImpl()));
+    }
+    if (!arg || typeof arg !== "string") return [];
+    const hasRawOptionBoundary = /\s/.test(arg) && /(^|\s)--\S/.test(arg);
+    if (argv.length === 1 || hasRawOptionBoundary) return splitRawArgumentString(arg);
+    return [arg];
+  });
+}
+
+function splitRawArgumentString(raw) {
+  const tokens = [];
+  let current = "";
+  let quote = null;
+  let escaping = false;
+
+  for (const character of raw) {
+    if (escaping) {
+      current += character;
+      escaping = false;
+      continue;
+    }
+    if (quote === "'") {
+      if (character === "'") quote = null;
+      else current += character;
+      continue;
+    }
+    if (character === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      else current += character;
+      continue;
+    }
+    if (character === "'" || character === "\"") {
+      quote = character;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += character;
+  }
+
+  if (escaping) current += "\\";
+  if (current) tokens.push(current);
+  return tokens;
+}
+
 // Parse argv into { json, only }. Throws UsageError on bad input.
 function parseArgs(argv) {
   let json = false;
@@ -355,17 +413,37 @@ function checkDelegate(deps) {
 
 // Per-engine checker — routes to the real recipe or stubs for future tasks.
 export function checkEngine(engine, deps) {
-  if (engine === "codex") return checkCodex(deps);
-  if (engine === "antigravity") return checkAntigravity(deps);
-  if (engine === "delegate") return checkDelegate(deps);
-  return {
+  if (engine === "codex") return withActionMetadata(checkCodex(deps));
+  if (engine === "antigravity") return withActionMetadata(checkAntigravity(deps));
+  if (engine === "delegate") return withActionMetadata(checkDelegate(deps));
+  return withActionMetadata({
     engine,
     status: "not-ready",
     authVerified: false,
     reason: null,
     summary: "stub",
     deepFixCommand: null,
+  });
+}
+
+function withActionMetadata(report) {
+  const fixCommand = report.deepFixCommand ?? null;
+  return {
+    ...report,
+    category: "core",
+    fixCommand,
+    fixHint: buildFixHint(report, fixCommand),
   };
+}
+
+function buildFixHint(report, fixCommand) {
+  if (report.status === "ready") {
+    return "Local prerequisites are present; auth is still not verified by fleet-doctor.";
+  }
+  if (fixCommand) {
+    return `${report.summary} Run ${fixCommand} yourself, then re-run /fleet:doctor.`;
+  }
+  return report.summary;
 }
 
 function renderHuman(doc) {
@@ -392,12 +470,13 @@ function renderHuman(doc) {
 export function runDoctor(argv = [], deps = {}) {
   let parsed;
   let engines;
+  const normalizedArgv = normalizeArgv(argv, deps);
   try {
-    parsed = parseArgs(argv);
+    parsed = parseArgs(normalizedArgv);
     engines = resolveEngines(parsed.only);
   } catch (err) {
     if (err instanceof UsageError) {
-      const wantJson = argv.includes("--json");
+      const wantJson = normalizedArgv.includes("--json");
       if (wantJson) {
         return { stdout: JSON.stringify({ error: err.message }), stderr: "", exitCode: 2 };
       }

@@ -32,13 +32,22 @@ export function parseArgs(argv, schema = {}) {
     }
 
     if (arg.startsWith("--")) {
-      const key = arg.slice(2);
+      const rawKey = arg.slice(2);
+      const eqIndex = rawKey.indexOf("=");
+      const key = eqIndex >= 0 ? rawKey.slice(0, eqIndex) : rawKey;
+      const inlineValue = eqIndex >= 0 ? rawKey.slice(eqIndex + 1) : undefined;
 
       if (valueSet.has(key)) {
-        i += 1;
-        options[key] = argv[i] ?? "";
+        if (inlineValue !== undefined) {
+          options[key] = inlineValue;
+        } else {
+          i += 1;
+          options[key] = argv[i] ?? "";
+        }
       } else if (booleanSet.has(key)) {
-        options[key] = true;
+        options[key] = inlineValue === undefined ? true : inlineValue !== "false";
+      } else if (inlineValue !== undefined) {
+        options[key] = inlineValue;
       } else {
         // Unknown flags with a following value that doesn't look like a flag.
         const next = argv[i + 1];

@@ -286,6 +286,15 @@ export function resolveCancelableJob(cwd, reference) {
     throw new Error("No active antigravity jobs to cancel.");
   }
 
+  if (activeJobs.length > 1) {
+    const ids = activeJobs.map((j) => j.id).join(", ");
+    const exact = reference ? activeJobs.find((job) => job.id === reference) : null;
+    if (exact) return { workspaceRoot, job: exact };
+    throw new Error(
+      `Multiple active antigravity jobs; pass a job id (full id required). Active jobs: ${ids}`
+    );
+  }
+
   const selected = matchJobReference(activeJobs, reference);
   if (!selected) {
     const ids = activeJobs.map((j) => j.id).join(", ");

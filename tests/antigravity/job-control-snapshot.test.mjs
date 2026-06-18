@@ -230,6 +230,35 @@ describe('resolveCancelableJob', () => {
     assert.equal(job.id, 'c1');
   });
 
+  it('selects the only active job when no reference is given', async () => {
+    await seedJob({ id: 'only-active', status: 'running' });
+    const { job } = resolveCancelableJob(workCwd, null);
+    assert.equal(job.id, 'only-active');
+  });
+
+  it('requires a job id when multiple active jobs exist', async () => {
+    await seedJob({ id: 'active-one', status: 'running' });
+    await seedJob({ id: 'active-two', status: 'queued' });
+    assert.throws(
+      () => resolveCancelableJob(workCwd, null),
+      (err) => {
+        assert.match(err.message, /Multiple active antigravity jobs/);
+        assert.match(err.message, /active-one/);
+        assert.match(err.message, /active-two/);
+        return true;
+      },
+    );
+  });
+
+  it('does not accept positional indexes as job ids when multiple active jobs exist', async () => {
+    await seedJob({ id: 'idx-one', status: 'running' });
+    await seedJob({ id: 'idx-two', status: 'queued' });
+    assert.throws(
+      () => resolveCancelableJob(workCwd, '1'),
+      /pass a job id/,
+    );
+  });
+
   it('errors when there are no active jobs', () => {
     assert.throws(() => resolveCancelableJob(workCwd, null), /No active antigravity jobs/);
   });

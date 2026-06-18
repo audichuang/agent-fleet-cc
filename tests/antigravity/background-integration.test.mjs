@@ -42,6 +42,7 @@ describe('background job end-to-end', () => {
       prompt: 'say hi',
       cwd: tempDir,
       request: {},
+      watchdog: false,
     });
     const final = await waitForJob(tempDir, job.id, { pollMs: 100, timeoutMs: 15000 });
     assert.ok(final, 'job should reach a terminal state');

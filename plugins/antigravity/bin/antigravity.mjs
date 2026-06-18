@@ -13,7 +13,7 @@ const SCRIPT_ROOT = process.env.ANTIGRAVITY_SCRIPT_ROOT
   : resolve(ROOT, 'scripts', 'commands');
 
 const INSTALL_URL = 'https://antigravity.google/download';
-const KNOWN = ['setup', 'review', 'adversarial-review', 'rescue', 'task', 'image', 'status', 'result', 'cancel'];
+const KNOWN = ['setup', 'review', 'adversarial-review', 'rescue', 'task', 'image', 'status', 'result', 'cancel', 'wait', 'logs'];
 // Commands that shell out to `agy`. status/result/cancel only read disk state.
 const AGY_REQUIRED = new Set(['setup', 'review', 'adversarial-review', 'rescue', 'task', 'image']);
 
@@ -93,6 +93,15 @@ const COMMAND_HELP = {
     'antigravity-plugin cancel — terminate an active background job.\n\n' +
     'Usage: antigravity-plugin cancel [<job-id>] [flags]\n\n' +
     'Flags: --json, --cwd <path>',
+  wait:
+    'antigravity-plugin wait — wait for a background job to finish.\n\n' +
+    'Usage: antigravity-plugin wait <job-id> [flags]\n\n' +
+    'Flags: --timeout-ms <ms>, --json, --cwd <path>\n' +
+    'Exit codes: 0 completed, 1 failed/missing, 2 cancelled, 10 timeout.',
+  logs:
+    'antigravity-plugin logs — show or follow a persisted job log.\n\n' +
+    'Usage: antigravity-plugin logs <job-id> [flags]\n\n' +
+    'Flags: --follow, --timeout-ms <ms>, --json, --cwd <path>',
 };
 
 const [, , raw, ...rest] = process.argv;
@@ -240,6 +249,8 @@ function printHelp(stream = process.stdout) {
     '  status     List active/recent delegation jobs',
     '  result     Fetch the result of a finished job',
     '  cancel     Cancel a running job',
+    '  wait       Wait for a job to finish',
+    '  logs       Show or follow a persisted job log',
     '',
     'Common flags: --background, --wait, --continue, --conversation <id>, --json',
     'Env: AGY_BIN, ANTIGRAVITY_SCRIPT_ROOT (testing only)',

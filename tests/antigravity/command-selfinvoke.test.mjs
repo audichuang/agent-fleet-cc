@@ -48,6 +48,20 @@ describe('command self-invoke', () => {
     assert.match(res.stderr, /No active antigravity jobs|antigravity:cancel/);
   });
 
+  it('wait with no job id exits 1 with a friendly error when run directly', () => {
+    const res = runCmd('wait');
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /antigravity:wait/);
+    assert.match(res.stderr, /job id/i);
+  });
+
+  it('logs with an unknown job exits 1 with a friendly error when run directly', () => {
+    const res = runCmd('logs', ['missing-job']);
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /antigravity:logs/);
+    assert.match(res.stderr, /No job found|unknown/i);
+  });
+
   it('setup self-invokes and reports an unusable agy without invoking the real one', () => {
     // Use a stub `agy` whose `--version` fails, so probeAgy returns not-ok and
     // setup exits 2 — without falling back to (and OAuth-probing) the real agy.

@@ -38,6 +38,10 @@ commands:
     description: "Render the full output of a completed agy job by id."
   - name: cancel
     description: "Send SIGTERM to a running agy worker by job id."
+  - name: wait
+    description: "Wait for a background agy job to reach a terminal state."
+  - name: logs
+    description: "Show or follow the persisted log for an agy job."
 
 # Auth notes (surfaced via SKILL.md too):
 # - agy 1.0.x is OAuth-only — there is no API-key / headless path. The very

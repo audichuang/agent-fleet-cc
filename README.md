@@ -4,15 +4,16 @@ Four Claude Code plugins, one marketplace:
 
 | Plugin | Commands | What it delegates to |
 |---|---|---|
-| `codex` | `/codex:*` (review, adversarial-review, rescue, execute-plan, handoff, status, result, attach, cancel, setup) | OpenAI Codex (app-server) |
-| `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, image, handoff, status, result, cancel, setup) | Google Antigravity CLI (`agy`) |
-| `delegate` | `/delegate:*` (task, status, result, cancel, setup) | Cheap-model headless Claude Code via settings profiles |
-| `fleet` | `/fleet:setup` | Guided onboarding — pick the engines you want, check readiness, then guide each deep fix to that engine's `/<engine>:setup` (the recommended starting point) |
+| `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server) |
+| `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, image, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
+| `delegate` | `/delegate:*` (task, status, wait, logs, result, cancel, setup) | Cheap-model headless Claude Code via settings profiles |
+| `fleet` | `/fleet:*` (setup, doctor, status) | Guided onboarding plus read-only fleet diagnostics/status |
 
 > **`delegate` v0.2.0** runs on the shared job runtime (`shared/lib/`). Its companion
 > CLI also exposes machine-layer re-entry verbs `wait` and `logs` (with `--json`
-> projections) for editors/orchestrators — these have no slash command. `execute-plan`
-> was removed in v0.2.0; hand a plan to `task` directly (or via `--prompt-file <path>`).
+> projections) for editors/orchestrators, and the same verbs are now exposed as
+> `/delegate:wait` and `/delegate:logs`. `execute-plan` was removed in v0.2.0;
+> hand a plan to `task` directly (or via `--prompt-file <path>`).
 
 ## Install
 
@@ -39,6 +40,8 @@ under `plugins/<name>/`.
 
 ```text
 /fleet:setup        # pick the engines you want; checks readiness for each
+/fleet:doctor       # direct local readiness check; no auth or network verification
+/fleet:status       # read-only CLI board across installed engines; not a full TUI
 ```
 
 `/fleet:setup` asks which engines you want (multi-select), runs one fast,
@@ -48,6 +51,39 @@ agy OAuth, or a `delegate` profile). It is **guide-only**: it never runs another
 command or logs you in for you. A `ready` engine means its binary/profile is
 present, **not** that auth is done — run `/<engine>:setup` once on first use to
 complete login, then re-run `/fleet:setup` to confirm.
+
+`/fleet:doctor` is the non-interactive version of the local prerequisite check.
+`/fleet:status` shells out to each installed engine's own read-only status command,
+normalizes the rows, and prints a compact table with follow-up actions. The slash
+wrappers intentionally run the all-engine view without raw slash arguments so user
+text is never injected into a shell command; the underlying `fleet-doctor.mjs` and
+`fleet-status.mjs` CLIs still support `--only` and `--json` for automation. This is
+not a full terminal UI and does not translate any engine transcript.
+
+### Lifecycle commands
+
+The P0/P1 lifecycle surface is intentionally command-line oriented:
+
+```text
+/codex:task "..." --background
+/codex:wait <job-id>
+/codex:logs <job-id>
+
+/antigravity:task "..." --background
+/antigravity:wait <job-id>
+/antigravity:logs <job-id> [--follow]
+
+/delegate:task "..." --background --profile <name>
+/delegate:wait <job-id>
+/delegate:logs <job-id> [--follow]
+
+/fleet:doctor
+/fleet:status
+```
+
+Codex log streaming delegates to its native attach/live-log path. Antigravity logs
+come from persisted job logs; `agy --print` does not expose a tool-event stream, so
+the plugin does not invent one. Delegate logs expose the shared-runtime event log.
 
 ### Quick start: `delegate`
 
@@ -68,12 +104,14 @@ Then delegate work:
 ```text
 /delegate:task "a complete, self-contained instruction" --profile <name>
 /delegate:status              # list jobs in this workspace
+/delegate:wait <job-id>       # block until a job reaches a terminal state
+/delegate:logs <job-id>       # print job events; add --follow to stream
 /delegate:result <job-id>     # fetch a job's result
 /delegate:cancel <job-id>     # cancel a running job
 ```
 
-Long tasks: add `--background`, then poll `/delegate:status` (or, from an
-orchestrator, use the companion `wait <id>` / `logs <id>` verbs). Flags:
+Long tasks: add `--background`, then poll `/delegate:status`, block with
+`/delegate:wait <id>`, or inspect events with `/delegate:logs <id> --follow`. Flags:
 `--prompt-file <path>`, `--json`, `--model <id>`, `--read-only`,
 `--resume-job <id>|--resume-last`, `--timeout-ms <n>`. Secrets in a profile's `env`
 are read at spawn time and never written to job state.

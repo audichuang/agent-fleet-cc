@@ -28,6 +28,8 @@ All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Cl
 | `status` | Shows a compact table of current and recent jobs (id, kind, phase, health, last progress). Surfaces any pending OAuth URL prominently. |
 | `result` | Prints the final output of a completed job by id. |
 | `cancel` | Sends SIGTERM to a running worker by job id. |
+| `wait`   | Waits for a background job to reach a terminal state. Returns exit code 10 when the wait times out. |
+| `logs`   | Shows or follows the persisted job log. This is stdout/job-log only; agy `--print` does not expose live tool events. |
 
 ## Auth requirements
 
@@ -46,6 +48,8 @@ $antigravity review --base main
 $antigravity rescue investigate why the integration tests started failing after PR #42
 $antigravity task --continue draft a migration plan from Sequelize to Drizzle
 $antigravity status
+$antigravity wait 0193e2c9-... --timeout-ms 600000
+$antigravity logs 0193e2c9-... --follow
 $antigravity result 0193e2c9-...
 ```
 

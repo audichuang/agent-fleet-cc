@@ -80,6 +80,29 @@ afterEach(() => {
   } catch {}
 });
 
+async function seedStoredJob(overrides = {}) {
+  const id = overrides.id ?? 'job' + randomBytes(3).toString('hex');
+  const status = overrides.status ?? 'completed';
+  const now = new Date().toISOString();
+  const job = {
+    id,
+    kind: 'task',
+    title: 'demo',
+    status,
+    phase: overrides.phase ?? status,
+    sessionId: process.env.ANTIGRAVITY_PLUGIN_SESSION_ID,
+    pid: null,
+    createdAt: now,
+    updatedAt: now,
+    logFile: resolveJobLogFile(tempDir, id),
+    ...overrides,
+  };
+  ensureStateDir(tempDir);
+  await upsertJob(tempDir, job);
+  await writeJobFile(tempDir, id, { ...job, request: null, result: null });
+  return job;
+}
+
 // ───────────────────────────── status ─────────────────────────────
 
 describe('/antigravity:status', () => {
@@ -198,6 +221,222 @@ describe('/antigravity:result', () => {
       cap.restore();
     }
     assert.equal(exit, 2);
+  });
+});
+
+// ───────────────────────────── wait ─────────────────────────────
+
+describe('/antigravity:wait', () => {
+  it('emits JSON and exits 0 for a completed job', async () => {
+    const job = await seedStoredJob({
+      id: 'waitdone',
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      summary: 'all done',
+    });
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id, '--json'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 0);
+    const payload = JSON.parse(cap.out.join(''));
+    assert.equal(payload.engine, 'antigravity');
+    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.status, 'completed');
+    assert.equal(payload.summary, 'all done');
+  });
+
+  it('returns 2 for a cancelled job', async () => {
+    const job = await seedStoredJob({
+      id: 'waitcancelled',
+      status: 'cancelled',
+      completedAt: new Date().toISOString(),
+    });
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id, '--json'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 2);
+    assert.equal(JSON.parse(cap.out.join('')).status, 'cancelled');
+  });
+
+  it('returns 10 when timeout expires before the job reaches terminal state', async () => {
+    const job = await seedStoredJob({
+      id: 'waitrunning',
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    });
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id, '--timeout-ms', '1', '--json'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 10);
+    const payload = JSON.parse(cap.out.join(''));
+    assert.equal(payload.engine, 'antigravity');
+    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.status, 'running');
+    assert.equal(payload.timedOut, true);
+  });
+
+  it('rejects invalid and missing timeout values', async () => {
+    const job = await seedStoredJob({
+      id: 'waitbadtimeout',
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    });
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
+    for (const args of [
+      [job.id, '--timeout-ms', 'abc'],
+      [job.id, '--timeout-ms'],
+      [job.id, '--timeout-ms', '-1'],
+      [job.id, '--timeout-ms=-1'],
+    ]) {
+      const cap = captureStdio();
+      let exit;
+      try {
+        exit = await run(args, { cwd: tempDir });
+      } finally {
+        cap.restore();
+      }
+      assert.equal(exit, 1);
+      assert.match(cap.err.join(''), /antigravity:wait/);
+      assert.match(cap.err.join(''), /--timeout-ms/);
+    }
+  });
+});
+
+// ───────────────────────────── logs ─────────────────────────────
+
+describe('/antigravity:logs', () => {
+  it('prints the persisted job log without follow', async () => {
+    const job = await seedStoredJob({ id: 'logdone', status: 'completed' });
+    appendJobLog(tempDir, job.id, 'first persisted line');
+    appendJobLog(tempDir, job.id, 'second persisted line');
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 0);
+    const text = cap.out.join('');
+    assert.match(text, /first persisted line/);
+    assert.match(text, /second persisted line/);
+  });
+
+  it('emits JSON with engine, job id, status, and log', async () => {
+    const job = await seedStoredJob({ id: 'logjson', status: 'failed' });
+    appendJobLog(tempDir, job.id, 'failure details');
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id, '--json'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 0);
+    const payload = JSON.parse(cap.out.join(''));
+    assert.equal(payload.engine, 'antigravity');
+    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.status, 'failed');
+    assert.match(payload.log, /failure details/);
+  });
+
+  it('follows an already-terminal job log and exits cleanly', async () => {
+    const job = await seedStoredJob({ id: 'logfollow', status: 'completed' });
+    appendJobLog(tempDir, job.id, 'already terminal log');
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id, '--follow'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 0);
+    assert.match(cap.out.join(''), /already terminal log/);
+  });
+
+  it('returns 1 with a friendly error when the job is unknown', async () => {
+    const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run(['missing-job'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 1);
+    assert.match(cap.err.join(''), /antigravity:logs/);
+    assert.match(cap.err.join(''), /No job found/);
+  });
+
+  it('follow json emits current log and exits 10 when timeout expires before terminal state', async () => {
+    const job = await seedStoredJob({
+      id: 'logfollowtimeout',
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    });
+    appendJobLog(tempDir, job.id, 'still running');
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id, '--follow', '--json', '--timeout-ms', '1'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 10);
+    const payload = JSON.parse(cap.out.join(''));
+    assert.equal(payload.engine, 'antigravity');
+    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.status, 'running');
+    assert.equal(payload.timedOut, true);
+    assert.match(payload.log, /still running/);
+  });
+
+  it('rejects invalid timeout values in --flag=value form', async () => {
+    const job = await seedStoredJob({
+      id: 'logbadtimeout',
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    });
+    appendJobLog(tempDir, job.id, 'still running');
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([job.id, '--follow', '--json', '--timeout-ms=-1'], { cwd: tempDir });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 1);
+    assert.match(cap.err.join(''), /antigravity:logs/);
+    assert.match(cap.err.join(''), /--timeout-ms/);
   });
 });
 
@@ -365,4 +604,20 @@ describe('job-helpers.createTrackedJob', () => {
     const logPath = resolveJobLogFile(tempDir, job.id);
     assert.ok(fs.existsSync(logPath));
   });
+});
+
+// ───────────────────────────── slash wrappers ─────────────────────────────
+
+describe('slash command wrappers', () => {
+  for (const name of ['wait', 'logs']) {
+    it(`ships /antigravity:${name} wrapper`, () => {
+      const file = path.resolve(process.cwd(), `plugins/antigravity/commands/${name}.md`);
+      const text = fs.readFileSync(file, 'utf8');
+      assert.match(text, /disable-model-invocation: true/);
+      assert.ok(
+        text.includes(`node "\${CLAUDE_PLUGIN_ROOT}/scripts/commands/${name}.mjs"`),
+        text,
+      );
+    });
+  }
 });
