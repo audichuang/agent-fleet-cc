@@ -31,6 +31,12 @@
       "source": "./plugins/delegate",
       "description": "Delegate execution tasks to cheap-model headless Claude Code via settings profiles",
       "version": "0.2.0"
+    },
+    {
+      "name": "fleet",
+      "source": "./plugins/fleet",
+      "description": "Guided onboarding for the agent-fleet engines — pick the ones you want and fix only those.",
+      "version": "0.1.0"
     }
   ]
 }

@@ -7,6 +7,7 @@ Three Claude Code plugins, one marketplace:
 | `codex` | `/codex:*` (review, adversarial-review, rescue, execute-plan, handoff, status, result, attach, cancel, setup) | OpenAI Codex (app-server) |
 | `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, image, handoff, status, result, cancel, setup) | Google Antigravity CLI (`agy`) |
 | `delegate` | `/delegate:*` (task, status, result, cancel, setup) | Cheap-model headless Claude Code via settings profiles |
+| `fleet` | `/fleet:setup` | Guided onboarding — pick the engines you want, check readiness, then guide each deep fix to that engine's `/<engine>:setup` (the recommended starting point) |
 
 > **`delegate` v0.2.0** runs on the shared job runtime (`shared/lib/`). Its companion
 > CLI also exposes machine-layer re-entry verbs `wait` and `logs` (with `--json`
@@ -17,6 +18,13 @@ Three Claude Code plugins, one marketplace:
 
 ```bash
 /plugin marketplace add audichuang/agent-fleet-cc
+
+# Recommended starting point — install fleet and run the guided onboarding:
+/plugin install fleet@agent-fleet
+/fleet:setup
+
+# fleet only *guides* the deep fixes; install the engine plugins you chose so
+# their /<engine>:setup commands exist:
 /plugin install codex@agent-fleet
 /plugin install antigravity@agent-fleet
 /plugin install delegate@agent-fleet
