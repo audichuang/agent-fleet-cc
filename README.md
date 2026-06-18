@@ -1,6 +1,6 @@
 # agent-fleet — one marketplace for AI-agent delegation plugins
 
-Three Claude Code plugins, one marketplace:
+Four Claude Code plugins, one marketplace:
 
 | Plugin | Commands | What it delegates to |
 |---|---|---|
@@ -34,6 +34,20 @@ Three Claude Code plugins, one marketplace:
 Install only the ones you use. Per-plugin requirements (codex CLI login, agy OAuth,
 Anthropic-compatible endpoint profiles) are documented in each plugin's directory
 under `plugins/<name>/`.
+
+### Quick start: `fleet` (recommended first run)
+
+```text
+/fleet:setup        # pick the engines you want; checks readiness for each
+```
+
+`/fleet:setup` asks which engines you want (multi-select), runs one fast,
+network-free readiness check, then — one decision at a time — explains any gap and
+points you at that engine's own `/<engine>:setup` to fix it (install, `codex login`,
+agy OAuth, or a `delegate` profile). It is **guide-only**: it never runs another
+command or logs you in for you. A `ready` engine means its binary/profile is
+present, **not** that auth is done — run `/<engine>:setup` once on first use to
+complete login, then re-run `/fleet:setup` to confirm.
 
 ### Quick start: `delegate`
 
@@ -78,8 +92,8 @@ This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-pl
 ## Development
 
 ```bash
-npm test               # structure + shared + delegate + antigravity + codex suites (Node >= 22.3)
-npm run test:delegate  # one suite at a time
+npm test               # structure + shared + delegate + antigravity + codex + fleet suites (Node >= 22.3)
+npm run test:delegate  # one suite at a time (also test:fleet, test:codex, …)
 npm run test:e2e       # black-box CLI end-to-end regression for delegate (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
