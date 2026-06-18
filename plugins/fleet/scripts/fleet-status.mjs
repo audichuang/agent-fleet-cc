@@ -157,14 +157,24 @@ function unavailableRow(engine, summary) {
 }
 
 function normalizeStatus(engine, payload) {
-  const jobs = extractJobs(payload);
+  const { jobs, recognized } = extractJobs(payload);
+  if (!recognized) {
+    return {
+      engine,
+      available: true,
+      active: 0,
+      recent: 0,
+      status: "unknown",
+      summary: `${engine}: status JSON in an unrecognized shape; cannot tally jobs`,
+      actions: [`/${engine}:status`],
+    };
+  }
   const activeJobs = jobs.filter((job) => ACTIVE_STATUSES.has(job?.status));
   const recentJobs = jobs.filter((job) => !ACTIVE_STATUSES.has(job?.status));
   const active = activeJobs.length;
   const recent = recentJobs.length;
   const latest = activeJobs[0] ?? recentJobs[0] ?? null;
   const status = active ? "active" : latest?.status ?? "idle";
-  const summary = summarizeRow(engine, active, recent, latest);
 
   return {
     engine,
@@ -172,21 +182,28 @@ function normalizeStatus(engine, payload) {
     active,
     recent,
     status,
-    summary,
+    summary: summarizeRow(engine, active, recent, latest),
     actions: buildActions(engine, latest),
   };
 }
 
 function extractJobs(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== "object") return [];
+  if (Array.isArray(payload)) return { jobs: payload, recognized: true };
+  if (!payload || typeof payload !== "object") return { jobs: [], recognized: false };
+  const hasKnownKeys =
+    Array.isArray(payload.running) ||
+    Array.isArray(payload.recent) ||
+    Array.isArray(payload.jobs) ||
+    payload.latestFinished;
+  if (!hasKnownKeys) return { jobs: [], recognized: false };
   const jobs = [];
   if (Array.isArray(payload.running)) jobs.push(...payload.running);
   if (Array.isArray(payload.recent)) jobs.push(...payload.recent);
+  if (Array.isArray(payload.jobs)) jobs.push(...payload.jobs);
   if (payload.latestFinished && !jobs.some((job) => job?.id === payload.latestFinished?.id)) {
     jobs.push(payload.latestFinished);
   }
-  return jobs;
+  return { jobs, recognized: true };
 }
 
 function jobId(job) {
@@ -208,7 +225,6 @@ function buildActions(engine, job) {
   actions.push(`/${engine}:wait ${id}`);
   if (engine === "codex") {
     actions.push(`/codex:logs ${id}`);
-    actions.push(`/codex:attach ${id}`);
   } else if (engine === "delegate") {
     actions.push(`/delegate:logs ${id} --follow`);
   } else {

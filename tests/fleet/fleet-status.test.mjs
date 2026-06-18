@@ -72,9 +72,59 @@ test("status runs each engine's own status command and normalizes rows", () => {
       ["delegate", true, 1, 1, "active"],
     ],
   );
-  assert.ok(doc.rows[0].actions.includes("/codex:attach codex-active"));
+  assert.ok(doc.rows[0].actions.includes("/codex:logs codex-active"), "logs action present");
+  assert.ok(!doc.rows[0].actions.includes("/codex:attach codex-active"), "attach is redundant, should be absent");
   assert.ok(doc.rows[1].actions.includes("/antigravity:logs agy-done --follow"));
   assert.ok(doc.rows[2].actions.includes("/delegate:logs delegate-active --follow"));
+});
+
+test("an unrecognized status JSON shape becomes an explicit 'unknown' row, not idle", () => {
+  const { doc } = runWith(
+    {
+      codex: { unexpected: true },
+      antigravity: { running: [], recent: [] },
+      delegate: [],
+    },
+    { argv: ["--only", "codex"] },
+  );
+  const row = doc.rows.find((r) => r.engine === "codex");
+  assert.equal(row.status, "unknown");
+  assert.match(row.summary, /unrecognized|unknown/i);
+  assert.notEqual(row.status, "idle");
+});
+
+test("a jobs envelope is recognized and tallied", () => {
+  const { doc } = runWith(
+    {
+      codex: {
+        jobs: [
+          { id: "codex-queued", status: "queued" },
+          { id: "codex-done", status: "completed" },
+        ],
+      },
+      antigravity: { running: [], recent: [] },
+      delegate: [],
+    },
+    { argv: ["--only", "codex"] },
+  );
+  const row = doc.rows.find((r) => r.engine === "codex");
+  assert.equal(row.status, "active");
+  assert.equal(row.active, 1);
+  assert.equal(row.recent, 1);
+});
+
+test("codex actions do not list both logs and attach (same handler)", () => {
+  const { doc } = runWith(
+    {
+      codex: { running: [{ id: "codex-1", status: "running" }], recent: [] },
+      antigravity: { running: [], recent: [] },
+      delegate: [],
+    },
+    { argv: ["--only", "codex"] },
+  );
+  const row = doc.rows.find((r) => r.engine === "codex");
+  assert.ok(row.actions.includes("/codex:logs codex-1"), "logs action present");
+  assert.ok(!row.actions.includes("/codex:attach codex-1"), "attach is redundant with logs");
 });
 
 test("--only canonicalizes engine order and filters spawned commands", () => {
