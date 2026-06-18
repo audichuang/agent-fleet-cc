@@ -554,3 +554,116 @@ test("delegate default dataRoot derives from env.HOME, not os.homedir()", () => 
   ).engines.delegate;
   assert.equal(d.dataRoot, `${fakeHome}/.claude/plugins/data/delegate`);
 });
+
+// ---------------------------------------------------------------------------
+// Task 8: top-level assembly — allReady, --only map filtering, schema invariants
+// ---------------------------------------------------------------------------
+
+function allReadyDoc() {
+  // codex (both probes) + antigravity probe ready; delegate ready needs a valid profile.
+  // antigravity resolves via the bare default; spawn returns status 0 so it is ready.
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "work", { env: { ANTHROPIC_AUTH_TOKEN: "t" } });
+  return JSON.parse(
+    runDoctor(["--json"], {
+      spawnSyncImpl: () => ({ status: 0, stdout: "v 1.0\n", stderr: "" }),
+      existsSyncImpl: () => false, // antigravity falls through to bare "agy", which spawns ok
+      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: dataRoot },
+    }).stdout,
+  );
+}
+
+function allNotReadyDoc() {
+  // Every probe ENOENT (codex/antigravity binary-missing, delegate cli-missing);
+  // delegate dataRoot empty. No engine is ready.
+  const emptyRoot = makeDataRoot();
+  return JSON.parse(
+    runDoctor(["--json"], {
+      spawnSyncImpl: () => ({ error: { code: "ENOENT" }, status: null }),
+      existsSyncImpl: () => false,
+      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: emptyRoot },
+    }).stdout,
+  );
+}
+
+test("allReady is true only when every checked engine is ready", () => {
+  const doc = allReadyDoc();
+  assert.equal(doc.allReady, true);
+  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "delegate"]);
+
+  // Flip delegate to not-ready by withholding profiles.
+  const emptyRoot = makeDataRoot();
+  const doc2 = JSON.parse(
+    runDoctor(["--json"], {
+      spawnSyncImpl: () => ({ status: 0, stdout: "v 1.0\n", stderr: "" }),
+      existsSyncImpl: () => false,
+      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: emptyRoot },
+    }).stdout,
+  );
+  assert.equal(doc2.allReady, false);
+});
+
+test("--only filters the engines map to exactly the checked keys (canonical insertion order)", () => {
+  const doc = JSON.parse(
+    runDoctor(["--json", "--only", "codex,delegate"], {
+      spawnSyncImpl: () => ({ status: 0, stdout: "v 1.0\n", stderr: "" }),
+      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: makeDataRoot() },
+    }).stdout,
+  );
+  assert.deepEqual(doc.checkedEngines, ["codex", "delegate"]);
+  // unsorted: pins the canonical INSERTION order of the engines map keys.
+  assert.deepEqual(Object.keys(doc.engines), ["codex", "delegate"]);
+  assert.ok(!("antigravity" in doc.engines));
+});
+
+function assertSchemaInvariants(doc) {
+  assert.ok(!("schemaVersion" in doc));
+  for (const name of doc.checkedEngines) {
+    const e = doc.engines[name];
+    assert.equal(e.engine, name);
+    assert.ok(e.status === "ready" || e.status === "not-ready");
+    // authVerified is ALWAYS present and ALWAYS false (never true, even when ready).
+    assert.equal(e.authVerified, false);
+    assert.equal(typeof e.summary, "string");
+    assert.ok(e.summary.length > 0);
+    if (e.status === "ready") {
+      assert.equal(e.reason, null);
+      assert.equal(e.deepFixCommand, null);
+    } else {
+      assert.notEqual(e.reason, null);
+      assert.notEqual(e.deepFixCommand, null);
+    }
+    // Per-engine fields present on EVERY verdict (catches undefined regressions).
+    if (name === "codex") assert.equal(typeof e.appServerAvailable, "boolean");
+    if (name === "antigravity") {
+      assert.equal(typeof e.binPath, "string");
+      assert.equal(typeof e.resolvedFrom, "string");
+    }
+    if (name === "delegate") assert.equal(typeof e.cliRunnable, "boolean");
+  }
+}
+
+test("schema invariants hold for an all-ready doc (ready branch — authVerified still false)", () => {
+  const doc = allReadyDoc();
+  assert.equal(doc.allReady, true);
+  assertSchemaInvariants(doc);
+});
+
+test("schema invariants hold for an all-not-ready doc (not-ready branch — proves 'iff' both ways)", () => {
+  const doc = allNotReadyDoc();
+  assert.equal(doc.allReady, false);
+  // Every engine is not-ready, so the reason/deepFixCommand-non-null leg runs.
+  for (const name of doc.checkedEngines) {
+    assert.equal(doc.engines[name].status, "not-ready");
+  }
+  assertSchemaInvariants(doc);
+});
+
+test("exit code is 0 for a completed not-ready run", () => {
+  const r = runDoctor(["--json", "--only", "codex"], {
+    spawnSyncImpl: () => ({ error: { code: "ENOENT" }, status: null }),
+    env: { HOME: "/tmp/fleet-noexist-home" },
+  });
+  assert.equal(r.exitCode, 0);
+  assert.equal(JSON.parse(r.stdout).engines.codex.status, "not-ready");
+});
