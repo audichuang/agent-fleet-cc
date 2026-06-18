@@ -1011,6 +1011,22 @@ Steps:
     assert.equal(a.version, null);
     assert.equal(a.deepFixCommand, "/antigravity:setup");
   });
+
+  test("antigravity version-failed: resolved real path but spawn ENOENT (NOT binary-missing)", () => {
+    // existsSync resolved /a/agy, but the spawn ENOENTs. Because a real path was
+    // resolved (resolvedFrom !== "default"), this is version-failed, NOT binary-missing.
+    const { a } = onlyAgy({
+      env: { PATH: "/a" },
+      exists: ["/a/agy"],
+      spawnByBin: { "/a/agy": { error: { code: "ENOENT" }, status: null } },
+    });
+    assert.equal(a.status, "not-ready");
+    assert.equal(a.reason, "version-failed");
+    assert.equal(a.resolvedFrom, "PATH");
+    assert.equal(a.onPath, true);
+    assert.equal(a.binPath, "/a/agy");
+    assert.equal(a.deepFixCommand, "/antigravity:setup");
+  });
   ```
 
 - [ ] Run the test to verify it FAILS (antigravity is still the stub branch; `resolveAgyBin` not exported):
@@ -1070,11 +1086,15 @@ Steps:
         installUrl: ANTIGRAVITY_INSTALL_URL,
       };
     }
-    // binary-missing only when no candidate existed (default) AND the bare spawn ENOENT'd.
-    const reason = probe.found ? "version-failed" : "binary-missing";
-    const summary = probe.found
-      ? `agy found (${binPath}) but '${binPath} --version' failed`
-      : `agy not found — install from ${ANTIGRAVITY_INSTALL_URL}`;
+    // binary-missing ONLY when nothing was resolved on disk (resolvedFrom "default")
+    // AND the bare spawn ENOENT'd. A resolved real path (AGY_BIN/PATH/home-fallback)
+    // that fails to launch is version-failed, not missing — existsSync already proved
+    // the file was there, so the gap is "present but broken," matching §5.3's rule.
+    const missing = resolvedFrom === "default" && !probe.found;
+    const reason = missing ? "binary-missing" : "version-failed";
+    const summary = missing
+      ? `agy not found — install from ${ANTIGRAVITY_INSTALL_URL}`
+      : `agy found (${binPath}) but '${binPath} --version' failed`;
     return {
       engine: "antigravity",
       status: "not-ready",
@@ -1085,7 +1105,7 @@ Steps:
       binaryName: "agy",
       binPath,
       resolvedFrom,
-      onPath: probe.found,
+      onPath: !missing,
       version: null,
       installUrl: ANTIGRAVITY_INSTALL_URL,
     };
