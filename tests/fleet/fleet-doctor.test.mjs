@@ -396,3 +396,58 @@ test("antigravity version-failed: resolved real path but spawn ENOENT (NOT binar
   assert.equal(a.binPath, "/a/agy");
   assert.equal(a.deepFixCommand, "/antigravity:setup");
 });
+
+// ---------------------------------------------------------------------------
+// Task 6: checkDelegate — DELEGATE_CLAUDE_BIN override, cliRunnable
+// ---------------------------------------------------------------------------
+
+function onlyDelegate(spawnResult, env = {}) {
+  const spawn = (bin, args, opts) => {
+    onlyDelegate._lastBin = bin;
+    return spawnResult;
+  };
+  return {
+    doc: JSON.parse(
+      runDoctor(["--json", "--only", "delegate"], {
+        spawnSyncImpl: spawn,
+        env: { HOME: "/tmp/fleet-noexist-home", ...env },
+      }).stdout,
+    ),
+    lastBin: () => onlyDelegate._lastBin,
+  };
+}
+
+test("delegate cli-missing (ENOENT) → cliRunnable false", () => {
+  const { doc } = onlyDelegate({ error: { code: "ENOENT" }, status: null });
+  const d = doc.engines.delegate;
+  assert.equal(d.status, "not-ready");
+  assert.equal(d.reason, "cli-missing");
+  assert.equal(d.cliRunnable, false);
+  assert.equal(d.cliVersion, null);
+  assert.equal(d.binaryName, "claude");
+  assert.equal(d.authVerified, false);
+  assert.equal(d.deepFixCommand, "/delegate:setup");
+  // §5.4 delegate field shape must stay uniform even on the cli-missing leg
+  // (no profile discovery happens, but the keys must be present).
+  assert.equal(typeof d.dataRoot, "string");
+  assert.ok(Array.isArray(d.profiles));
+  assert.equal(d.validProfileCount, 0);
+  assert.equal(d.firstValidProfile, null);
+});
+
+test("delegate cli-version-failed (status 1) → cliRunnable false, cliVersion null", () => {
+  const { doc } = onlyDelegate({ status: 1, stdout: "", stderr: "x" });
+  const d = doc.engines.delegate;
+  assert.equal(d.reason, "cli-version-failed");
+  assert.equal(d.cliRunnable, false);
+  assert.equal(d.cliVersion, null);
+});
+
+test("delegate honors DELEGATE_CLAUDE_BIN override for binaryName and spawn", () => {
+  const { doc, lastBin } = onlyDelegate(
+    { error: { code: "ENOENT" }, status: null },
+    { DELEGATE_CLAUDE_BIN: "/opt/bin/claude" },
+  );
+  assert.equal(doc.engines.delegate.binaryName, "/opt/bin/claude");
+  assert.equal(lastBin(), "/opt/bin/claude");
+});

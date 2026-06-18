@@ -215,11 +215,66 @@ function checkAntigravity(deps) {
   };
 }
 
+function resolveDataRoot(env) {
+  if (env.DELEGATE_PLUGIN_DATA) return env.DELEGATE_PLUGIN_DATA;
+  if (env.CLAUDE_PLUGIN_DATA) return env.CLAUDE_PLUGIN_DATA;
+  const home = env.HOME ?? process.env.HOME ?? "";
+  return path.join(home, ".claude", "plugins", "data", "delegate");
+}
+
+function checkDelegate(deps) {
+  const env = deps.env ?? process.env;
+  const binaryName = env.DELEGATE_CLAUDE_BIN ?? "claude";
+  const probe = probeBinary(binaryName, deps);
+  const cliRunnable = probe.ok;
+  const cliVersion = probe.ok ? probe.version : null;
+
+  if (!cliRunnable) {
+    const reason = probe.found ? "cli-version-failed" : "cli-missing";
+    const summary = probe.found
+      ? `${binaryName} found but '--version' failed`
+      : `${binaryName} CLI not found — delegate needs the claude CLI`;
+    return {
+      engine: "delegate",
+      status: "not-ready",
+      authVerified: false,
+      reason,
+      summary,
+      deepFixCommand: "/delegate:setup",
+      binaryName,
+      cliRunnable: false,
+      cliVersion: null,
+      dataRoot: resolveDataRoot(env),
+      profiles: [],
+      validProfileCount: 0,
+      firstValidProfile: null,
+    };
+  }
+
+  // CLI ok. Profile discovery is added in Task 7; for now report not-ready with
+  // zero profiles as a placeholder (finalized next task).
+  return {
+    engine: "delegate",
+    status: "not-ready",
+    authVerified: false,
+    reason: "no-profiles",
+    summary: "delegate CLI ready (profile discovery pending)",
+    deepFixCommand: "/delegate:setup",
+    binaryName,
+    cliRunnable: true,
+    cliVersion,
+    dataRoot: resolveDataRoot(env),
+    profiles: [],
+    validProfileCount: 0,
+    firstValidProfile: null,
+  };
+}
+
 // Per-engine checker — routes to the real recipe or stubs for future tasks.
 export function checkEngine(engine, deps) {
   if (engine === "codex") return checkCodex(deps);
   if (engine === "antigravity") return checkAntigravity(deps);
-  // Other engines stubbed until their tasks.
+  if (engine === "delegate") return checkDelegate(deps);
   return {
     engine,
     status: "not-ready",
