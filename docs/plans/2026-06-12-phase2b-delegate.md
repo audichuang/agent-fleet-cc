@@ -247,7 +247,7 @@ git commit -m "feat(shared): promote cancelJob (CAS-first, two-stage kill contra
 - Modify: `.github/workflows/ci.yml`(加 drift step)
 - 產物: `plugins/delegate/scripts/lib/shared/`(首個 vendored 副本)
 
-- [ ] **Step 1: 寫 sync 腳本**
+- [x] **Step 1: 寫 sync 腳本**
 
 ```js
 // scripts/sync-shared.mjs
@@ -277,7 +277,7 @@ for (const target of TARGETS) {
 }
 ```
 
-- [ ] **Step 2: 接上 npm script 並執行**
+- [x] **Step 2: 接上 npm script 並執行**
 
 `package.json` scripts 加一行:
 
@@ -288,7 +288,7 @@ for (const target of TARGETS) {
 Run: `npm run sync-shared && ls plugins/delegate/scripts/lib/shared/core/`
 Expected: 印出 synced 行;ls 列出 job.mjs、events.mjs、state-store.mjs、reconcile.mjs、env.mjs、wait.mjs、job-control.mjs
 
-- [ ] **Step 3: CI 加 drift step**
+- [x] **Step 3: CI 加 drift step**
 
 `.github/workflows/ci.yml` 在 `- run: npm test` 之前插入:
 
@@ -297,7 +297,7 @@ Expected: 印出 synced 行;ls 列出 job.mjs、events.mjs、state-store.mjs、r
         run: npm run sync-shared && git diff --exit-code
 ```
 
-- [ ] **Step 4: 驗證 drift check 邏輯(本地模擬)**
+- [x] **Step 4: 驗證 drift check 邏輯(本地模擬)**
 
 ```bash
 echo "// drift" >> plugins/delegate/scripts/lib/shared/core/job.mjs
@@ -306,7 +306,7 @@ npm run sync-shared && git diff --exit-code -- plugins/delegate/scripts/lib/shar
 
 Expected: `DRIFT-CHECK-OK`(sync 把手改覆蓋回去,diff 乾淨)。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/sync-shared.mjs package.json .github/workflows/ci.yml plugins/delegate/scripts/lib/shared/
@@ -321,7 +321,7 @@ git commit -m "feat(vendor): sync-shared script + CI drift check + first vendore
 - Create: `plugins/delegate/scripts/lib/adapter.mjs`
 - Test: `tests/delegate/adapter.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/delegate/adapter.test.mjs
@@ -424,12 +424,12 @@ test("resumeArgs + recursion marker + paths", () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/delegate/adapter.test.mjs`
 Expected: FAIL — `Cannot find module .../adapter.mjs`
 
-- [ ] **Step 3: 實作**
+- [x] **Step 3: 實作**
 
 ```js
 // plugins/delegate/scripts/lib/adapter.mjs
@@ -554,12 +554,12 @@ export function makeClaudeAdapter() {
 
 注意:`parseEvent` 的 session 分支對 `type:"result"` 行讓位給 result 分支(result 行也帶 session_id,但 result 事件優先)— 測試的兩個案例已鎖此行為。
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/delegate/adapter.test.mjs`
 Expected: PASS(8 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugins/delegate/scripts/lib/adapter.mjs tests/delegate/adapter.test.mjs
@@ -574,7 +574,7 @@ git commit -m "feat(delegate): ClaudeAdapter — engine knowledge behind the Pro
 - Modify: `tests/delegate/fake-claude.mjs`(擴充;**既有模式 success/noise/fail/hang/early-exit/env-echo 保留**,companion 測試還在用)
 - Create: `tests/delegate/delegate.conformance.test.mjs`
 
-- [ ] **Step 1: 擴充 fake-claude(追加十劇本模式)**
+- [x] **Step 1: 擴充 fake-claude(追加十劇本模式)**
 
 在既有 switch/分支之後追加以下模式(沿用既有 `out()`/`sessionId` helper;conformance 斷言值必須逐字對齊 `tests/shared/conformance/conformance.mjs`):
 
@@ -627,7 +627,7 @@ if (mode === "conf-grandchild") {
 
 (若既有檔案結構是先讀完 stdin 再分支,把 `conf-instant-exit` 跟既有 `early-exit` 一樣放在 stdin 讀取之前;其餘 conf 模式在 stdin 讀完後分支。grandchild 模式需要檔案是 top-level await 可用的 .mjs——已是。)
 
-- [ ] **Step 2: 寫 conformance 接線**
+- [x] **Step 2: 寫 conformance 接線**
 
 ```js
 // tests/delegate/delegate.conformance.test.mjs
@@ -671,17 +671,17 @@ function makeAdapter({ mode = "ok", resumeSessionId = null } = {}) {
 runConformanceSuite({ makeAdapter });
 ```
 
-- [ ] **Step 3: 跑 conformance 確認十劇本全綠**
+- [x] **Step 3: 跑 conformance 確認十劇本全綠**
 
 Run: `node --test tests/delegate/delegate.conformance.test.mjs`
 Expected: PASS(10 scenarios)。若 scenario 9 的 errorKind 不是 `auth`,真因在 adapter 的 classifyError 對 stderr 樣式不認——修 adapter,不改 conformance。
 
-- [ ] **Step 4: 既有 delegate 測試未被破壞**
+- [x] **Step 4: 既有 delegate 測試未被破壞**
 
 Run: `node --test tests/delegate/claude.test.mjs tests/delegate/companion-task.test.mjs`
 Expected: PASS(舊模式 success/noise/... 仍在,既有測試不受擴充影響)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/delegate/fake-claude.mjs tests/delegate/delegate.conformance.test.mjs
@@ -710,7 +710,7 @@ git commit -m "test(delegate): ClaudeAdapter passes the 10-scenario conformance 
 | `--resume-job <id>` / `--resume-last` | 取代 `--resume-id`(舊名移除);語意不變(讀 source job 的 settingsPath+sessionId) |
 | `--profile/--settings/--timeout-ms` | 不變 |
 
-- [ ] **Step 1: 更新 companion-task 測試至新合約**
+- [x] **Step 1: 更新 companion-task 測試至新合約**
 
 對 `tests/delegate/companion-task.test.mjs` 做以下變更(每筆都對應 spec 條款):
 
@@ -762,12 +762,12 @@ test("--read-only maps to permission-mode default in the spawned argv", async ()
 5. `execute-plan` 的兩個測試此 task 先不動(Task 9 刪)。
 6. 既有行為測試(recursion guard、背景 e2e cancel、env 重建、traversal 防護、owner-only 權限)全部保留——更新路徑斷言後必須照樣綠。
 
-- [ ] **Step 2: 跑更新後測試確認失敗**
+- [x] **Step 2: 跑更新後測試確認失敗**
 
 Run: `node --test tests/delegate/companion-task.test.mjs`
 Expected: FAIL(新旗標未實作、佈局還是平鋪)
 
-- [ ] **Step 3: 寫 worker-entry 並重構 companion 的 task/startJob**
+- [x] **Step 3: 寫 worker-entry 並重構 companion 的 task/startJob**
 
 ```js
 // plugins/delegate/scripts/worker-entry.mjs
@@ -900,12 +900,12 @@ async function startJob({ prompt, flags, env, out, cwd, dataRoot, stateDir, deps
 
 實作細節:`resolveResumeSource` 沿舊邏輯但讀 `flags["resume-job"]`;`readLogTail` 路徑改 `logFilePath`(目錄式);binary 的 DELEGATE_CLAUDE_BIN 改由 adapter 內部讀(`deps.binary` 縫移除——測試經 `DELEGATE_CLAUDE_BIN` env 或 `claudeSpawnImpl` 注入)。`USAGE` 字串同步更新七動詞。
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/delegate/companion-task.test.mjs tests/delegate/adapter.test.mjs`
 Expected: PASS(含背景 e2e:REAL detached worker-entry 跑 fake claude、跨進程 cancel)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugins/delegate/scripts/worker-entry.mjs plugins/delegate/scripts/delegate-companion.mjs tests/delegate/companion-task.test.mjs
@@ -920,7 +920,7 @@ git commit -m "feat(delegate): companion task on shared runtime — prompt-file/
 - Modify: `plugins/delegate/scripts/delegate-companion.mjs`(三個子指令)
 - Modify: `tests/delegate/companion-control.test.mjs`
 
-- [ ] **Step 1: 更新測試**
+- [x] **Step 1: 更新測試**
 
 `companion-control.test.mjs` 的 6 個既有測試更新佈局/前綴斷言(同 Task 6 規則),並新增:
 
@@ -941,12 +941,12 @@ test("result --json emits the unified result projection; cancel --json emits {ok
 });
 ```
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/delegate/companion-control.test.mjs`
 Expected: FAIL(--json 未實作 / import 還指舊 lib)
 
-- [ ] **Step 3: 重構三個子指令**
+- [x] **Step 3: 重構三個子指令**
 
 ```js
 function cmdStatus({ argv, out, stateDir }) {
@@ -982,12 +982,12 @@ function cmdCancel({ argv, out, stateDir }) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/delegate/companion-control.test.mjs`
 Expected: PASS(8 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugins/delegate/scripts/delegate-companion.mjs tests/delegate/companion-control.test.mjs
@@ -1002,7 +1002,7 @@ git commit -m "feat(delegate): status/result/cancel on shared store with unified
 - Modify: `plugins/delegate/scripts/delegate-companion.mjs`(+cmdWait、+cmdLogs、USAGE)
 - Create: `tests/delegate/companion-wait-logs.test.mjs`
 
-- [ ] **Step 1: 寫失敗測試**
+- [x] **Step 1: 寫失敗測試**
 
 ```js
 // tests/delegate/companion-wait-logs.test.mjs
@@ -1036,12 +1036,12 @@ test("wait/logs on unknown job exit 1 with a clear message", async () => {});
 
 (測試骨架照上述意圖寫完整——五個測試都要有真斷言;沿用檔內既有 e2e helper 跑真 detached worker。)
 
-- [ ] **Step 2: 跑測試確認失敗**
+- [x] **Step 2: 跑測試確認失敗**
 
 Run: `node --test tests/delegate/companion-wait-logs.test.mjs`
 Expected: FAIL — unknown command `wait`
 
-- [ ] **Step 3: 實作兩個動詞**
+- [x] **Step 3: 實作兩個動詞**
 
 ```js
 const WAIT_TIMEOUT_EXIT = 10; // 超時不是錯誤:專用碼讓編排者乾淨 re-entry(spec §2.3)
@@ -1093,12 +1093,12 @@ async function cmdLogs({ argv, out, stateDir }) {
 
 (`TERMINAL_STATUSES` 自 `./lib/shared/core/job.mjs` import;switch 加 `case "wait"`/`case "logs"`;USAGE 更新。注意:`logs --follow` 會重印 readEvents 已印過的行嗎?不會——`waitForJob` 的 drain 從 index 0 重數,所以 follow 模式跳過第一段 `for (const e of readEvents(dir))`,直接走 waitForJob 讓它從頭 emit。實作以此為準:`--follow` 時不先靜態印,全部交給 waitForJob 的 onEvent。)
 
-- [ ] **Step 4: 跑測試確認通過**
+- [x] **Step 4: 跑測試確認通過**
 
 Run: `node --test tests/delegate/companion-wait-logs.test.mjs`
 Expected: PASS(5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugins/delegate/scripts/delegate-companion.mjs tests/delegate/companion-wait-logs.test.mjs
@@ -1117,7 +1117,7 @@ git commit -m "feat(delegate): wait/logs re-entry verbs (orchestrator contract �
 - Modify: `plugins/delegate/scripts/lib/render.mjs` + `tests/delegate/render.test.mjs`(欄位適配統一 schema)
 - Modify: `tests/delegate/companion-task.test.mjs`(刪 execute-plan 的 2 個測試)
 
-- [ ] **Step 1: 刪指令與子指令**
+- [x] **Step 1: 刪指令與子指令**
 
 ```bash
 git rm plugins/delegate/commands/execute-plan.md
@@ -1136,7 +1136,7 @@ usage: delegate-companion <command> [...]
   cancel <job-id> [--json]
 ```
 
-- [ ] **Step 2: 刪舊 lib 與舊測試(處置表逐筆)**
+- [x] **Step 2: 刪舊 lib 與舊測試(處置表逐筆)**
 
 ```bash
 git rm plugins/delegate/scripts/lib/args.mjs plugins/delegate/scripts/lib/state.mjs \
@@ -1164,16 +1164,16 @@ console.log(bad.length?bad.join('\n'):'NO-STALE-IMPORTS');"
 
 Expected: `NO-STALE-IMPORTS`
 
-- [ ] **Step 3: render 適配統一 schema**
+- [x] **Step 3: render 適配統一 schema**
 
 `render.mjs`:`job.prompt`/`promptPreview` 改 `job.title`、`resultText` 不變、加 `errorKind` 顯示(failed 行尾 `[auth]` 式標注);`render.test.mjs` 對應更新(兩個測試,改用 `createJobRecord` 形狀的 job 物件)。
 
-- [ ] **Step 4: companion-task 移除 execute-plan 測試後全套跑**
+- [x] **Step 4: companion-task 移除 execute-plan 測試後全套跑**
 
 Run: `node --test tests/delegate/*.test.mjs`
 Expected: 全 PASS(13 檔 → 9 檔:adapter、conformance、companion-task、companion-control、companion-wait-logs、profiles、render、plugin-structure、helpers 不算)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A plugins/delegate tests/delegate
@@ -1191,7 +1191,7 @@ git commit -m "feat(delegate)!: drop execute-plan and legacy lib — runtime ful
 - Modify: `tests/delegate/plugin-structure.test.mjs`
 - Modify: `tests/fleet-structure.test.mjs`(僅當紅;最小更新)
 
-- [ ] **Step 1: 更新 plugin-structure 測試**
+- [x] **Step 1: 更新 plugin-structure 測試**
 
 - 「every command md exists」清單移除 execute-plan
 - 「task and execute-plan document the no-profile selection flow」改為只驗 task.md
@@ -1200,7 +1200,7 @@ git commit -m "feat(delegate)!: drop execute-plan and legacy lib — runtime ful
 Run: `node --test tests/delegate/plugin-structure.test.mjs`
 Expected: FAIL(md 還是舊的)
 
-- [ ] **Step 2: 重寫 task.md**
+- [x] **Step 2: 重寫 task.md**
 
 frontmatter `argument-hint` 更新:
 
@@ -1210,14 +1210,14 @@ frontmatter `argument-hint` 更新:
 
 內文:Profile selection 一節原樣保留(0.1.1 的流程,spec §2.5 裁定不下沉);移除所有 execute-plan 參照;補一句「長任務建議 `--background`,之後用 `/delegate:status` 或讓編排者用 companion 的 `wait <id>` 等待」。
 
-- [ ] **Step 3: 版號 bump 兩處**
+- [x] **Step 3: 版號 bump 兩處**
 
 `plugins/delegate/.claude-plugin/plugin.json` 與 `.claude-plugin/marketplace.json` 的 delegate 版號都改 `0.2.0`。
 
 Run: `node --test tests/delegate/plugin-structure.test.mjs tests/fleet-structure.test.mjs`
 Expected: PASS。fleet-structure 若因 execute-plan/版號紅,做最小對應更新並在 commit message 引 spec §4。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add plugins/delegate/commands plugins/delegate/.claude-plugin .claude-plugin/marketplace.json tests/delegate/plugin-structure.test.mjs tests/fleet-structure.test.mjs
@@ -1230,7 +1230,7 @@ git commit -m "feat(delegate): v0.2.0 — task.md machine-contract flags, drop e
 
 **Files:** Modify: 本 plan 檔(勾 checkbox)
 
-- [ ] **Step 1: drift check 本地重演**
+- [x] **Step 1: drift check 本地重演**
 
 ```bash
 npm run sync-shared && git diff --exit-code && echo DRIFT-OK
@@ -1238,7 +1238,7 @@ npm run sync-shared && git diff --exit-code && echo DRIFT-OK
 
 Expected: `DRIFT-OK`(Task 1/2 升入 shared 的 args/job-control 已被 sync 帶進 vendored 副本;若 diff 非空表示有人手改了 vendored——修 source 重 sync)。
 
-- [ ] **Step 2: 全套 npm test**
+- [x] **Step 2: 全套 npm test**
 
 ```bash
 npm test > /tmp/phase2b-final.txt 2>&1; echo "exit=$?"; node -e "const s=require('fs').readFileSync('/tmp/phase2b-final.txt','utf8');for(const l of s.split('\n'))if(/^# (tests|pass|fail)/.test(l.trim()))console.log(l.trim())"
@@ -1246,7 +1246,7 @@ npm test > /tmp/phase2b-final.txt 2>&1; echo "exit=$?"; node -e "const s=require
 
 Expected: exit=0,五套全綠;codex/antigravity pass 數與 Task 0 基線完全一致(它們一個檔都不准動)。
 
-- [ ] **Step 3: 鐵律終驗**
+- [x] **Step 3: 鐵律終驗**
 
 ```bash
 git diff main..HEAD --stat -- plugins/codex plugins/antigravity tests/codex tests/antigravity | head -3
@@ -1254,14 +1254,14 @@ git diff main..HEAD --stat -- plugins/codex plugins/antigravity tests/codex test
 
 Expected: 空輸出。
 
-- [ ] **Step 4: 勾掉本 plan 全部 checkbox 並 commit**
+- [x] **Step 4: 勾掉本 plan 全部 checkbox 並 commit**
 
 ```bash
 git add docs/plans/2026-06-12-phase2b-delegate.md
 git commit -m "feat(delegate): phase 2B complete — delegate on shared foundation"
 ```
 
-- [ ] **Step 5: 收工回報**
+- [x] **Step 5: 收工回報**
 
 回報:分支名、npm test 末行統計、`git log --oneline main..HEAD`。push/PR 留使用者。真實端點冒煙(deepseek profile 真 job)為人工關卡,不在本 plan。
 
