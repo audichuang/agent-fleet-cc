@@ -242,3 +242,157 @@ test("codex app-server-failed on ETIMEDOUT and ENOENT of the app-server probe", 
     assert.equal(c.version, "codex-cli 0.42.1");
   }
 });
+
+// ---------------------------------------------------------------------------
+// Task 5: checkAntigravity — inline resolveAgyBin + existsSync seam
+// ---------------------------------------------------------------------------
+
+// Drives an antigravity-only run with stubbed existence + spawn. `exists` is a
+// Set of paths that "exist"; `spawnByBin` maps the resolved binPath → spawn result.
+function onlyAgy({ env = {}, exists = [], spawnByBin = {}, defaultSpawn } = {}) {
+  const existsSet = new Set(exists);
+  let spawnedBin = null;
+  const spawn = (bin) => {
+    spawnedBin = bin;
+    return spawnByBin[bin] ?? defaultSpawn ?? { status: 0, stdout: "agy 1.0\n", stderr: "" };
+  };
+  const doc = JSON.parse(
+    runDoctor(["--json", "--only", "antigravity"], {
+      spawnSyncImpl: spawn,
+      existsSyncImpl: (p) => existsSet.has(p),
+      env: { HOME: "/home/u", ...env },
+    }).stdout,
+  );
+  return { a: doc.engines.antigravity, spawnedBin: () => spawnedBin };
+}
+
+test("antigravity resolves via AGY_BIN", () => {
+  const { a, spawnedBin } = onlyAgy({
+    env: { AGY_BIN: "/opt/agy", PATH: "/usr/bin" },
+    exists: ["/opt/agy"],
+    spawnByBin: { "/opt/agy": { status: 0, stdout: "agy 2.3.0\n", stderr: "" } },
+  });
+  assert.equal(a.status, "ready");
+  assert.equal(a.binPath, "/opt/agy");
+  assert.equal(a.resolvedFrom, "AGY_BIN");
+  assert.equal(a.binaryName, "agy");
+  assert.equal(a.onPath, true);
+  assert.equal(a.version, "agy 2.3.0");
+  assert.equal(a.authVerified, false);
+  assert.equal(a.installUrl, "https://antigravity.google/download");
+  assert.equal(spawnedBin(), "/opt/agy");
+});
+
+test("antigravity resolves via PATH (first existing dir wins)", () => {
+  const { a } = onlyAgy({
+    env: { PATH: "/a:/b" }, // no AGY_BIN
+    exists: ["/b/agy"], // /a/agy does not exist
+    spawnByBin: { "/b/agy": { status: 0, stdout: "agy 1.1\n", stderr: "" } },
+  });
+  assert.equal(a.status, "ready");
+  assert.equal(a.binPath, "/b/agy");
+  assert.equal(a.resolvedFrom, "PATH");
+});
+
+test("antigravity PATH empty-segment safety — leading/trailing/double colon is skipped", () => {
+  // A bare-'agy' match via an empty segment would be join('', 'agy') === 'agy'.
+  // The .filter(Boolean) must skip empty segments so we never test existsSync('agy').
+  const seenExistsArgs = [];
+  const doc = JSON.parse(
+    runDoctor(["--json", "--only", "antigravity"], {
+      spawnSyncImpl: () => ({ error: { code: "ENOENT" }, status: null }),
+      existsSyncImpl: (p) => {
+        seenExistsArgs.push(p);
+        return false;
+      },
+      env: { HOME: "/home/u", PATH: ":/x::/y" },
+    }).stdout,
+  );
+  assert.ok(!seenExistsArgs.includes("agy"), "must not probe a bare 'agy' from an empty PATH segment");
+  assert.equal(doc.engines.antigravity.resolvedFrom, "default");
+});
+
+test("antigravity resolves via HOME ~/.local/bin/agy fallback", () => {
+  const { a } = onlyAgy({
+    env: { HOME: "/home/u", PATH: "/a" }, // no AGY_BIN, no agy on PATH
+    exists: ["/home/u/.local/bin/agy"],
+    spawnByBin: { "/home/u/.local/bin/agy": { status: 0, stdout: "agy 1.4\n", stderr: "" } },
+  });
+  assert.equal(a.status, "ready");
+  assert.equal(a.binPath, "/home/u/.local/bin/agy");
+  assert.equal(a.resolvedFrom, "home-fallback");
+});
+
+test("antigravity AGY_BIN that does not exist falls through (not AGY_BIN)", () => {
+  const { a } = onlyAgy({
+    env: { AGY_BIN: "/opt/agy", PATH: "/a" },
+    exists: ["/a/agy"], // AGY_BIN path NOT in exists; /a/agy is
+    spawnByBin: { "/a/agy": { status: 0, stdout: "agy 1.0\n", stderr: "" } },
+  });
+  assert.equal(a.resolvedFrom, "PATH");
+  assert.equal(a.binPath, "/a/agy");
+});
+
+test("antigravity empty/unset AGY_BIN never calls existsSync('')", () => {
+  const seenExistsArgs = [];
+  const doc = JSON.parse(
+    runDoctor(["--json", "--only", "antigravity"], {
+      spawnSyncImpl: () => ({ error: { code: "ENOENT" }, status: null }),
+      existsSyncImpl: (p) => {
+        seenExistsArgs.push(p);
+        return false;
+      },
+      env: { HOME: "/home/u", AGY_BIN: "", PATH: "/a" },
+    }).stdout,
+  );
+  assert.ok(!seenExistsArgs.includes(""), "must not call existsSync('') for empty AGY_BIN");
+  assert.equal(doc.engines.antigravity.resolvedFrom, "default");
+});
+
+test("antigravity binary-missing when none — default + ENOENT carries installUrl", () => {
+  const { a } = onlyAgy({
+    env: { HOME: "/home/u", PATH: "/a:/b" },
+    exists: [], // nothing exists anywhere
+    defaultSpawn: { error: { code: "ENOENT" }, status: null },
+  });
+  assert.equal(a.status, "not-ready");
+  assert.equal(a.reason, "binary-missing");
+  assert.equal(a.binPath, "agy");
+  assert.equal(a.resolvedFrom, "default");
+  assert.equal(a.onPath, false);
+  assert.equal(a.version, null);
+  assert.equal(a.installUrl, "https://antigravity.google/download");
+  assert.equal(a.deepFixCommand, "/antigravity:setup");
+  assert.equal(a.authVerified, false);
+});
+
+test("antigravity version-failed: resolved path launched but --version failed", () => {
+  const { a } = onlyAgy({
+    env: { PATH: "/a" },
+    exists: ["/a/agy"],
+    spawnByBin: { "/a/agy": { status: 7, stdout: "", stderr: "x" } },
+  });
+  assert.equal(a.status, "not-ready");
+  assert.equal(a.reason, "version-failed");
+  assert.equal(a.onPath, true);
+  assert.equal(a.binPath, "/a/agy");
+  assert.equal(a.resolvedFrom, "PATH");
+  assert.equal(a.version, null);
+  assert.equal(a.deepFixCommand, "/antigravity:setup");
+});
+
+test("antigravity version-failed: resolved real path but spawn ENOENT (NOT binary-missing)", () => {
+  // existsSync resolved /a/agy, but the spawn ENOENTs. Because a real path was
+  // resolved (resolvedFrom !== "default"), this is version-failed, NOT binary-missing.
+  const { a } = onlyAgy({
+    env: { PATH: "/a" },
+    exists: ["/a/agy"],
+    spawnByBin: { "/a/agy": { error: { code: "ENOENT" }, status: null } },
+  });
+  assert.equal(a.status, "not-ready");
+  assert.equal(a.reason, "version-failed");
+  assert.equal(a.resolvedFrom, "PATH");
+  assert.equal(a.onPath, true);
+  assert.equal(a.binPath, "/a/agy");
+  assert.equal(a.deepFixCommand, "/antigravity:setup");
+});

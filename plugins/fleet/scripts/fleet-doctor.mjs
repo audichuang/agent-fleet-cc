@@ -2,6 +2,8 @@
 // agent-fleet engines (codex, antigravity, delegate). Self-contained: it does
 // NOT import sibling-plugin code and NEVER probes auth or makes a network call.
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 const CANONICAL = ["codex", "antigravity", "delegate"];
 
@@ -139,9 +141,84 @@ function checkCodex(deps) {
   };
 }
 
+const ANTIGRAVITY_INSTALL_URL = "https://antigravity.google/download";
+
+// Re-implements the antigravity engine's resolveAgyBin order INLINE (no import
+// of plugins/antigravity/.../agent-runtime.mjs). Order, first match wins:
+//   1. env.AGY_BIN (only when truthy AND existsSync) → "AGY_BIN"
+//   2. first 'agy' in (env.PATH || env.Path).split(':').filter(Boolean) → "PATH"
+//   3. <env.HOME>/.local/bin/agy if it exists → "home-fallback"
+//   4. bare "agy" → "default"
+export function resolveAgyBin(env = {}, existsSyncImpl = fs.existsSync) {
+  if (env.AGY_BIN && existsSyncImpl(env.AGY_BIN)) {
+    return { binPath: env.AGY_BIN, resolvedFrom: "AGY_BIN" };
+  }
+  const dirs = (env.PATH || env.Path || "").split(":").filter(Boolean);
+  for (const d of dirs) {
+    const candidate = path.join(d, "agy");
+    if (existsSyncImpl(candidate)) {
+      return { binPath: candidate, resolvedFrom: "PATH" };
+    }
+  }
+  if (env.HOME) {
+    const home = path.join(env.HOME, ".local", "bin", "agy");
+    if (existsSyncImpl(home)) {
+      return { binPath: home, resolvedFrom: "home-fallback" };
+    }
+  }
+  return { binPath: "agy", resolvedFrom: "default" };
+}
+
+function checkAntigravity(deps) {
+  const env = deps.env ?? process.env;
+  const existsSyncImpl = deps.existsSyncImpl ?? fs.existsSync;
+  const { binPath, resolvedFrom } = resolveAgyBin(env, existsSyncImpl);
+  const probe = probeBinary(binPath, deps);
+  if (probe.ok) {
+    return {
+      engine: "antigravity",
+      status: "ready",
+      authVerified: false,
+      reason: null,
+      summary: `agy CLI ready (${probe.version}) — auth not checked, run /antigravity:setup to authorize`,
+      deepFixCommand: null,
+      binaryName: "agy",
+      binPath,
+      resolvedFrom,
+      onPath: true,
+      version: probe.version,
+      installUrl: ANTIGRAVITY_INSTALL_URL,
+    };
+  }
+  // binary-missing ONLY when nothing was resolved on disk (resolvedFrom "default")
+  // AND the bare spawn ENOENT'd. A resolved real path (AGY_BIN/PATH/home-fallback)
+  // that fails to launch is version-failed, not missing — existsSync already proved
+  // the file was there, so the gap is "present but broken," matching §5.3's rule.
+  const missing = resolvedFrom === "default" && !probe.found;
+  const reason = missing ? "binary-missing" : "version-failed";
+  const summary = missing
+    ? `agy not found — install from ${ANTIGRAVITY_INSTALL_URL}`
+    : `agy found (${binPath}) but '${binPath} --version' failed`;
+  return {
+    engine: "antigravity",
+    status: "not-ready",
+    authVerified: false,
+    reason,
+    summary,
+    deepFixCommand: "/antigravity:setup",
+    binaryName: "agy",
+    binPath,
+    resolvedFrom,
+    onPath: !missing,
+    version: null,
+    installUrl: ANTIGRAVITY_INSTALL_URL,
+  };
+}
+
 // Per-engine checker — routes to the real recipe or stubs for future tasks.
 export function checkEngine(engine, deps) {
   if (engine === "codex") return checkCodex(deps);
+  if (engine === "antigravity") return checkAntigravity(deps);
   // Other engines stubbed until their tasks.
   return {
     engine,
