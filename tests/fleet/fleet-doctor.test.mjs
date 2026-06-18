@@ -695,3 +695,57 @@ test("human output: one line per engine, marks ready, routes not-ready, prints a
   // the auth-not-verified caveat must be present (ready != logged in).
   assert.match(r.stdout, /auth.*not.*(checked|verified)/i);
 });
+
+// ---------------------------------------------------------------------------
+// Task 10: error-path guardrails — probe {error} never throws
+// ---------------------------------------------------------------------------
+
+test("a probe ENOENT never throws — classified as missing across all engines", () => {
+  const spawn = () => ({ error: { code: "ENOENT" }, status: null });
+  const r = runDoctor(["--json"], {
+    spawnSyncImpl: spawn,
+    existsSyncImpl: () => false,
+    env: { HOME: "/tmp/fleet-noexist-home" },
+  });
+  assert.equal(r.exitCode, 0);
+  const doc = JSON.parse(r.stdout);
+  assert.equal(doc.engines.codex.reason, "binary-missing");
+  assert.equal(doc.engines.antigravity.reason, "binary-missing");
+  assert.equal(doc.engines.delegate.reason, "cli-missing");
+  assert.equal(doc.allReady, false);
+});
+
+test("clause 2: a non-ENOENT error with null status → version-failed (binary launched), not missing", () => {
+  // EACCES is not ENOENT, so clause 1 does not match → clause 2 (version-failed).
+  const r = runDoctor(["--json", "--only", "codex"], {
+    spawnSyncImpl: () => ({ error: { code: "EACCES" }, status: null }),
+    env: { HOME: "/tmp/fleet-noexist-home" },
+  });
+  assert.equal(r.exitCode, 0);
+  const c = JSON.parse(r.stdout).engines.codex;
+  assert.equal(c.reason, "version-failed");
+  assert.equal(c.onPath, true);
+});
+
+test("clause 2: error truthy WITH a non-null status + non-ENOENT code → version-failed", () => {
+  // Pins probeBinary (Task 3) so a future refactor cannot flip error-with-status to missing.
+  const r = runDoctor(["--json", "--only", "codex"], {
+    spawnSyncImpl: () => ({ error: { code: "EACCES" }, status: 1, stdout: "", stderr: "" }),
+    env: { HOME: "/tmp/fleet-noexist-home" },
+  });
+  assert.equal(r.exitCode, 0);
+  const c = JSON.parse(r.stdout).engines.codex;
+  assert.equal(c.reason, "version-failed");
+  assert.equal(c.onPath, true);
+});
+
+test("usage error under --json is parseable JSON with an error key (not a crash)", () => {
+  const r = runDoctor(["--json", "--only", "nope"], {
+    spawnSyncImpl: () => ({ status: 0, stdout: "v\n" }),
+    env: { HOME: "/tmp/fleet-noexist-home" },
+  });
+  assert.equal(r.exitCode, 2);
+  const parsed = JSON.parse(r.stdout); // must not throw
+  assert.ok(typeof parsed.error === "string" && parsed.error.length > 0);
+  assert.ok(!("engines" in parsed));
+});
