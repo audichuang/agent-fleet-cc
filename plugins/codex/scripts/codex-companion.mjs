@@ -377,9 +377,24 @@ function findLatestResumableTaskJob(jobs) {
   );
 }
 
+function coerceMs(value, fallback, floor = 0) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.max(floor, n);
+}
+
+function waitExitCode(snapshot) {
+  if (snapshot.waitTimedOut) return 10;
+  const status = snapshot.job?.status;
+  if (status === "completed") return 0;
+  if (status === "cancelled") return 2;
+  return 1; // failed, or any non-completed terminal state
+}
+
 async function waitForSingleJobSnapshot(cwd, reference, options = {}) {
-  const timeoutMs = Math.max(0, Number(options.timeoutMs) || DEFAULT_STATUS_WAIT_TIMEOUT_MS);
-  const pollIntervalMs = Math.max(100, Number(options.pollIntervalMs) || DEFAULT_STATUS_POLL_INTERVAL_MS);
+  const timeoutMs = coerceMs(options.timeoutMs, DEFAULT_STATUS_WAIT_TIMEOUT_MS, 0);
+  const pollIntervalMs = coerceMs(options.pollIntervalMs, DEFAULT_STATUS_POLL_INTERVAL_MS, 100);
   const deadline = Date.now() + timeoutMs;
   let snapshot = buildSingleJobSnapshot(cwd, reference);
 
@@ -985,6 +1000,7 @@ async function handleWait(argv) {
     pollIntervalMs: options["poll-interval-ms"]
   });
   outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
+  process.exitCode = waitExitCode(snapshot);
 }
 
 function handleResult(argv) {
@@ -1262,6 +1278,24 @@ export async function handleAttach(argv, deps = {}) {
 }
 
 export async function handleLogs(argv, deps = {}) {
+  const { positionals, options } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "poll-interval-ms"],
+    booleanOptions: ["json", "follow"]
+  });
+  // With no explicit id and no live job, fall back to the most recent job's
+  // persisted log instead of erroring (attach semantics require a live job).
+  if (!positionals[0]) {
+    const workspaceRoot = resolveCommandWorkspace(options);
+    const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
+    const live = jobs.find((j) => j.status === "queued" || j.status === "running");
+    if (!live && jobs[0]) {
+      const logFile = jobs[0].logFile ?? resolveJobLogFile(workspaceRoot, jobs[0].id);
+      let log = "";
+      try { log = fs.readFileSync(logFile, "utf8"); } catch { /* no log yet */ }
+      outputResult(log, false);
+      return;
+    }
+  }
   return handleAttach(argv, deps);
 }
 
