@@ -49,6 +49,44 @@ function resolveEngines(only) {
   return CANONICAL.filter((name) => requested.includes(name));
 }
 
+// Uniform binary probe + ORDERED detection rule (spec §5.3).
+// Evaluate clauses top-to-bottom; first match wins:
+//   1. r.error && r.error.code === "ENOENT"                 → not found ("missing")
+//   2. r.error (any code incl ETIMEDOUT) || r.signal
+//      || r.status !== 0                                    → found, "version-failed"
+//   3. r.status === 0                                       → ok, version = first line
+// Only ENOENT means missing; a timeout/any-other-error/signal/non-zero is
+// present-but-failed. `args` is parameterized so the codex secondary probe
+// (["app-server","--help"]) reuses this exact rule.
+export function probeBinary(binary, deps = {}, args = ["--version"]) {
+  const spawnSyncImpl = deps.spawnSyncImpl ?? spawnSync;
+  const r = spawnSyncImpl(binary, args, {
+    encoding: "utf8",
+    timeout: 5000,
+    input: "",
+  });
+  // Clause 1: ENOENT (and only ENOENT) means the binary was not found.
+  if (r && r.error && r.error.code === "ENOENT") {
+    return { ok: false, found: false, reason: "missing", version: null };
+  }
+  // Clause 2: any other error (incl ETIMEDOUT), any signal, or non-zero status
+  // means the binary launched but the probe failed.
+  if ((r && r.error) || (r && r.signal) || !r || r.status !== 0) {
+    return { ok: false, found: true, reason: "version-failed", version: null };
+  }
+  // Clause 3: status === 0 → ok.
+  return { ok: true, found: true, reason: null, version: firstNonEmptyLine(r.stdout) };
+}
+
+function firstNonEmptyLine(stdout) {
+  if (typeof stdout !== "string") return null;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (line) return line;
+  }
+  return null;
+}
+
 // Per-engine checker — stubbed for now; real recipes added in later tasks.
 export function checkEngine(engine, deps) {
   return {
