@@ -1364,3 +1364,18 @@ Codex handoff 因認證失效(refresh token 已用)改走 ultracode-only。5 視
 - `safePid` 放行 pid=2(kthreadd)——OS 對 `kill(2)`/`kill(-2)` 回 ESRCH/EPERM,無實害;可收緊為 >2。
 - `installCancelForwarder.onChild` 無雙呼叫守衛(第一個 child 的 pgid 會被覆蓋遺漏)——實務只呼叫一次,防禦性。
 - `buildEngineEnv` 不 coerce 非字串 baseEnv 值(OS env 恆為字串,無實害);`DENY_PREFIXES` 不含裸 `ANTHROPIC`(無此變數);`worker-entry.mjs` 不驗 argv 的 jobId(companion 已傳 safeJobId 過的 id,內部呼叫);`extractResult` 對 null/非陣列 events 會 throw(worker 呼叫點已 try/catch 包住)。
+
+---
+
+## Codex 第二意見審查 follow-ups(2026-06-18)
+
+Codex(GPT-5.5)獨立審查找到 3 個先前審查(含實證探測)漏掉的真實 **liveness/orphan** 問題(我的探測聚焦 CAS/race/parse,沒涵蓋「程序死掉/孤兒/訊號」盲區)。已逐項查證行號屬實。
+
+**已修(commit 6f2e91e,shared core + companion,已 re-vendor,+10 測試):**
+- **F1 — wait/logs 起跑後不再 reconcile**:worker 中途死亡時 `wait` 卡到 timeout、`logs --follow` 卡到 24h。→ `waitForJob` 加 `reconcile` hook(預設 no-op,向後相容),每輪 poll 先 reconcile;cmdWait/cmdLogs 傳 `reconcileDeadPids`。
+- **F3 — 背景 job 永遠卡 queued**(worker 未到 markJobRunning):→ 三段 race-free 修法:companion 對同步 spawn throw `finalizeJob` failed;worker-entry 啟動即 stamp 自身 pid(sole writer,guarded non-terminal);`reconcileDeadPids` 的死-pid 分支擴及 `queued`(不只 running)。
+- **F4 — 前景 Ctrl-C(SIGINT)不轉發到 detached 引擎 → 孤兒**:→ `installCancelForwarder` 改聽 `SIGTERM`/`SIGINT`/`SIGHUP`(dispose 一併移除)。
+
+**未修,記為 follow-up(經裁示):**
+- **F2(Important)— `cancel` 可能 signal 到 stale/重用的 worker PID**:`cancelJob` 探活後對 pid 發 SIGTERM,無 process 身分驗證;worker 死後 PID 若被同使用者程序重用,會誤殺。**低機率**但 robust 修法非平凡:存並驗 process 身分 token(Linux `/proc/<pid>/stat` start time),或改由 worker 自 watch terminal lock 殺自己的 child group。pre-cancel reconcile 可縮小窗口但不足。跨引擎 shared 議題。
+- **Minor — 非 worker finalizer 不寫 `finalized` 事件**:`reconcile` 的 lock-repair 與死-pid finalize、以及 `cancelJob`,都直接改 job.json 而不 append `finalized` 事件(spec §5 觀測脊椎)。乾淨修法需 events-model 決策(避免 running-cancel 的雙事件);與先前記錄的 queued-cancel 缺口同類,合併處理。
