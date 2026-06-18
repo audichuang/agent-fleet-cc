@@ -1379,3 +1379,17 @@ Codex(GPT-5.5)獨立審查找到 3 個先前審查(含實證探測)漏掉的真�
 **未修,記為 follow-up(經裁示):**
 - **F2(Important)— `cancel` 可能 signal 到 stale/重用的 worker PID**:`cancelJob` 探活後對 pid 發 SIGTERM,無 process 身分驗證;worker 死後 PID 若被同使用者程序重用,會誤殺。**低機率**但 robust 修法非平凡:存並驗 process 身分 token(Linux `/proc/<pid>/stat` start time),或改由 worker 自 watch terminal lock 殺自己的 child group。pre-cancel reconcile 可縮小窗口但不足。跨引擎 shared 議題。
 - **Minor — 非 worker finalizer 不寫 `finalized` 事件**:`reconcile` 的 lock-repair 與死-pid finalize、以及 `cancelJob`,都直接改 job.json 而不 append `finalized` 事件(spec §5 觀測脊椎)。乾淨修法需 events-model 決策(避免 running-cancel 的雙事件);與先前記錄的 queued-cancel 缺口同類,合併處理。
+
+---
+
+## CLI e2e 回歸測試 + Codex 審查(2026-06-18)
+
+新增 `tests/delegate/e2e-cli.test.mjs`:黑箱跑真實 `delegate-companion.mjs` CLI 子程序(真 `isCliEntry`、真 detached worker-entry、真目錄 store),fake-claude shim、無需 API、跟 `npm test`(`test:delegate`)自動跑(亦 `npm run test:e2e`)。Codex 審查後**已強化**(commit de152f5,9/9 綠):
+- **cancel 測試用 `FAKE_CLAUDE_PIDFILE` 實證引擎程序真的被 reap**(修掉 Codex 標的 Critical 假綠——原本只驗 job 狀態 cancelled、沒驗引擎死)。
+- `--json` 斷言**恰一行 + stderr 乾淨**(抓 banner/warning 洩漏);`logs` **逐行 parse JSON** 斷言事件型別;新增失敗投影、旗標合約(--read-only/--model/--prompt-file → 持久化 request)、--resume-job 連結的 e2e;pidfile-based 清理(失敗路徑不洩漏引擎)。
+
+**Codex e2e 審查的延後 fidelity 項(非阻擋,記錄):**
+- `fake-claude` 不驗 adapter 傳的 argv(只 conf-resume 檢 `-r`):理論上回歸若漏傳 `--output-format stream-json`/`--settings`/`--model` 等,e2e 不會抓到(但「旗標→request」鏈已由 job.json e2e + adapter unit test 的 buildClaudeArgs 斷言兩端覆蓋)。follow-up:讓 fake 在缺必要 argv 時 fail(需小心——fake-claude 為多測試共用)。
+- `fake-claude` stream fidelity 偏淺(只 system+result happy path):真實 claude 還有 assistant 訊息與更豐富的 result metadata、result-level `is_error:true` 形態。follow-up:加真實 assistant 行 + result-error 模式並斷言。
+- Codex 另建議把 `parseEvent` 收緊為「只在 `type:"system"` 視為 session」(目前任何帶 session_id 的非 result 行皆視為 session)——屬 adapter 產品行為微調,debatable,記為 follow-up。
+- **真實 claude API 端到端**仍是人工關卡(真模型輸出非決定性 + 花 API 錢,不入自動回歸):用真 profile 跑 `node delegate-companion.mjs task "..." --profile <真profile> --json` 手動冒煙。
