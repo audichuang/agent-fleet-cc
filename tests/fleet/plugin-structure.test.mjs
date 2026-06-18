@@ -79,7 +79,7 @@ test("setup.md drives the GUIDE-ONLY flow per spec §6", () => {
   // §6.3 confirm-by-re-running guidance (single-line, backtick adjacent to "re-run ").
   assert.match(text, /re-run `\/fleet:setup`/);
   // §6.4 auth-not-verified note (even when allReady) — single physical line.
-  assert.match(text, /not.*(verified|checked)/i, "must state auth was not verified");
+  assert.match(text, /auth was NOT verified/, "must state auth was not verified");
   // §6.4 delegate real-smoke hint uses the REAL slash command.
   assert.match(text, /\/delegate:task "hello" --profile/);
   // GUIDE-ONLY guardrail: must NOT promise to invoke /<engine>:setup itself or
