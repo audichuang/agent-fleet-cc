@@ -26,5 +26,7 @@ jobs:
       - run: npm ci
       - name: Install Codex CLI (codex suite + typecheck prereq)
         run: npm install -g @openai/codex
+      - name: Vendored shared lib must match source (drift check)
+        run: npm run sync-shared && git diff --exit-code
       - run: npm test
       - run: npm run build:codex

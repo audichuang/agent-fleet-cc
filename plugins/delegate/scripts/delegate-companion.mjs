@@ -1,41 +1,52 @@
 #!/usr/bin/env node
-// CLI entry. Commands: setup | task | execute-plan | status | result | cancel
+// CLI entry. Commands: setup | task | status | result | cancel | wait | logs
 // Testable via runCompanion(argv, deps) with injectable seams.
+//
+// Job runtime (state/worker/cancel/reconcile) lives in the vendored shared lib;
+// the delegate-specific engine knowledge lives in ./lib/adapter.mjs. This
+// companion only orchestrates: parse flags, build a job record, drive the
+// shared runWorker (foreground) or spawn worker-entry.mjs (background).
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseArgs, UsageError } from "./lib/args.mjs";
-import { resolveProfile, listProfiles, ProfileError } from "./lib/profiles.mjs";
-import { resolveTimeoutMs } from "./lib/claude.mjs";
-import { runWorker, installCancelForwarder } from "./lib/worker.mjs";
-import { renderStatus, renderResult } from "./lib/render.mjs";
-import { reconcileDeadPids, cancelJob } from "./lib/job-control.mjs";
+import { parseArgs, UsageError } from "./lib/shared/args.mjs";
+import { createJobRecord, TERMINAL_STATUSES } from "./lib/shared/core/job.mjs";
 import {
-  resolveDataRoot,
-  workspaceStateDir,
-  newJobId,
-  writeJob,
+  createJob,
   readJob,
   listJobs,
   pruneJobs,
+  finalizeJob,
   promptFilePath,
   logFilePath,
-  TERMINAL_STATUSES,
-} from "./lib/state.mjs";
+  jobDir,
+} from "./lib/shared/core/state-store.mjs";
+import { reconcileDeadPids } from "./lib/shared/core/reconcile.mjs";
+import { cancelJob } from "./lib/shared/core/job-control.mjs";
+import { waitForJob } from "./lib/shared/core/wait.mjs";
+import { readEvents } from "./lib/shared/core/events.mjs";
+import { runWorker, installCancelForwarder } from "./lib/shared/runtime/worker.mjs";
+import { makeClaudeAdapter, resolveDataRoot, workspaceStateDir } from "./lib/adapter.mjs";
+import { resolveProfile, listProfiles, ProfileError } from "./lib/profiles.mjs";
+import { renderStatus, renderResult } from "./lib/render.mjs";
+
+// Job timeout default (1h) — inlined from the retired claude helper module.
+const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: delegate-companion <command> [...]
   setup
-  task <prompt...> [--profile <name>|--settings <path>] [--background] [--resume-id <job>|--resume-last] [--timeout-ms <n>]
-  execute-plan <plan-file> [same flags as task]
+  task <prompt...>|--prompt-file <path> [--profile <name>|--settings <path>] [--background|--wait] [--json] [--model <id>] [--read-only|--write] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status
   result [<job-id>|--last]
-  cancel <job-id>`;
+  cancel <job-id>
+  wait <job-id> [--timeout-s <n>] [--json]
+  logs <job-id> [--follow]`;
 
 const TASK_FLAGS = {
-  valueFlags: ["profile", "settings", "resume-id", "timeout-ms"],
-  boolFlags: ["background", "resume-last"],
+  valueFlags: ["profile", "settings", "resume-job", "timeout-ms", "prompt-file", "model"],
+  boolFlags: ["background", "wait", "resume-last", "json", "read-only", "write"],
 };
 
 // Job ids are joined into state paths — reject traversal before any fs use.
@@ -47,7 +58,10 @@ function safeJobId(value) {
 }
 
 function parseTimeoutMs(value, env) {
-  if (value === undefined) return resolveTimeoutMs(env);
+  if (value === undefined) {
+    const raw = Number(env.DELEGATE_JOB_TIMEOUT_MS);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
+  }
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
     // Unvalidated NaN would become setTimeout(NaN) ≈ a 1ms timeout.
@@ -56,14 +70,20 @@ function parseTimeoutMs(value, env) {
   return n;
 }
 
-const EXECUTE_PLAN_TEMPLATE = (plan) => `You are executing a pre-approved implementation plan. Read it carefully, then implement it COMPLETELY:
-- Follow the plan's tasks in order; run every verification step it specifies.
-- Do not redesign or skip steps. If a step is impossible, finish what you can and report the blocker in your final summary.
-- Commit as the plan instructs.
-
-<plan>
-${plan}
-</plan>`;
+// Unified result projection (spec §2.1): the shape result/--json speak.
+function resultProjection(job) {
+  return {
+    engine: "delegate",
+    jobId: job.id,
+    status: job.status,
+    resultText: job.resultText ?? null,
+    sessionId: job.sessionId ?? null,
+    exitCode: job.exitCode ?? null,
+    error: job.error ?? null,
+    errorKind: job.errorKind ?? null,
+    durationMs: job.durationMs ?? null,
+  };
+}
 
 export async function runCompanion(argv, deps = {}) {
   const env = deps.env ?? process.env;
@@ -82,14 +102,16 @@ export async function runCompanion(argv, deps = {}) {
         return cmdSetup({ env, out, dataRoot, deps });
       case "task":
         return await cmdTask({ argv: rest, env, out, cwd, dataRoot, stateDir, deps });
-      case "execute-plan":
-        return await cmdExecutePlan({ argv: rest, env, out, cwd, dataRoot, stateDir, deps });
       case "status":
-        return cmdStatus({ out, stateDir });
+        return cmdStatus({ argv: rest, out, stateDir });
       case "result":
         return cmdResult({ argv: rest, out, stateDir });
       case "cancel":
         return cmdCancel({ argv: rest, out, stateDir });
+      case "wait":
+        return await cmdWait({ argv: rest, out, stateDir });
+      case "logs":
+        return await cmdLogs({ argv: rest, out, stateDir });
       default:
         out(USAGE);
         return command ? 1 : 0;
@@ -137,9 +159,9 @@ function cmdSetup({ env, out, dataRoot, deps }) {
 }
 
 function resolveResumeSource({ flags, stateDir }) {
-  if (flags["resume-id"]) {
-    const source = readJob(stateDir, safeJobId(flags["resume-id"]));
-    if (!source) throw new UsageError(`No job ${flags["resume-id"]} to resume`);
+  if (flags["resume-job"]) {
+    const source = readJob(stateDir, safeJobId(flags["resume-job"]));
+    if (!source) throw new UsageError(`No job ${flags["resume-job"]} to resume`);
     if (!source.sessionId)
       throw new UsageError(`Job ${source.id} has no session id to resume`);
     return source;
@@ -154,16 +176,18 @@ function resolveResumeSource({ flags, stateDir }) {
   return null;
 }
 
-async function startJob({ prompt, promptPreview, flags, env, out, cwd, dataRoot, stateDir, deps }) {
+async function startJob({ prompt, title, flags, env, out, cwd, dataRoot, stateDir, deps }) {
   const source = resolveResumeSource({ flags, stateDir });
   let settingsPath;
   let profileName;
   if (source) {
     // Fail fast pre-spawn (SPEC §10): the source profile may have been
-    // deleted since the original job ran.
-    resolveProfile({ settingsPath: source.settingsPath });
-    settingsPath = source.settingsPath;
-    profileName = source.profile;
+    // deleted since the original job ran. Engine-specific request fields live
+    // under request.* in the unified schema.
+    const sourceSettingsPath = source.request?.settingsPath ?? source.settingsPath;
+    resolveProfile({ settingsPath: sourceSettingsPath });
+    settingsPath = sourceSettingsPath;
+    profileName = source.request?.profile ?? source.profile;
   } else {
     const profile = resolveProfile({
       dataRoot,
@@ -174,44 +198,67 @@ async function startJob({ prompt, promptPreview, flags, env, out, cwd, dataRoot,
     settingsPath = profile.path;
     profileName = profile.name;
   }
-  const job = {
-    id: newJobId(),
-    status: "queued",
-    profile: profileName,
-    settingsPath,
-    permissionMode: env.DELEGATE_PERMISSION_MODE ?? "bypassPermissions",
+  // --read-only → "default"; --write is an explicit no-op synonym for the
+  // legacy default (bypassPermissions).
+  const permissionMode = flags["read-only"]
+    ? "default"
+    : (env.DELEGATE_PERMISSION_MODE ?? "bypassPermissions");
+  const record = createJobRecord({
+    engine: "delegate",
+    title: title ?? prompt.slice(0, 120),
     cwd,
     timeoutMs: parseTimeoutMs(flags["timeout-ms"], env),
-    background: Boolean(flags.background),
-    resumedFrom: source?.id ?? null,
-    resumeSessionId: source?.sessionId ?? null,
-    promptPreview,
-    createdAt: new Date().toISOString(),
-  };
-  // Prompts can carry proprietary code/secrets — keep artifacts owner-only.
-  fs.mkdirSync(path.dirname(promptFilePath(stateDir, job.id)), {
-    recursive: true,
-    mode: 0o700,
+    request: {
+      profile: profileName,
+      settingsPath,
+      permissionMode,
+      model: flags.model ?? null,
+      resumeSessionId: source?.sessionId ?? null,
+      resumedFrom: source?.id ?? null,
+    },
   });
-  fs.writeFileSync(promptFilePath(stateDir, job.id), prompt, { mode: 0o600 });
-  writeJob(stateDir, job);
+  // createJob writes the job dir (0700) + prompt.txt (0600) + job.json atomically.
+  createJob(stateDir, record, prompt);
   pruneJobs(stateDir);
 
-  if (job.background) {
+  if (flags.background) {
     const workerPath = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
-      "lib",
-      "worker.mjs",
+      "worker-entry.mjs",
     );
     const spawnImpl = deps.workerSpawnImpl ?? spawn;
-    const child = spawnImpl(
-      process.execPath,
-      [workerPath, stateDir, job.id],
-      { detached: true, stdio: "ignore", env: { ...env } },
-    );
+    // F3:detached spawn 同步 throw(execPath 不存在、資源耗盡等)時不能把
+    // queued job 留著爛 — reconcile 只救「有死 pid」的 job,而此時 worker-entry
+    // 根本沒起來 stamp pid。直接 finalize failed 並回報,exit 1。
+    let child;
+    try {
+      child = spawnImpl(
+        process.execPath,
+        [workerPath, stateDir, record.id],
+        { detached: true, stdio: "ignore", env: { ...env } },
+      );
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      finalizeJob(stateDir, record.id, {
+        status: "failed",
+        error: message,
+        errorKind: "spawn",
+      });
+      const finished = readJob(stateDir, record.id);
+      out(
+        flags.json
+          ? JSON.stringify(resultProjection(finished))
+          : `delegate: failed to launch background worker: ${message}`,
+      );
+      return 1;
+    }
     child.unref();
-    out(`Started background job ${job.id} (profile=${job.profile}).`);
-    out(`Check: status | result ${job.id} | cancel ${job.id}`);
+    if (flags.json) {
+      out(JSON.stringify({ engine: "delegate", jobId: record.id, status: "queued" }));
+    } else {
+      out(`Started background job ${record.id} (profile=${record.request.profile}).`);
+      out(`Check: status | result ${record.id} | cancel ${record.id}`);
+    }
     return 0;
   }
 
@@ -222,10 +269,10 @@ async function startJob({ prompt, promptPreview, flags, env, out, cwd, dataRoot,
   try {
     await runWorker({
       stateDir,
-      jobId: job.id,
+      jobId: record.id,
+      adapter: makeClaudeAdapter(),
       deps: {
         spawnImpl: deps.claudeSpawnImpl,
-        binary: env.DELEGATE_CLAUDE_BIN,
         baseEnv: env,
         onChild: forwarder.onChild,
       },
@@ -233,37 +280,32 @@ async function startJob({ prompt, promptPreview, flags, env, out, cwd, dataRoot,
   } finally {
     forwarder.dispose();
   }
-  const finished = readJob(stateDir, job.id);
-  out(renderResult(finished, readLogTail(stateDir, job.id)));
+  const finished = readJob(stateDir, record.id);
+  out(
+    flags.json
+      ? JSON.stringify(resultProjection(finished))
+      : renderResult(finished, readLogTail(stateDir, record.id)),
+  );
   return finished.status === "completed" ? 0 : 1;
 }
 
 async function cmdTask({ argv, env, out, cwd, dataRoot, stateDir, deps }) {
   const { flags, positionals } = parseArgs(argv, TASK_FLAGS);
-  const prompt = positionals.join(" ").trim();
-  if (!prompt) throw new UsageError("task requires a prompt");
-  return startJob({
-    prompt,
-    promptPreview: prompt.slice(0, 120),
-    flags, env, out, cwd, dataRoot, stateDir, deps,
-  });
-}
-
-async function cmdExecutePlan({ argv, env, out, cwd, dataRoot, stateDir, deps }) {
-  const { flags, positionals } = parseArgs(argv, TASK_FLAGS);
-  const planPath = positionals[0];
-  if (!planPath) throw new UsageError("execute-plan requires a plan file path");
-  let plan;
-  try {
-    plan = fs.readFileSync(path.resolve(cwd, planPath), "utf8");
-  } catch {
-    throw new UsageError(`plan file not readable: ${planPath}`);
+  let prompt;
+  if (flags["prompt-file"]) {
+    try {
+      prompt = fs.readFileSync(path.resolve(cwd, flags["prompt-file"]), "utf8");
+    } catch {
+      throw new UsageError(`prompt file not readable: ${flags["prompt-file"]}`);
+    }
+  } else {
+    prompt = positionals.join(" ").trim();
   }
-  return startJob({
-    prompt: EXECUTE_PLAN_TEMPLATE(plan),
-    promptPreview: `execute-plan ${path.basename(planPath)}`,
-    flags, env, out, cwd, dataRoot, stateDir, deps,
-  });
+  if (!prompt) throw new UsageError("task requires a prompt or --prompt-file");
+  if (flags.wait && flags.background) {
+    throw new UsageError("--wait and --background are mutually exclusive");
+  }
+  return startJob({ prompt, flags, env, out, cwd, dataRoot, stateDir, deps });
 }
 
 function readLogTail(stateDir, jobId, lines = 30) {
@@ -275,34 +317,109 @@ function readLogTail(stateDir, jobId, lines = 30) {
   }
 }
 
-function cmdStatus({ out, stateDir }) {
+function cmdStatus({ argv, out, stateDir }) {
+  const { flags } = parseArgs(argv, { boolFlags: ["json"] });
   reconcileDeadPids(stateDir);
-  out(renderStatus(listJobs(stateDir)));
+  const jobs = listJobs(stateDir);
+  out(flags.json ? JSON.stringify(jobs.map(resultProjection)) : renderStatus(jobs));
   return 0;
 }
 
 function cmdResult({ argv, out, stateDir }) {
-  const { flags, positionals } = parseArgs(argv, { boolFlags: ["last"] });
+  const { flags, positionals } = parseArgs(argv, { boolFlags: ["last", "json"] });
   reconcileDeadPids(stateDir);
-  const job = flags.last
-    ? listJobs(stateDir)[0]
-    : positionals[0]
-      ? readJob(stateDir, safeJobId(positionals[0]))
-      : listJobs(stateDir)[0];
+  const job = positionals[0]
+    ? readJob(stateDir, safeJobId(positionals[0]))
+    : listJobs(stateDir)[0];
   if (!job) {
-    out("No delegate jobs in this workspace.");
+    out(flags.json ? JSON.stringify({ error: "no jobs" }) : "No delegate jobs in this workspace.");
     return 1;
   }
-  out(renderResult(job, job.status === "completed" ? "" : readLogTail(stateDir, job.id)));
+  out(flags.json
+    ? JSON.stringify(resultProjection(job))
+    : renderResult(job, job.status === "completed" ? "" : readLogTail(stateDir, job.id)));
   return job.status === "completed" ? 0 : 1;
 }
 
 function cmdCancel({ argv, out, stateDir }) {
-  const { positionals } = parseArgs(argv, {});
+  const { flags, positionals } = parseArgs(argv, { boolFlags: ["json"] });
   if (!positionals[0]) throw new UsageError("cancel requires a job id");
   const result = cancelJob(stateDir, safeJobId(positionals[0]));
-  out(result.message);
+  out(flags.json ? JSON.stringify(result) : result.message);
   return result.ok ? 0 : 1;
+}
+
+// Timeout exit code for wait: not an error — lets an orchestrator cleanly re-enter (spec §2.3)
+const WAIT_TIMEOUT_EXIT = 10;
+
+async function cmdWait({ argv, out, stateDir }) {
+  const { flags, positionals } = parseArgs(argv, {
+    valueFlags: ["timeout-s"],
+    boolFlags: ["json"],
+  });
+  if (!positionals[0]) throw new UsageError("wait requires a job id");
+  const jobId = safeJobId(positionals[0]);
+  if (!readJob(stateDir, jobId)) {
+    out(
+      flags.json
+        ? JSON.stringify({ error: `no job ${jobId}` })
+        : `No job ${jobId} in this workspace.`,
+    );
+    return 1;
+  }
+  const timeoutS = flags["timeout-s"] ? Number(flags["timeout-s"]) : 540;
+  if (!Number.isFinite(timeoutS) || timeoutS <= 0) {
+    throw new UsageError(
+      `--timeout-s must be a positive number, got: ${flags["timeout-s"]}`,
+    );
+  }
+  reconcileDeadPids(stateDir);
+  const { done, job } = await waitForJob({
+    stateDir,
+    jobId,
+    timeoutMs: timeoutS * 1000,
+    // F1:每輪 poll reconcile,worker 中途死亡時不卡到 timeout。
+    reconcile: reconcileDeadPids,
+    onEvent: (e) => {
+      if (!flags.json)
+        out(`[${e.ts}] ${e.type}${e.kind ? ":" + e.kind : ""}`);
+    },
+  });
+  if (!job) {
+    out(flags.json ? JSON.stringify({ error: `job ${jobId} no longer exists` }) : `Job ${jobId} no longer exists.`);
+    return 1;
+  }
+  out(flags.json ? JSON.stringify(resultProjection(job)) : renderResult(job, ""));
+  if (!done) return WAIT_TIMEOUT_EXIT;
+  return job.status === "completed" ? 0 : 1;
+}
+
+async function cmdLogs({ argv, out, stateDir }) {
+  const { flags, positionals } = parseArgs(argv, { boolFlags: ["follow"] });
+  if (!positionals[0]) throw new UsageError("logs requires a job id");
+  const jobId = safeJobId(positionals[0]);
+  if (!readJob(stateDir, jobId)) {
+    out(`No job ${jobId} in this workspace.`);
+    return 1;
+  }
+  const dir = jobDir(stateDir, jobId);
+  if (!flags.follow) {
+    // Without --follow: print all events as JSON lines and return
+    for (const e of readEvents(dir)) out(JSON.stringify(e));
+    return 0;
+  }
+  // With --follow: do NOT static-print first (avoids double-print).
+  // waitForJob's onEvent drain starts at index 0, emitting all events
+  // including history, until terminal.
+  const { job } = await waitForJob({
+    stateDir,
+    jobId,
+    timeoutMs: 24 * 60 * 60 * 1000,
+    // F1:--follow 最長等 24h;worker 中途死亡時必須靠 reconcile 收斂,否則卡滿。
+    reconcile: reconcileDeadPids,
+    onEvent: (e) => out(JSON.stringify(e)),
+  });
+  return TERMINAL_STATUSES.has(job?.status) ? 0 : 1;
 }
 
 const isCliEntry =

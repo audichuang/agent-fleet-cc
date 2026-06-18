@@ -1,7 +1,6 @@
-import "./helpers.mjs";
-import test from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseArgs, UsageError } from "../../plugins/delegate/scripts/lib/args.mjs";
+import { parseArgs, UsageError } from "../../shared/lib/args.mjs";
 
 test("parses value flags, bool flags, and positionals", () => {
   const { flags, positionals } = parseArgs(

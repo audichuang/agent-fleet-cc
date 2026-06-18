@@ -8,15 +8,15 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { runCompanion } from "../../plugins/delegate/scripts/delegate-companion.mjs";
 import {
-  workspaceStateDir,
   listJobs,
   readJob,
   jobFilePath,
   promptFilePath,
   logFilePath,
-  TERMINAL_STATUSES,
-} from "../../plugins/delegate/scripts/lib/state.mjs";
-import { isPidAlive } from "../../plugins/delegate/scripts/lib/job-control.mjs";
+} from "../../plugins/delegate/scripts/lib/shared/core/state-store.mjs";
+import { TERMINAL_STATUSES } from "../../plugins/delegate/scripts/lib/shared/core/job.mjs";
+import { isPidAlive } from "../../plugins/delegate/scripts/lib/shared/core/reconcile.mjs";
+import { workspaceStateDir } from "../../plugins/delegate/scripts/lib/adapter.mjs";
 
 const FIXTURE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -62,7 +62,7 @@ test("foreground task: runs to completion and prints the result", async () => {
   const jobs = listJobs(stateDir);
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].status, "completed");
-  assert.equal(jobs[0].profile, "kimi");
+  assert.equal(jobs[0].request.profile, "kimi");
   assert.match(out.join("\n"), /echo:say hi/);
   assert.equal(
     fs.readFileSync(promptFilePath(stateDir, jobs[0].id), "utf8"),
@@ -85,11 +85,61 @@ test("background task: writes queued job + prompt file and spawns detached worke
   const jobs = listJobs(stateDir);
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].status, "queued");
+  assert.match(jobs[0].id, /^delegate-/);
   assert.equal(spawned.length, 1);
-  assert.ok(spawned[0].args.some((a) => a.includes("worker.mjs")));
+  assert.ok(spawned[0].args.some((a) => a.includes("worker-entry.mjs")));
   assert.ok(spawned[0].args.includes(jobs[0].id));
   assert.equal(spawned[0].options.detached, true);
   assert.match(out.join("\n"), new RegExp(jobs[0].id));
+});
+
+// ─── F3: background spawn throws → job finalized failed, not left queued ──────
+// The detached worker spawn can throw synchronously (execPath missing, resource
+// exhaustion). worker-entry never starts, so it never stamps a pid — reconcile
+// alone (which needs a dead pid) cannot save a pid-less queued job. The companion
+// must finalize the job failed itself and return 1.
+//
+// mutation criterion: remove the try/catch around the detached spawnImpl → the
+// throw escapes runCompanion (rejected promise) and the job stays "queued" → both
+// the exit-code assertion and the status assertion turn red.
+test("F3: background spawn throw finalizes the job failed (not left queued) and exits 1", async () => {
+  const { deps, out, stateDir } = setup();
+  deps.workerSpawnImpl = () => {
+    const err = new Error("spawn EAGAIN");
+    err.code = "EAGAIN";
+    throw err;
+  };
+  const code = await runCompanion(
+    ["task", "boom", "--profile", "kimi", "--background"],
+    deps,
+  );
+  assert.equal(code, 1, "spawn failure must exit 1");
+  const jobs = listJobs(stateDir);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].status, "failed", "job must be finalized failed, not left queued");
+  assert.equal(jobs[0].errorKind, "spawn");
+  assert.match(jobs[0].error, /EAGAIN/);
+  assert.match(out.join("\n"), /EAGAIN/);
+});
+
+test("F3: background spawn throw with --json emits the failed result projection", async () => {
+  const { deps, stateDir } = setup();
+  const lines = [];
+  deps.out = (line) => lines.push(line);
+  deps.workerSpawnImpl = () => {
+    throw new Error("spawn ENOMEM");
+  };
+  const code = await runCompanion(
+    ["task", "boom", "--profile", "kimi", "--background", "--json"],
+    deps,
+  );
+  assert.equal(code, 1);
+  const payload = JSON.parse(lines.join("\n"));
+  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.status, "failed");
+  assert.equal(payload.errorKind, "spawn");
+  assert.match(payload.error, /ENOMEM/);
+  assert.equal(listJobs(stateDir)[0].status, "failed");
 });
 
 test("task without profile or default fails with guidance, creates no job", async () => {
@@ -100,21 +150,146 @@ test("task without profile or default fails with guidance, creates no job", asyn
   assert.match(out.join("\n"), /profile/i);
 });
 
-test("resume-id reuses source job settings + session, links resumedFrom", async () => {
+test("task without a prompt or --prompt-file fails with UsageError, creates no job", async () => {
+  const { deps, out, stateDir } = setup();
+  const code = await runCompanion(["task", "--profile", "kimi"], deps);
+  assert.notEqual(code, 0);
+  assert.equal(listJobs(stateDir).length, 0);
+  assert.match(out.join("\n"), /prompt/i);
+});
+
+test("--prompt-file reads the prompt from a file (workflow seam)", async () => {
+  const { dataRoot, cwd, deps } = setup();
+  const promptPath = path.join(cwd, "p.md");
+  fs.writeFileSync(promptPath, "from file");
+  const code = await runCompanion(
+    ["task", "--prompt-file", promptPath, "--profile", "kimi"],
+    deps,
+  );
+  assert.equal(code, 0);
+  const job = listJobs(workspaceStateDir(dataRoot, cwd))[0];
+  assert.equal(
+    fs.readFileSync(promptFilePath(workspaceStateDir(dataRoot, cwd), job.id), "utf8"),
+    "from file",
+  );
+});
+
+test("--prompt-file with an unreadable path fails with UsageError, creates no job", async () => {
+  const { deps, out, stateDir } = setup();
+  const code = await runCompanion(
+    ["task", "--prompt-file", "/no/such/prompt.md", "--profile", "kimi"],
+    deps,
+  );
+  assert.notEqual(code, 0);
+  assert.equal(listJobs(stateDir).length, 0);
+  assert.match(out.join("\n"), /prompt file not readable/i);
+});
+
+test("--json on background launch emits the unified launch projection", async () => {
+  const { deps } = setup();
+  const lines = [];
+  deps.out = (line) => lines.push(line);
+  deps.workerSpawnImpl = () => ({ unref() {}, pid: 7777 });
+  await runCompanion(
+    ["task", "x", "--profile", "kimi", "--background", "--json"],
+    deps,
+  );
+  const payload = JSON.parse(lines.join("\n"));
+  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.status, "queued");
+  assert.match(payload.jobId, /^delegate-/);
+});
+
+test("--json on foreground completion emits the unified result projection", async () => {
+  const { deps } = setup();
+  const lines = [];
+  deps.out = (line) => lines.push(line);
+  const code = await runCompanion(
+    ["task", "hello", "--profile", "kimi", "--json"],
+    deps,
+  );
+  assert.equal(code, 0);
+  const payload = JSON.parse(lines.join("\n"));
+  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.status, "completed");
+  assert.ok(typeof payload.resultText === "string");
+  assert.ok("sessionId" in payload && "durationMs" in payload && "errorKind" in payload);
+});
+
+test("--read-only maps to permission-mode default in the spawned argv; --write and default map to bypassPermissions", async () => {
+  for (const [flags, expected] of [
+    [["--read-only"], "default"],
+    [["--write"], "bypassPermissions"],
+    [[], "bypassPermissions"],
+  ]) {
+    const { deps } = setup();
+    let captured = null;
+    deps.claudeSpawnImpl = (_b, args, options) => {
+      captured = args;
+      return spawn(process.execPath, [FIXTURE], {
+        ...options,
+        env: { ...options.env, FAKE_CLAUDE_MODE: "success" },
+      });
+    };
+    const code = await runCompanion(
+      ["task", "hi", "--profile", "kimi", ...flags],
+      deps,
+    );
+    assert.equal(code, 0, `flags=${flags.join(" ")}`);
+    const idx = captured.indexOf("--permission-mode");
+    assert.ok(idx >= 0, `--permission-mode present for ${flags.join(" ")}`);
+    assert.equal(captured[idx + 1], expected, `flags=${flags.join(" ")}`);
+  }
+});
+
+test("--model is threaded into the spawned argv", async () => {
+  const { deps } = setup();
+  let captured = null;
+  deps.claudeSpawnImpl = (_b, args, options) => {
+    captured = args;
+    return spawn(process.execPath, [FIXTURE], {
+      ...options,
+      env: { ...options.env, FAKE_CLAUDE_MODE: "success" },
+    });
+  };
+  const code = await runCompanion(
+    ["task", "hi", "--profile", "kimi", "--model", "deepseek-chat"],
+    deps,
+  );
+  assert.equal(code, 0);
+  const idx = captured.indexOf("--model");
+  assert.ok(idx >= 0);
+  assert.equal(captured[idx + 1], "deepseek-chat");
+});
+
+test("resume-job reuses source job settings + session, links resumedFrom", async () => {
   const { deps, stateDir } = setup();
   await runCompanion(["task", "first", "--profile", "kimi"], deps);
   const first = listJobs(stateDir)[0];
   assert.equal(first.sessionId, "sess-fake-1");
   const code = await runCompanion(
-    ["task", "follow", "up", "--resume-id", first.id],
+    ["task", "follow", "up", "--resume-job", first.id],
     deps,
   );
   assert.equal(code, 0);
   const jobs = listJobs(stateDir);
   const resumed = jobs.find((j) => j.id !== first.id);
-  assert.equal(resumed.resumedFrom, first.id);
-  assert.equal(resumed.resumeSessionId, "sess-fake-1");
-  assert.equal(resumed.settingsPath, first.settingsPath);
+  assert.equal(resumed.request.resumedFrom, first.id);
+  assert.equal(resumed.request.resumeSessionId, "sess-fake-1");
+  assert.equal(resumed.request.settingsPath, first.request.settingsPath);
+});
+
+test("--resume-id now fails with UsageError (renamed to --resume-job)", async () => {
+  const { deps, out, stateDir } = setup();
+  await runCompanion(["task", "first", "--profile", "kimi"], deps);
+  const first = listJobs(stateDir)[0];
+  out.length = 0;
+  const code = await runCompanion(
+    ["task", "follow", "--resume-id", first.id],
+    deps,
+  );
+  assert.notEqual(code, 0);
+  assert.match(out.join("\n"), /Unknown flag: --resume-id/);
 });
 
 test("resume ignores --profile: reuses source job's settings (no mid-resume model switch)", async () => {
@@ -123,13 +298,13 @@ test("resume ignores --profile: reuses source job's settings (no mid-resume mode
   await runCompanion(["task", "first", "--profile", "kimi"], deps);
   const first = listJobs(stateDir)[0];
   const code = await runCompanion(
-    ["task", "follow", "--resume-id", first.id, "--profile", "glm"],
+    ["task", "follow", "--resume-job", first.id, "--profile", "glm"],
     deps,
   );
   assert.equal(code, 0);
   const resumed = listJobs(stateDir).find((j) => j.id !== first.id);
-  assert.equal(resumed.profile, "kimi");
-  assert.equal(resumed.settingsPath, first.settingsPath);
+  assert.equal(resumed.request.profile, "kimi");
+  assert.equal(resumed.request.settingsPath, first.request.settingsPath);
 });
 
 test("resume-last picks newest terminal job with a session id", async () => {
@@ -256,12 +431,12 @@ test("--profile with path traversal is rejected before any job is created", asyn
   assert.match(out.join("\n"), /Invalid profile name/);
 });
 
-test("result/cancel/resume-id reject traversal job ids", async () => {
+test("result/cancel/resume-job reject traversal job ids", async () => {
   const { deps, out } = setup();
   assert.notEqual(await runCompanion(["result", "../../etc/passwd"], deps), 0);
   assert.notEqual(await runCompanion(["cancel", "../../x"], deps), 0);
   assert.notEqual(
-    await runCompanion(["task", "hi", "--resume-id", "../../x"], deps),
+    await runCompanion(["task", "hi", "--resume-job", "../../x"], deps),
     0,
   );
   assert.match(out.join("\n"), /Invalid job id/);
@@ -271,9 +446,9 @@ test("resume with deleted source settings fails fast, creates no new job", async
   const { deps, out, stateDir } = setup();
   await runCompanion(["task", "first", "--profile", "kimi"], deps);
   const first = listJobs(stateDir)[0];
-  fs.unlinkSync(first.settingsPath);
+  fs.unlinkSync(first.request.settingsPath);
   const code = await runCompanion(
-    ["task", "again", "--resume-id", first.id],
+    ["task", "again", "--resume-job", first.id],
     deps,
   );
   assert.notEqual(code, 0);
@@ -295,27 +470,13 @@ test("job artifacts are owner-only (no group/world access)", async () => {
   }
 });
 
-test("execute-plan wraps the plan file into the prompt", async () => {
-  const { deps, cwd, stateDir } = setup();
-  const planPath = path.join(cwd, "plan.md");
-  fs.writeFileSync(planPath, "# The Plan\n1. do X");
+test("--wait and --background are mutually exclusive", async () => {
+  const { deps, out, stateDir } = setup();
   const code = await runCompanion(
-    ["execute-plan", planPath, "--profile", "kimi"],
-    deps,
-  );
-  assert.equal(code, 0);
-  const job = listJobs(stateDir)[0];
-  const prompt = fs.readFileSync(promptFilePath(stateDir, job.id), "utf8");
-  assert.match(prompt, /pre-approved implementation plan/);
-  assert.match(prompt, /# The Plan/);
-});
-
-test("execute-plan with missing file fails cleanly", async () => {
-  const { deps, out } = setup();
-  const code = await runCompanion(
-    ["execute-plan", "/no/such/plan.md", "--profile", "kimi"],
+    ["task", "hi", "--profile", "kimi", "--wait", "--background"],
     deps,
   );
   assert.notEqual(code, 0);
-  assert.match(out.join("\n"), /plan file/i);
+  assert.equal(listJobs(stateDir).length, 0);
+  assert.match(out.join("\n"), /mutually exclusive/);
 });

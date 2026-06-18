@@ -5,9 +5,9 @@ export function renderStatus(jobs) {
       [
         job.id,
         (job.status ?? "?").padEnd(9),
-        `profile=${job.profile ?? "?"}`,
+        `profile=${job.request?.profile ?? "?"}`,
         job.createdAt ?? "",
-        job.promptPreview ? `"${job.promptPreview}"` : "",
+        job.title ? `"${job.title}"` : "",
       ]
         .filter(Boolean)
         .join("  "),
@@ -16,17 +16,17 @@ export function renderStatus(jobs) {
 }
 
 export function renderResult(job, logTail = "") {
-  const head = `[${job.id}] ${job.status} (profile=${job.profile ?? "?"})`;
+  const head = `[${job.id}] ${job.status} (profile=${job.request?.profile ?? "?"})`;
   if (job.status === "completed") {
     return `${head}\n\n${job.resultText ?? "(no result text)"}`;
   }
-  const lines = [head];
+  const lines = [job.errorKind ? `${head} [${job.errorKind}]` : head];
   if (job.error) lines.push(`error: ${job.error}`);
   if (logTail) lines.push("", "--- log tail ---", logTail);
   if (job.sessionId) {
     lines.push(
       "",
-      `Tip: continue this thread with: task --resume-id ${job.id} "<follow-up>"`,
+      `Tip: continue this thread with: task --resume-job ${job.id} "<follow-up>"`,
     );
   }
   return lines.join("\n");

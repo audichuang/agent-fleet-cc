@@ -6,10 +6,10 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runCompanion } from "../../plugins/delegate/scripts/delegate-companion.mjs";
 import {
-  workspaceStateDir,
   writeJob,
   readJob,
-} from "../../plugins/delegate/scripts/lib/state.mjs";
+} from "../../plugins/delegate/scripts/lib/shared/core/state-store.mjs";
+import { workspaceStateDir } from "../../plugins/delegate/scripts/lib/adapter.mjs";
 
 const FIXTURE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -36,11 +36,11 @@ function setup() {
 
 test("status reconciles dead pids before rendering", async () => {
   const { out, deps, stateDir } = setup();
-  writeJob(stateDir, { id: "dlg-z", status: "running", pid: 999999, createdAt: "a" });
+  writeJob(stateDir, { id: "delegate-z", status: "running", pid: 999999, createdAt: "a" });
   const code = await runCompanion(["status"], deps);
   assert.equal(code, 0);
-  assert.equal(readJob(stateDir, "dlg-z").status, "failed");
-  assert.match(out.join("\n"), /dlg-z/);
+  assert.equal(readJob(stateDir, "delegate-z").status, "failed");
+  assert.match(out.join("\n"), /delegate-z/);
 });
 
 test("result --last returns newest job; result with no jobs exits 1", async () => {
@@ -54,14 +54,14 @@ test("result --last returns newest job; result with no jobs exits 1", async () =
 
 test("cancel running job then result shows cancelled", async () => {
   const { out, deps, stateDir } = setup();
-  writeJob(stateDir, { id: "dlg-r", status: "running", pid: process.pid, createdAt: "a" });
+  writeJob(stateDir, { id: "delegate-r", status: "running", pid: process.pid, createdAt: "a" });
   // process.pid 是活的 — 但 killImpl 不可注入到 companion 層，因此這裡只驗證
   // 狀態機：cancel 後 job 為 cancelled。對自己送 SIGTERM 是危險的，所以先把
   // pid 改成不存在的，讓 cancelJob 走「不發信號」分支。
-  writeJob(stateDir, { ...readJob(stateDir, "dlg-r"), pid: 999998 });
-  const code = await runCompanion(["cancel", "dlg-r"], deps);
+  writeJob(stateDir, { ...readJob(stateDir, "delegate-r"), pid: 999998 });
+  const code = await runCompanion(["cancel", "delegate-r"], deps);
   assert.equal(code, 0);
-  assert.equal(readJob(stateDir, "dlg-r").status, "cancelled");
+  assert.equal(readJob(stateDir, "delegate-r").status, "cancelled");
   assert.match(out.join("\n"), /Cancelled/);
 });
 
@@ -97,4 +97,47 @@ test("unknown command prints usage and exits 1", async () => {
   const code = await runCompanion(["bogus"], deps);
   assert.equal(code, 1);
   assert.match(out.join("\n"), /usage:/);
+});
+
+test("status --json emits an array of core-field projections", async () => {
+  const { out, deps, stateDir } = setup();
+  writeJob(stateDir, { id: "delegate-z", status: "running", pid: 999999, createdAt: "a" });
+  const code = await runCompanion(["status", "--json"], deps);
+  assert.equal(code, 0);
+  const arr = JSON.parse(out.join("\n"));
+  assert.ok(Array.isArray(arr));
+  assert.ok(arr.length >= 1, "expected at least one job in the array");
+  assert.ok("engine" in arr[0] && "jobId" in arr[0] && "status" in arr[0]);
+});
+
+test("cancel --json on unknown job emits {ok:false} and exits 1", async () => {
+  const { out, deps } = setup();
+  const code = await runCompanion(["cancel", "delegate-nope", "--json"], deps);
+  assert.equal(code, 1);
+  const payload = JSON.parse(out.join("\n"));
+  assert.equal(payload.ok, false);
+  assert.ok(typeof payload.message === "string" && payload.message.length > 0);
+});
+
+test("result --json emits the unified result projection; cancel --json emits {ok,message}", async () => {
+  // Part 1: result --json on a completed job returns resultProjection fields
+  const { out: out1, deps: deps1 } = setup();
+  await runCompanion(["task", "hello", "--profile", "kimi"], deps1);
+  out1.length = 0;
+  const code1 = await runCompanion(["result", "--last", "--json"], deps1);
+  assert.equal(code1, 0);
+  const proj = JSON.parse(out1.join("\n"));
+  assert.ok("engine" in proj && "jobId" in proj && "status" in proj);
+  assert.equal(proj.engine, "delegate");
+  assert.equal(proj.status, "completed");
+
+  // Part 2: cancel --json on a running job emits {ok:true, message:/Cancelled/}
+  const { out: out2, deps: deps2, stateDir: stateDir2 } = setup();
+  writeJob(stateDir2, { id: "delegate-r", status: "running", pid: process.pid, createdAt: "a" });
+  writeJob(stateDir2, { ...readJob(stateDir2, "delegate-r"), pid: 999998 });
+  const code2 = await runCompanion(["cancel", "delegate-r", "--json"], deps2);
+  assert.equal(code2, 0);
+  const cancelResult = JSON.parse(out2.join("\n"));
+  assert.equal(cancelResult.ok, true);
+  assert.match(cancelResult.message, /Cancelled/);
 });

@@ -534,6 +534,78 @@ test("installCancelForwarder (b): terminated before spawn — onChild still kill
   forwarder.dispose();
 });
 
+// ─── F4: SIGINT/SIGHUP forwarding ────────────────────────────────────────────
+// The detached engine child has its own process group, so a terminal Ctrl-C
+// (SIGINT) delivered to the foreground companion does NOT reach the engine —
+// orphaning it. installCancelForwarder must register the same kill handler on
+// SIGINT and SIGHUP, not just SIGTERM.
+//
+// mutation criterion: revert installCancelForwarder to register only "SIGTERM" →
+// the SIGINT emit triggers no kill → assert killed.length>=1 turns red.
+test("installCancelForwarder (F4): SIGINT triggers killGroupWithGrace on child.pid", () => {
+  const proc = new EventEmitter();
+  const killed = [];
+  const killImpl = (pid, sig) => killed.push({ pid, sig });
+  const forwarder = installCancelForwarder({
+    proc,
+    graceMs: 100,
+    killImpl,
+    scheduleImpl: () => ({ unref: () => {} }),
+  });
+  forwarder.onChild({ pid: 1234 });
+  proc.emit("SIGINT"); // Ctrl-C, NOT SIGTERM
+  assert.ok(killed.length >= 1, "SIGINT must trigger a kill (Ctrl-C forwarding)");
+  assert.ok(killed.some((k) => k.pid === -1234), "must kill the process GROUP (negative pgid)");
+  assert.ok(killed.some((k) => k.sig === "SIGTERM"), "killGroupWithGrace sends SIGTERM to the group first");
+  forwarder.dispose();
+});
+
+// F4: SIGHUP (controlling terminal closed) must also forward the kill.
+test("installCancelForwarder (F4): SIGHUP triggers killGroupWithGrace on child.pid", () => {
+  const proc = new EventEmitter();
+  const killed = [];
+  const killImpl = (pid, sig) => killed.push({ pid, sig });
+  const forwarder = installCancelForwarder({
+    proc,
+    graceMs: 100,
+    killImpl,
+    scheduleImpl: () => ({ unref: () => {} }),
+  });
+  forwarder.onChild({ pid: 5678 });
+  proc.emit("SIGHUP");
+  assert.ok(killed.some((k) => k.pid === -5678), "SIGHUP must kill the child's process group");
+  forwarder.dispose();
+});
+
+// F4: dispose() must remove the handler from ALL THREE signals, not just SIGTERM —
+// otherwise a post-dispose signal (or a leaked listener across reused proc) still kills.
+// mutation criterion: have dispose remove only "SIGTERM" → after dispose, emitting
+// SIGINT/SIGHUP still finds a registered listener → listenerCount > 0 → red.
+test("installCancelForwarder (F4): dispose removes SIGTERM, SIGINT, and SIGHUP handlers", () => {
+  const proc = new EventEmitter();
+  const killed = [];
+  const killImpl = (pid, sig) => killed.push({ pid, sig });
+  const forwarder = installCancelForwarder({
+    proc,
+    graceMs: 100,
+    killImpl,
+    scheduleImpl: () => ({ unref: () => {} }),
+  });
+  forwarder.onChild({ pid: 4242 });
+  // Before dispose: all three signals have exactly one listener.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    assert.equal(proc.listenerCount(sig), 1, `${sig} listener installed`);
+  }
+  forwarder.dispose();
+  // After dispose: no listeners remain on any of the three.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    assert.equal(proc.listenerCount(sig), 0, `${sig} listener removed by dispose`);
+  }
+  // And a post-dispose signal triggers no kill.
+  proc.emit("SIGINT");
+  assert.equal(killed.length, 0, "no kill after dispose");
+});
+
 test("installCancelForwarder (c): forceExitMs triggers exitImpl(0)", () => {
   const proc = new EventEmitter();
   const exited = [];
@@ -812,4 +884,51 @@ test("stdinError + exitCode!==0 → failed with stdin: error message", async () 
     /stdin:/,
     "error message must include 'stdin:' prefix when stdinError caused the failure",
   );
+});
+
+// ─── Fix A: spawn-failure ENOENT → errorKind must be "not-installed" ─────────
+// Before Fix A, classifyError received only outcome.stderrTail, which is empty on
+// a spawn failure (the process never started) — so classifyError returned "unknown".
+// After Fix A, classifyError receives outcome.spawnError (which contains the ENOENT
+// message) when spawnError is truthy, so ClaudeAdapter.classifyError can match /ENOENT/
+// and return "not-installed".
+//
+// This test drives runWorker with a deps.spawnImpl that throws an Error whose message
+// contains "spawn /no/such/bin ENOENT" — exactly what Node's child_process emits when
+// the binary is missing. The adapter's classifyError is wired to return "not-installed"
+// when the input matches /ENOENT/ (mimicking ClaudeAdapter.classifyError behaviour).
+//
+// mutation criterion: revert Fix A (change back to `outcome.stderrTail`) →
+// classifyError receives "" → returns "unknown" → assert.equal(job.errorKind, "not-installed") turns red.
+test("spawn failure (ENOENT) → errorKind is not-installed, not unknown", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 5000 });
+  createJob(stateDir, record, "the prompt");
+
+  // Adapter whose classifyError mirrors ClaudeAdapter: /ENOENT/ → "not-installed"
+  const adapter = makeAdapter({
+    classifyError: (text) => {
+      if (text && /ENOENT/.test(text)) return "not-installed";
+      return "unknown";
+    },
+  });
+
+  // spawnImpl that throws synchronously with an ENOENT-like error message,
+  // modelling what Node emits when the binary does not exist.
+  const spawnImpl = () => {
+    const err = new Error("spawn /no/such/bin ENOENT");
+    err.code = "ENOENT";
+    throw err;
+  };
+
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: { spawnImpl } });
+
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.status, "failed", "spawn failure must produce a failed job");
+  assert.equal(
+    job.errorKind,
+    "not-installed",
+    "errorKind must be 'not-installed' when spawnError contains ENOENT (Fix A)",
+  );
+  assert.match(job.error, /ENOENT/, "error field must contain the spawn error message");
 });

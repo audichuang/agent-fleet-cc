@@ -1,3 +1,4 @@
+// 統一旗標解析(spec §5:三 companion 共用同一套,杜絕再分岔)。升入自 delegate。
 export class UsageError extends Error {}
 
 export function parseArgs(argv, { valueFlags = [], boolFlags = [] } = {}) {

@@ -1,6 +1,6 @@
 ---
 description: Cancel a running delegate job
-argument-hint: "<job-id>"
+argument-hint: "<job-id> [--json]"
 ---
 
 Run and relay:
