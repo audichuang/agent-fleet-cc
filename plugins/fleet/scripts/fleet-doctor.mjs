@@ -87,8 +87,62 @@ function firstNonEmptyLine(stdout) {
   return null;
 }
 
-// Per-engine checker — stubbed for now; real recipes added in later tasks.
+function checkCodex(deps) {
+  const version = probeBinary("codex", deps); // ["--version"]
+  // binary-missing / version-failed: skip the app-server probe entirely.
+  if (!version.ok) {
+    const reason = version.found ? "version-failed" : "binary-missing";
+    const summary = version.found
+      ? "codex found but 'codex --version' failed"
+      : "codex not found on PATH — install the OpenAI Codex CLI";
+    return {
+      engine: "codex",
+      status: "not-ready",
+      authVerified: false,
+      reason,
+      summary,
+      deepFixCommand: "/codex:setup",
+      binaryName: "codex",
+      onPath: version.found,
+      appServerAvailable: false,
+      version: null,
+    };
+  }
+  // --version ok → run the second local probe.
+  const appServer = probeBinary("codex", deps, ["app-server", "--help"]);
+  if (appServer.ok) {
+    return {
+      engine: "codex",
+      status: "ready",
+      authVerified: false,
+      reason: null,
+      summary: `codex CLI ready (${version.version}) — auth not checked, run /codex:setup to log in`,
+      deepFixCommand: null,
+      binaryName: "codex",
+      onPath: true,
+      appServerAvailable: true,
+      version: version.version,
+    };
+  }
+  // --version ok but app-server probe failed (any non-zero / error / signal).
+  return {
+    engine: "codex",
+    status: "not-ready",
+    authVerified: false,
+    reason: "app-server-failed",
+    summary: `codex --version ok but 'codex app-server --help' failed — codex isn't fully ready`,
+    deepFixCommand: "/codex:setup",
+    binaryName: "codex",
+    onPath: true,
+    appServerAvailable: false,
+    version: version.version,
+  };
+}
+
+// Per-engine checker — routes to the real recipe or stubs for future tasks.
 export function checkEngine(engine, deps) {
+  if (engine === "codex") return checkCodex(deps);
+  // Other engines stubbed until their tasks.
   return {
     engine,
     status: "not-ready",

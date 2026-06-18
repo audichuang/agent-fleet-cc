@@ -128,3 +128,117 @@ test("probeBinary clause 2: status 1 (no error) → found but version-failed", (
   const r = probeBinary("codex", { spawnSyncImpl: spawn });
   assert.deepEqual(r, { ok: false, found: true, reason: "version-failed", version: null });
 });
+
+// ---------------------------------------------------------------------------
+// Task 4: checkCodex — two probes (version + app-server)
+// ---------------------------------------------------------------------------
+
+// Drives a codex-only run with separate results for the two probes.
+// versionResult answers ["--version"]; appServerResult answers ["app-server","--help"].
+// Returns { doc, appServerSpawned } so tests can assert the probe was/ wasn't run.
+function onlyCodexTwoProbe(versionResult, appServerResult) {
+  let appServerSpawned = false;
+  const spawn = (bin, args) => {
+    if (Array.isArray(args) && args[0] === "app-server") {
+      appServerSpawned = true;
+      return appServerResult ?? { status: 0, stdout: "usage\n", stderr: "" };
+    }
+    return versionResult;
+  };
+  const doc = JSON.parse(
+    runDoctor(["--json", "--only", "codex"], {
+      spawnSyncImpl: spawn,
+      env: { HOME: "/tmp/fleet-noexist-home" },
+    }).stdout,
+  );
+  return { doc, appServerSpawned: () => appServerSpawned };
+}
+
+test("codex ready requires BOTH probes exit 0", () => {
+  const { doc, appServerSpawned } = onlyCodexTwoProbe(
+    { status: 0, stdout: "codex-cli 0.42.1\n", stderr: "" },
+    { status: 0, stdout: "usage\n", stderr: "" },
+  );
+  const c = doc.engines.codex;
+  assert.equal(c.engine, "codex");
+  assert.equal(c.status, "ready");
+  assert.equal(c.reason, null);
+  assert.equal(c.binaryName, "codex");
+  assert.equal(c.onPath, true);
+  assert.equal(c.appServerAvailable, true);
+  assert.equal(c.version, "codex-cli 0.42.1");
+  assert.equal(c.authVerified, false);
+  assert.equal(c.deepFixCommand, null);
+  assert.ok(c.summary.length > 0);
+  assert.equal(appServerSpawned(), true);
+});
+
+test("codex binary-missing → app-server probe SKIPPED", () => {
+  const { doc, appServerSpawned } = onlyCodexTwoProbe({ error: { code: "ENOENT" }, status: null });
+  const c = doc.engines.codex;
+  assert.equal(c.status, "not-ready");
+  assert.equal(c.reason, "binary-missing");
+  assert.equal(c.onPath, false);
+  assert.equal(c.appServerAvailable, false);
+  assert.equal(c.version, null);
+  assert.equal(c.authVerified, false);
+  assert.equal(c.deepFixCommand, "/codex:setup");
+  assert.equal(appServerSpawned(), false, "app-server probe must be skipped when binary-missing");
+});
+
+test("codex version-failed (status 1) → app-server probe SKIPPED", () => {
+  const { doc, appServerSpawned } = onlyCodexTwoProbe({ status: 1, stdout: "", stderr: "boom" });
+  const c = doc.engines.codex;
+  assert.equal(c.status, "not-ready");
+  assert.equal(c.reason, "version-failed");
+  assert.equal(c.onPath, true);
+  assert.equal(c.appServerAvailable, false);
+  assert.equal(c.version, null);
+  assert.equal(c.deepFixCommand, "/codex:setup");
+  assert.equal(appServerSpawned(), false, "app-server probe must be skipped when version-failed");
+});
+
+test("codex version-failed (timeout shape) → app-server probe SKIPPED", () => {
+  const { doc, appServerSpawned } = onlyCodexTwoProbe({
+    status: null,
+    signal: "SIGTERM",
+    error: { code: "ETIMEDOUT" },
+  });
+  assert.equal(doc.engines.codex.reason, "version-failed");
+  assert.equal(doc.engines.codex.onPath, true);
+  assert.equal(doc.engines.codex.appServerAvailable, false);
+  assert.equal(appServerSpawned(), false);
+});
+
+test("codex app-server-failed: --version ok but app-server --help status 1", () => {
+  const { doc, appServerSpawned } = onlyCodexTwoProbe(
+    { status: 0, stdout: "codex-cli 0.42.1\n", stderr: "" },
+    { status: 1, stdout: "", stderr: "x" },
+  );
+  const c = doc.engines.codex;
+  assert.equal(c.status, "not-ready");
+  assert.equal(c.reason, "app-server-failed");
+  assert.equal(c.onPath, true);
+  assert.equal(c.appServerAvailable, false);
+  assert.equal(c.version, "codex-cli 0.42.1"); // version populated (--version succeeded)
+  assert.equal(c.authVerified, false);
+  assert.equal(c.deepFixCommand, "/codex:setup");
+  assert.equal(appServerSpawned(), true);
+});
+
+test("codex app-server-failed on ETIMEDOUT and ENOENT of the app-server probe", () => {
+  for (const appResult of [
+    { status: null, signal: "SIGTERM", error: { code: "ETIMEDOUT" } },
+    { error: { code: "ENOENT" }, status: null },
+  ]) {
+    const { doc } = onlyCodexTwoProbe(
+      { status: 0, stdout: "codex-cli 0.42.1\n", stderr: "" },
+      appResult,
+    );
+    const c = doc.engines.codex;
+    assert.equal(c.status, "not-ready");
+    assert.equal(c.reason, "app-server-failed");
+    assert.equal(c.appServerAvailable, false);
+    assert.equal(c.version, "codex-cli 0.42.1");
+  }
+});
