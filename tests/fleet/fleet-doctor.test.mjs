@@ -667,3 +667,31 @@ test("exit code is 0 for a completed not-ready run", () => {
   assert.equal(r.exitCode, 0);
   assert.equal(JSON.parse(r.stdout).engines.codex.status, "not-ready");
 });
+
+// ---------------------------------------------------------------------------
+// Task 9: human (non-json) output — per-engine readout + auth-not-verified caveat
+// ---------------------------------------------------------------------------
+
+test("human output: one line per engine, marks ready, routes not-ready, prints auth caveat", () => {
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "work", { env: { ANTHROPIC_AUTH_TOKEN: "t" } });
+  // codex ready (both probes status 0), antigravity missing, delegate ready.
+  const spawn = (bin) =>
+    bin === "agy"
+      ? { error: { code: "ENOENT" }, status: null }
+      : { status: 0, stdout: `${bin} 1.0\n`, stderr: "" };
+  const r = runDoctor([], {
+    spawnSyncImpl: spawn,
+    existsSyncImpl: () => false, // antigravity resolves to bare "agy" → ENOENT
+    env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: dataRoot },
+  });
+  assert.equal(r.exitCode, 0);
+  assert.equal(r.stderr, "");
+  assert.match(r.stdout, /codex/);
+  assert.match(r.stdout, /antigravity/);
+  assert.match(r.stdout, /delegate/);
+  // not-ready antigravity surfaces its deep-fix route.
+  assert.match(r.stdout, /\/antigravity:setup/);
+  // the auth-not-verified caveat must be present (ready != logged in).
+  assert.match(r.stdout, /auth.*not.*(checked|verified)/i);
+});

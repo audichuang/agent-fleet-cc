@@ -368,6 +368,27 @@ export function checkEngine(engine, deps) {
   };
 }
 
+function renderHuman(doc) {
+  const lines = [];
+  for (const name of doc.checkedEngines) {
+    const e = doc.engines[name];
+    if (e.status === "ready") {
+      lines.push(`✔ ${name}: ${e.summary}`);
+    } else {
+      lines.push(`✘ ${name}: ${e.summary} — run ${e.deepFixCommand} yourself`);
+    }
+  }
+  lines.push(doc.allReady ? "All checked engines are ready." : "Some engines need attention.");
+  // Honest readiness: auth/login/token was NEVER verified (authVerified: false).
+  // Keep "auth ... not checked" on ONE physical line (the test matches it with a
+  // single-line regex; RegExp '.' does not match a newline).
+  lines.push(
+    "Note: auth was NOT checked — 'ready' means local prerequisites are present, not that the engine is logged in.",
+  );
+  lines.push("Run /<engine>:setup on first use to complete auth.");
+  return lines.join("\n") + "\n";
+}
+
 export function runDoctor(argv = [], deps = {}) {
   let parsed;
   let engines;
@@ -395,8 +416,7 @@ export function runDoctor(argv = [], deps = {}) {
   if (parsed.json) {
     return { stdout: JSON.stringify(doc), stderr: "", exitCode: 0 };
   }
-  // Human output is implemented in a later task; emit a placeholder for now.
-  return { stdout: "", stderr: "", exitCode: 0 };
+  return { stdout: renderHuman(doc), stderr: "", exitCode: 0 };
 }
 
 function main() {
