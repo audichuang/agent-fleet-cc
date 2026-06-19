@@ -177,6 +177,11 @@ test("e2e: two-stage cancel actually REAPS the running engine process", async ()
     // the job.json flip to cancelled.
     assert.equal(await waitGone(enginePid), true, "engine process must be reaped after cancel (no zombie engine)");
     assert.equal(await pollStatus(w, jobId, "cancelled"), "cancelled");
+
+    // cross-engine parity: wait on a cancelled job must exit 2
+    const waitCancelled = cli(w, ["wait", jobId, "--timeout-s", "5", "--json"], { timeout: 10000 });
+    assert.equal(waitCancelled.status, 2, "wait on a cancelled job must exit 2");
+    assert.equal(jsonOne(waitCancelled, { successStderrEmpty: false }).status, "cancelled");
   } finally {
     if (enginePid && alive(enginePid)) { try { process.kill(-enginePid, "SIGKILL"); } catch {} try { process.kill(enginePid, "SIGKILL"); } catch {} }
     w.cleanup();
