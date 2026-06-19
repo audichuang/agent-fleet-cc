@@ -1,0 +1,32 @@
+{
+  "skill_name": "e2e-testing",
+  "notes": "Procedural skill. Eval prompts produce a test file / written procedure (no real-engine model spend needed to grade). Baseline is somewhat non-blind because the skill's files live in the repo working tree; treat the lift as understated.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "write-cancel-e2e",
+      "prompt": "I just changed `codex wait` so a cancelled job exits 2. Write an end-to-end test for the codex plugin that proves this, and make sure the test would actually fail on the old code.",
+      "expected_output": "A hermetic e2e test that drives the real codex-companion.mjs as a subprocess in an isolated workspace, seeds a terminal cancelled job via the plugin's state writers, asserts exit code 2, and is shown to be a true regression (fails on pre-fix code).",
+      "files": [],
+      "assertions": [
+        {"text": "drives the real codex-companion.mjs via spawnSync (not in-process)", "kind": "manual"},
+        {"text": "seeds a cancelled job directly (terminal seed; no pid juggling needed)", "kind": "manual"},
+        {"text": "asserts wait exit code === 2", "kind": "manual"},
+        {"text": "shows non-vacuity: would fail on old code (revert-the-line or base worktree)", "kind": "manual"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "verify-two-layer",
+      "prompt": "I refactored the fleet status board. How do I verify it end-to-end against the real engines, and how is that different from just running the test suite?",
+      "expected_output": "A procedure that distinguishes the hermetic suite (npm run test:e2e, fake engines) from the real-engine smoke (manual gate), checks readiness via fleet-doctor first, runs the bundled real-engine-smoke.mjs, and notes the cost/manual-gate caveat.",
+      "files": [],
+      "assertions": [
+        {"text": "distinguishes hermetic (fake) layer from real-engine layer", "kind": "manual"},
+        {"text": "checks readiness via fleet-doctor --json before any real run", "kind": "manual"},
+        {"text": "runs .claude/skills/e2e-testing/scripts/real-engine-smoke.mjs for the real layer", "kind": "manual"},
+        {"text": "notes the real layer is a manual gate that costs real model tokens", "kind": "manual"}
+      ]
+    }
+  ]
+}
