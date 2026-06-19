@@ -352,6 +352,14 @@ function cmdCancel({ argv, out, stateDir }) {
 // Timeout exit code for wait: not an error — lets an orchestrator cleanly re-enter (spec §2.3)
 const WAIT_TIMEOUT_EXIT = 10;
 
+// wait exit-code contract (identical to codex/antigravity):
+// 0 completed, 2 cancelled, 1 failed/other terminal, 10 timeout (handled separately).
+function waitExitCode(status) {
+  if (status === "completed") return 0;
+  if (status === "cancelled") return 2;
+  return 1;
+}
+
 async function cmdWait({ argv, out, stateDir }) {
   const { flags, positionals } = parseArgs(argv, {
     valueFlags: ["timeout-s"],
@@ -391,7 +399,7 @@ async function cmdWait({ argv, out, stateDir }) {
   }
   out(flags.json ? JSON.stringify(resultProjection(job)) : renderResult(job, ""));
   if (!done) return WAIT_TIMEOUT_EXIT;
-  return job.status === "completed" ? 0 : 1;
+  return waitExitCode(job.status);
 }
 
 async function cmdLogs({ argv, out, stateDir }) {

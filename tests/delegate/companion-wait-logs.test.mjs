@@ -251,3 +251,35 @@ test("wait/logs on unknown job exit 1 with a clear message", async () => {
     `expected clear error message, got: ${out.join("\n")}`,
   );
 });
+
+test("wait on a cancelled job exits 2 (parity with codex/antigravity)", async () => {
+  const { deps, stateDir } = setupE2E("hang");
+
+  const launchCode = await runCompanion(
+    ["task", "cancel me", "--profile", "kimi", "--background"],
+    deps,
+  );
+  assert.equal(launchCode, 0);
+
+  const jobId = listJobs(stateDir)[0].id;
+
+  const runningDeadline = Date.now() + 10_000;
+  while (Date.now() < runningDeadline) {
+    const job = readJob(stateDir, jobId);
+    if (job && job.status === "running") break;
+    await sleep(50);
+  }
+  assert.equal(readJob(stateDir, jobId)?.status, "running");
+
+  const cancelCode = await runCompanion(["cancel", jobId], deps);
+  assert.equal(cancelCode, 0);
+  assert.equal((await waitForTerminal(stateDir, jobId, 10_000)).status, "cancelled");
+
+  const waitOut = [];
+  const waitDeps = { ...deps, out: (line) => waitOut.push(line) };
+  const waitCode = await runCompanion(
+    ["wait", jobId, "--timeout-s", "5", "--json"],
+    waitDeps,
+  );
+  assert.equal(waitCode, 2, "cancelled job must exit 2, not 1");
+});
