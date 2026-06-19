@@ -1,5 +1,5 @@
 export function renderStatus(jobs) {
-  if (!jobs.length) return "No delegate jobs in this workspace.";
+  if (!jobs.length) return "No cc jobs in this workspace.";
   return jobs
     .map((job) =>
       [

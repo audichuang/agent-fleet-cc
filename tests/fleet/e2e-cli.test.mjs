@@ -35,7 +35,7 @@ function fakeTree(payloads) {
   fs.copyFileSync(REAL_CLI_ARGS, path.join(root, "fleet/scripts/lib/cli-args.mjs"));
   writeFakeScript(path.join(root, "codex/scripts/codex-companion.mjs"), payloads.codex ?? []);
   writeFakeScript(path.join(root, "antigravity/scripts/commands/status.mjs"), payloads.antigravity ?? []);
-  writeFakeScript(path.join(root, "delegate/scripts/delegate-companion.mjs"), payloads.delegate ?? []);
+  writeFakeScript(path.join(root, "cc/scripts/cc-companion.mjs"), payloads.cc ?? []);
   return { root, fleetScript };
 }
 

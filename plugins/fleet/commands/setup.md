@@ -22,7 +22,7 @@ labels with the binary named):
 
 - `codex` — OpenAI Codex CLI (review / delegate tasks)
 - `antigravity` — Google Antigravity CLI (`agy`)
-- `delegate` — cheap-model headless Claude Code via profiles
+- `cc` — a headless Claude Code instance, engine chosen by profile (native / cheap / any model)
 
 Only the chosen engines proceed.
 
@@ -75,12 +75,12 @@ For each `not-ready` engine, in the order they appear in `checkedEngines`:
      themselves. If `version-failed`, mention the resolved `binPath` /
      `resolvedFrom` so they know which binary failed, then point them at
      `/antigravity:setup`. Never run `agy --print` yourself.
-   - **delegate** (`cli-missing` / `cli-version-failed` / `no-profiles` /
-     `no-valid-profiles`): recommend the user run `/delegate:setup` themselves.
+   - **cc** (`cli-missing` / `cli-version-failed` / `no-profiles` /
+     `no-valid-profiles`): recommend the user run `/cc:setup` themselves.
      For `no-valid-profiles`, surface the specific `profiles[].error`
      (`invalid-name` / `unparseable-json` / `non-scalar-env`) and the offending
      `name` so the user knows which file to fix, then tell them to run
-     `/delegate:setup`.
+     `/cc:setup`.
 4. **Plugin-not-installed fallback.** If the engine's plugin may not be installed
    (its `/<engine>:setup` slash command does not exist in this session), tell the
    user to FIRST run `/plugin install <engine>@agent-fleet`, THEN `/<engine>:setup`.
@@ -97,18 +97,18 @@ Print a compact summary: for each chosen engine, either `ready` or
 **Auth caveat (ALWAYS print, even when every engine is `ready`).** Tell the user plainly: auth was NOT verified by fleet-doctor, so `ready` means local prerequisites only — not that the engine is logged in or usable right now. Because `fleet-doctor` never verifies auth (`authVerified: false` on every engine), on first use the user should run the engine's own setup to complete auth:
 - codex → `/codex:setup` (guides `codex login`),
 - antigravity → `/antigravity:setup` (runs the OAuth flow),
-- delegate → `/delegate:setup` (the token lives in each profile's `env`;
+- cc → `/cc:setup` (the token lives in each profile's `env`;
   `fleet-doctor` only checked shape, never the token).
 
 Do NOT present `ready` as "usable now."
 
-**When `delegate` is `ready`** (claude CLI present + ≥1 valid profile),
+**When `cc` is `ready`** (claude CLI present + ≥1 valid profile),
 additionally print this manual real-smoke one-liner as an informational hint,
 using the REAL installed slash command and substituting `firstValidProfile`
 for `<name>`:
 
 ```text
-/delegate:task "hello" --profile <name> --json
+/cc:task "hello" --profile <name> --json
 ```
 
 This is a hint the user may run manually. Never run it yourself — that would be

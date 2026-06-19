@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SOURCE = path.join(root, "shared", "lib");
 // Plan C/D 把 antigravity、codex 加進來
-const TARGETS = ["delegate"].map((p) =>
+const TARGETS = ["cc"].map((p) =>
   path.join(root, "plugins", p, "scripts", "lib", "shared"),
 );
 

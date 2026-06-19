@@ -19,8 +19,8 @@ const ENGINE_COMMANDS = {
     script: ["..", "antigravity", "scripts", "commands", "status.mjs"],
     args: ["--json"],
   },
-  delegate: {
-    script: ["..", "delegate", "scripts", "delegate-companion.mjs"],
+  cc: {
+    script: ["..", "cc", "scripts", "cc-companion.mjs"],
     args: ["status", "--json"],
   },
 };
@@ -200,8 +200,8 @@ function buildActions(engine, job) {
   actions.push(`/${engine}:wait ${id}`);
   if (engine === "codex") {
     actions.push(`/codex:logs ${id}`);
-  } else if (engine === "delegate") {
-    actions.push(`/delegate:logs ${id} --follow`);
+  } else if (engine === "cc") {
+    actions.push(`/cc:logs ${id} --follow`);
   } else {
     actions.push(`/antigravity:logs ${id} --follow`);
   }

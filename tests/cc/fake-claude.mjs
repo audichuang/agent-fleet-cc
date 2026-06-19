@@ -89,7 +89,7 @@ process.stdin.on("end", async () => {
         ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL ?? null,
         ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL ?? null,
         CLAUDECODE: process.env.CLAUDECODE ?? null,
-        CLAUDE_DELEGATE_ACTIVE: process.env.CLAUDE_DELEGATE_ACTIVE ?? null,
+        CLAUDE_CC_ACTIVE: process.env.CLAUDE_CC_ACTIVE ?? null,
       }),
       session_id: sessionId,
     });

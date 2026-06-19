@@ -1,15 +1,15 @@
-// tests/delegate/adapter.test.mjs
+// tests/cc/adapter.test.mjs
 import "./helpers.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { validateProcessAdapter } from "../../plugins/delegate/scripts/lib/shared/adapter-api.mjs";
+import { validateProcessAdapter } from "../../plugins/cc/scripts/lib/shared/adapter-api.mjs";
 import {
   makeClaudeAdapter,
   buildClaudeArgs,
   resolveDataRoot,
   workspaceStateDir,
-} from "../../plugins/delegate/scripts/lib/adapter.mjs";
+} from "../../plugins/cc/scripts/lib/adapter.mjs";
 import { writeProfile, makeDataRoot } from "./helpers.mjs";
 
 test("adapter satisfies the ProcessAdapter contract", () => {
@@ -95,10 +95,10 @@ test("classifyError buckets", () => {
 test("resumeArgs + recursion marker + paths", () => {
   const a = makeClaudeAdapter();
   assert.deepEqual(a.resumeArgs("s1"), ["-r", "s1"]);
-  assert.equal(a.recursionMarker, "CLAUDE_DELEGATE_ACTIVE");
-  assert.equal(a.engine, "delegate");
+  assert.equal(a.recursionMarker, "CLAUDE_CC_ACTIVE");
+  assert.equal(a.engine, "cc");
   assert.equal(a.wantsWatchdog, false);
-  assert.equal(resolveDataRoot({ DELEGATE_PLUGIN_DATA: "/d" }), "/d");
+  assert.equal(resolveDataRoot({ CC_PLUGIN_DATA: "/d" }), "/d");
   const dir = workspaceStateDir("/root", "/home/u/proj");
   assert.ok(dir.startsWith(path.join("/root", "state", "proj-")));
   assert.equal(workspaceStateDir("/root", "/home/u/proj"), dir); // 穩定

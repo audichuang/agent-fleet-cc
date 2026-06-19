@@ -49,7 +49,7 @@ function dataRoots(report) {
   const def = process.env.CLAUDE_PLUGIN_DATA
     || path.join(os.homedir(), ".claude/plugins/data/codex-agent-fleet");
   roots.add(def);
-  const dr = report.engines?.delegate?.dataRoot;
+  const dr = report.engines?.cc?.dataRoot;
   if (dr) roots.add(dr);
   return [...roots];
 }
@@ -82,12 +82,12 @@ const ENGINES = {
     cancel: (ws, id) => ["cancel", id, "--json"],
     waitFor: (ws, id, ms) => ["wait", id, "--timeout-ms", String(ms), "--json"],
   },
-  delegate: {
-    script: path.join(REPO, "plugins/delegate/scripts/delegate-companion.mjs"),
+  cc: {
+    script: path.join(REPO, "plugins/cc/scripts/cc-companion.mjs"),
     needsProfile: true,
     launch: (ws, profile) => ["task", "smoke: reply with the single word ok", "--profile", profile, "--background", "--json"],
     cancel: (ws, id) => ["cancel", id, "--json"],
-    // delegate wait takes SECONDS, the others take ms.
+    // cc wait takes SECONDS, the others take ms.
     waitFor: (ws, id, ms) => ["wait", id, "--timeout-s", String(Math.max(1, Math.round(ms / 1000))), "--json"],
   },
 };

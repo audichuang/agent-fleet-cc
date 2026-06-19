@@ -73,23 +73,23 @@ test("setup.md drives the GUIDE-ONLY flow per spec §6", () => {
   // lists the three engines
   assert.match(text, /codex/);
   assert.match(text, /antigravity/);
-  assert.match(text, /delegate/);
+  assert.match(text, /cc/);
   // GUIDE-ONLY: routes each deep fix to the engine's OWN setup, run by the USER.
   assert.match(text, /\/codex:setup/);
   assert.match(text, /\/antigravity:setup/);
-  assert.match(text, /\/delegate:setup/);
+  assert.match(text, /\/cc:setup/);
   // §6.3 plugin-not-installed fallback.
   assert.match(text, /\/plugin install <engine>@agent-fleet/);
   // §6.3 confirm-by-re-running guidance (single-line, backtick adjacent to "re-run ").
   assert.match(text, /re-run `\/fleet:setup`/);
   // §6.4 auth-not-verified note (even when allReady) — single physical line.
   assert.match(text, /auth was NOT verified/, "must state auth was not verified");
-  // §6.4 delegate real-smoke hint uses the REAL slash command.
-  assert.match(text, /\/delegate:task "hello" --profile/);
+  // §6.4 cc real-smoke hint uses the REAL slash command.
+  assert.match(text, /\/cc:task "hello" --profile/);
   // GUIDE-ONLY guardrail: must NOT promise to invoke /<engine>:setup itself or
   // consume its re-check output. Pin the absence of the old in-flow phrasings.
   assert.doesNotMatch(text, /rely on its re-check output/i);
-  assert.doesNotMatch(text, /delegate-companion\.mjs/);
+  assert.doesNotMatch(text, /cc-companion\.mjs/);
 });
 
 test("doctor.md and status.md are safe read-only CLI wrappers", () => {

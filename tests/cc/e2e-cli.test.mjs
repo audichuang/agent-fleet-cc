@@ -1,4 +1,4 @@
-// Black-box end-to-end regression: drives the REAL delegate-companion.mjs CLI
+// Black-box end-to-end regression: drives the REAL cc-companion.mjs CLI
 // as a subprocess (the genuine isCliEntry / process.argv path), with a real
 // detached worker-entry, a real directory-layout store, and a real two-stage
 // cancel that is asserted to actually REAP the engine process — using a
@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const COMPANION = path.join(HERE, "../../plugins/delegate/scripts/delegate-companion.mjs");
+const COMPANION = path.join(HERE, "../../plugins/cc/scripts/cc-companion.mjs");
 const FAKE_CLAUDE = path.join(HERE, "fake-claude.mjs");
 
 const alive = (pid) => {
@@ -51,7 +51,7 @@ function makeWorkspace() {
   // hang mode + a pidfile so cancel/timeout tests can assert the engine is reaped.
   fs.writeFileSync(path.join(data, "profiles", "p-hang.json"), JSON.stringify({ env: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_PIDFILE: pidfile } }));
   fs.writeFileSync(path.join(data, "profiles", "p-fail.json"), JSON.stringify({ env: { FAKE_CLAUDE_MODE: "fail" } }));
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, DELEGATE_PLUGIN_DATA: data, DELEGATE_CLAUDE_BIN: shim };
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, CC_PLUGIN_DATA: data, CC_CLAUDE_BIN: shim };
   return {
     env, ws, data, pidfile,
     // maxRetries/retryDelay: a detached worker may still be finalizing a job into
@@ -128,10 +128,10 @@ test("e2e: foreground task completes with a clean single-line --json projection"
     const res = cli(w, ["task", "hello foreground", "--profile", "p-ok", "--json"]);
     assert.equal(res.status, 0, res.stderr);
     const payload = jsonOne(res);
-    assert.equal(payload.engine, "delegate");
+    assert.equal(payload.engine, "cc");
     assert.equal(payload.status, "completed");
     assert.equal(payload.resultText, "echo:hello foreground");
-    assert.match(payload.jobId, /^delegate-/);
+    assert.match(payload.jobId, /^cc-/);
     assert.equal(payload.errorKind, null);
   } finally { w.cleanup(); }
 });
@@ -267,12 +267,12 @@ test("e2e: --resume-job links a follow-up to the source job's settings + session
 test("e2e: machine-contract guards reject misuse (renamed/mutex/traversal/recursion)", () => {
   const w = makeWorkspace();
   try {
-    assert.notEqual(cli(w, ["task", "x", "--profile", "p-ok", "--resume-id", "delegate-x"]).status, 0, "--resume-id is renamed -> error");
+    assert.notEqual(cli(w, ["task", "x", "--profile", "p-ok", "--resume-id", "cc-x"]).status, 0, "--resume-id is renamed -> error");
     assert.notEqual(cli(w, ["task", "x", "--profile", "p-ok", "--wait", "--background"]).status, 0, "--wait + --background mutually exclusive");
     assert.notEqual(cli(w, ["cancel", "../../etc/passwd"]).status, 0, "traversal job id rejected");
     assert.notEqual(cli(w, ["result", "../../x"]).status, 0, "traversal job id rejected");
     const rec = spawnSync(process.execPath, [COMPANION, "task", "x", "--profile", "p-ok"], {
-      cwd: w.ws, env: { ...w.env, CLAUDE_DELEGATE_ACTIVE: "1" }, encoding: "utf8", timeout: 20000,
+      cwd: w.ws, env: { ...w.env, CLAUDE_CC_ACTIVE: "1" }, encoding: "utf8", timeout: 20000,
     });
     assert.equal(rec.status, 0);
     assert.match(rec.stdout, /recursion guard/i);

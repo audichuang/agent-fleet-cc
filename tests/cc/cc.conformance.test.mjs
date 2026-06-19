@@ -1,9 +1,9 @@
-// tests/delegate/delegate.conformance.test.mjs
+// tests/cc/cc.conformance.test.mjs
 import "./helpers.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runConformanceSuite } from "../shared/conformance/conformance.mjs";
-import { makeClaudeAdapter } from "../../plugins/delegate/scripts/lib/adapter.mjs";
+import { makeClaudeAdapter } from "../../plugins/cc/scripts/lib/adapter.mjs";
 import { makeDataRoot, writeProfile } from "./helpers.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));

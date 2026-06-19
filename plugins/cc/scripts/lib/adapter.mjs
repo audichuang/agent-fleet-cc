@@ -1,18 +1,18 @@
-// plugins/delegate/scripts/lib/adapter.mjs
-// ClaudeAdapter:delegate 的全部引擎知識住這裡(spec §2/§5)。
+// plugins/cc/scripts/lib/adapter.mjs
+// ClaudeAdapter:cc 的全部引擎知識住這裡(spec §2/§5)。
 // job runtime(state/worker/cancel)在 vendored shared,本檔不碰 I/O 生命週期。
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { resolveProfile } from "./profiles.mjs";
 
-export const RECURSION_MARKER = "CLAUDE_DELEGATE_ACTIVE";
+export const RECURSION_MARKER = "CLAUDE_CC_ACTIVE";
 
-// delegate 特有路徑邏輯(自舊 state.mjs 遷入,行為不變)
+// cc 特有路徑邏輯(自舊 state.mjs 遷入,行為不變)
 export function resolveDataRoot(env = process.env) {
-  if (env.DELEGATE_PLUGIN_DATA) return env.DELEGATE_PLUGIN_DATA;
+  if (env.CC_PLUGIN_DATA) return env.CC_PLUGIN_DATA;
   if (env.CLAUDE_PLUGIN_DATA) return env.CLAUDE_PLUGIN_DATA;
-  return path.join(os.homedir(), ".claude", "plugins", "data", "delegate");
+  return path.join(os.homedir(), ".claude", "plugins", "data", "cc");
 }
 
 export function workspaceStateDir(dataRoot, cwd) {
@@ -41,7 +41,7 @@ export function buildClaudeArgs({
 export function makeClaudeAdapter() {
   return {
     name: "claude",
-    engine: "delegate",
+    engine: "cc",
     recursionMarker: RECURSION_MARKER,
     wantsWatchdog: false,
     // request 只存 settingsPath/旗標 — profile env(含 AUTH_TOKEN)在 spawn
@@ -51,7 +51,7 @@ export function makeClaudeAdapter() {
       const profile = resolveProfile({ settingsPath: request.settingsPath });
       const head =
         request.binaryArgv ??
-        [process.env.DELEGATE_CLAUDE_BIN ?? "claude"];
+        [process.env.CC_CLAUDE_BIN ?? "claude"];
       const argv = [
         ...head,
         ...buildClaudeArgs({

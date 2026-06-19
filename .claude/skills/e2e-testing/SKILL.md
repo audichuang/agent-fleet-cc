@@ -2,7 +2,7 @@
 name: e2e-testing
 description: >-
   Complete end-to-end testing for the agent-fleet-cc plugin marketplace (codex /
-  antigravity / delegate / fleet). Use this whenever you need to verify engine
+  antigravity / cc / fleet). Use this whenever you need to verify engine
   behavior end-to-end, run or write E2E tests, run the real-engine smoke check,
   confirm a control-plane fix actually works against the live CLIs, prove a test
   is a true regression, or answer "did you actually run it end-to-end?". Triggers
@@ -40,14 +40,14 @@ not answer with the first and imply it was real.
 ## Layer 1 — Hermetic E2E suite
 
 ```bash
-npm run test:e2e     # the 4 black-box e2e files (delegate + codex + antigravity + fleet)
+npm run test:e2e     # the 4 black-box e2e files (cc + codex + antigravity + fleet)
 npm test             # full chain; test:e2e is the last && leg, so it gates the build
 ```
 
-`test:e2e` runs `tests/{delegate,codex,antigravity,fleet}/e2e-cli.test.mjs`.
-Each spawns the real plugin CLI (`delegate-companion.mjs`, `codex-companion.mjs`,
+`test:e2e` runs `tests/{cc,codex,antigravity,fleet}/e2e-cli.test.mjs`.
+Each spawns the real plugin CLI (`cc-companion.mjs`, `codex-companion.mjs`,
 `antigravity/bin/antigravity.mjs`, `fleet-status.mjs`) as a subprocess against an
-isolated workspace with fake/seeded state. `tests/delegate/e2e-cli.test.mjs` is
+isolated workspace with fake/seeded state. `tests/cc/e2e-cli.test.mjs` is
 the canonical template — read it before writing a new one.
 
 ## Layer 2 — Real-engine smoke (manual gate)
@@ -89,7 +89,7 @@ All three engines agree on this (verify any change against all three):
 | job `failed` / missing | `1` |
 | timeout before terminal | `10` |
 
-Reference implementations: delegate `waitExitCode` (`delegate-companion.mjs`),
+Reference implementations: cc `waitExitCode` (`cc-companion.mjs`),
 codex `waitExitCode` (`codex-companion.mjs`), antigravity `exitCodeFor`
 (`antigravity/scripts/commands/wait.mjs`). If you touch any one, grep the other
 two and keep them identical — a divergence here silently breaks orchestrators
@@ -97,13 +97,13 @@ that script `case $? in 2) ...`.
 
 ## Writing a new hermetic E2E test
 
-Follow the shape in `tests/delegate/e2e-cli.test.mjs`:
+Follow the shape in `tests/cc/e2e-cli.test.mjs`:
 
 1. **Isolated workspace per test** — `fs.mkdtempSync`; redirect the engine's data
-   dir env (`DELEGATE_PLUGIN_DATA`, `CLAUDE_PLUGIN_DATA`, …) so nothing leaks.
+   dir env (`CC_PLUGIN_DATA`, `CLAUDE_PLUGIN_DATA`, …) so nothing leaks.
 2. **Drive the real CLI** via `spawnSync(process.execPath, [COMPANION, ...args])`
    — this exercises the genuine `argv`/entry path, not an in-process helper.
-3. **Seed state, not a live model** — either a fake engine shim (delegate's
+3. **Seed state, not a live model** — either a fake engine shim (cc's
    `fake-claude.mjs`) or write `job.json` + log files directly with the plugin's
    own state writers, so `wait`/`logs`/`cancel`/`status` have something to read.
 4. **Assert the contract** — exit codes (`res.status`) AND the `--json`
@@ -126,8 +126,8 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
 
 - **`task --json` is MULTI-LINE pretty JSON** for codex and antigravity. Parsing
   `stdout.split("\n").pop()` gives you `}`, not the object. Parse the **whole**
-  stdout: `JSON.parse(entireStdout).jobId`. (delegate emits single-line JSON, so
-  this bites only when you generalize a delegate helper to the others.)
+  stdout: `JSON.parse(entireStdout).jobId`. (cc emits single-line JSON, so
+  this bites only when you generalize a cc helper to the others.)
 
 - **Seed an *active* ("running"/"queued") job with NO `pid`.** `wait`/`logs`/`status`
   call `listJobs → reconcileDeadPidJobs`, which auto-marks an **active** job
@@ -148,7 +148,7 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
   carried across polls) emits the intact character.
 
 - **Clean up real jobs.** A real background job spawns a detached worker AND a
-  watchdog. `cancel` reaps the worker (delegate's two-stage cancel is asserted to
+  watchdog. `cancel` reaps the worker (cc's two-stage cancel is asserted to
   kill the engine PID), but: prune the leftover `state/<slug>/` records, and don't
   orphan watchdogs. The smoke script does this; if you run engines by hand, end
   with a readiness/status check showing `0` running.

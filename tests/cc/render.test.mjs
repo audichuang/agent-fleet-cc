@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import {
   renderStatus,
   renderResult,
-} from "../../plugins/delegate/scripts/lib/render.mjs";
+} from "../../plugins/cc/scripts/lib/render.mjs";
 
 test("renderStatus: empty and populated", () => {
-  assert.match(renderStatus([]), /No delegate jobs/);
+  assert.match(renderStatus([]), /No cc jobs/);
   const text = renderStatus([
     {
       id: "dlg-1",

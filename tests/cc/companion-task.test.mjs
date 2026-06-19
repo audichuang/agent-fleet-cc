@@ -6,17 +6,17 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
-import { runCompanion } from "../../plugins/delegate/scripts/delegate-companion.mjs";
+import { runCompanion } from "../../plugins/cc/scripts/cc-companion.mjs";
 import {
   listJobs,
   readJob,
   jobFilePath,
   promptFilePath,
   logFilePath,
-} from "../../plugins/delegate/scripts/lib/shared/core/state-store.mjs";
-import { TERMINAL_STATUSES } from "../../plugins/delegate/scripts/lib/shared/core/job.mjs";
-import { isPidAlive } from "../../plugins/delegate/scripts/lib/shared/core/reconcile.mjs";
-import { workspaceStateDir } from "../../plugins/delegate/scripts/lib/adapter.mjs";
+} from "../../plugins/cc/scripts/lib/shared/core/state-store.mjs";
+import { TERMINAL_STATUSES } from "../../plugins/cc/scripts/lib/shared/core/job.mjs";
+import { isPidAlive } from "../../plugins/cc/scripts/lib/shared/core/reconcile.mjs";
+import { workspaceStateDir } from "../../plugins/cc/scripts/lib/adapter.mjs";
 
 const FIXTURE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,11 +32,11 @@ const fakeSpawn =
 
 function setup() {
   const dataRoot = makeDataRoot();
-  const cwd = makeTempDir("delegate-ws-");
+  const cwd = makeTempDir("cc-ws-");
   writeProfile(dataRoot, "kimi", { env: { ANTHROPIC_BASE_URL: "https://cheap" } });
   const out = [];
   const deps = {
-    env: { DELEGATE_PLUGIN_DATA: dataRoot, PATH: process.env.PATH },
+    env: { CC_PLUGIN_DATA: dataRoot, PATH: process.env.PATH },
     cwd,
     out: (line) => out.push(line),
     claudeSpawnImpl: fakeSpawn("success"),
@@ -44,9 +44,9 @@ function setup() {
   return { dataRoot, cwd, out, deps, stateDir: workspaceStateDir(dataRoot, cwd) };
 }
 
-test("recursion guard: CLAUDE_DELEGATE_ACTIVE=1 makes companion a no-op", async () => {
+test("recursion guard: CLAUDE_CC_ACTIVE=1 makes companion a no-op", async () => {
   const { deps, out } = setup();
-  deps.env.CLAUDE_DELEGATE_ACTIVE = "1";
+  deps.env.CLAUDE_CC_ACTIVE = "1";
   const code = await runCompanion(["task", "anything"], deps);
   assert.equal(code, 0);
   assert.match(out.join("\n"), /recursion guard/);
@@ -85,7 +85,7 @@ test("background task: writes queued job + prompt file and spawns detached worke
   const jobs = listJobs(stateDir);
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].status, "queued");
-  assert.match(jobs[0].id, /^delegate-/);
+  assert.match(jobs[0].id, /^cc-/);
   assert.equal(spawned.length, 1);
   assert.ok(spawned[0].args.some((a) => a.includes("worker-entry.mjs")));
   assert.ok(spawned[0].args.includes(jobs[0].id));
@@ -135,15 +135,34 @@ test("F3: background spawn throw with --json emits the failed result projection"
   );
   assert.equal(code, 1);
   const payload = JSON.parse(lines.join("\n"));
-  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.engine, "cc");
   assert.equal(payload.status, "failed");
   assert.equal(payload.errorKind, "spawn");
   assert.match(payload.error, /ENOMEM/);
   assert.equal(listJobs(stateDir)[0].status, "failed");
 });
 
-test("task without profile or default fails with guidance, creates no job", async () => {
-  const { deps, out, stateDir } = setup();
+test("task with 2+ profiles and none specified fails with guidance, creates no job", async () => {
+  const { deps, out, stateDir, dataRoot } = setup();
+  writeProfile(dataRoot, "glm", { env: { ANTHROPIC_BASE_URL: "https://other" } }); // 製造歧義
+  const code = await runCompanion(["task", "hi"], deps);
+  assert.notEqual(code, 0);
+  assert.equal(listJobs(stateDir).length, 0);
+  assert.match(out.join("\n"), /profile/i);
+});
+
+test("task with exactly one profile auto-selects it (no --profile needed)", async () => {
+  const { deps, stateDir } = setup(); // setup() 只建 kimi → 單一 profile
+  const code = await runCompanion(["task", "hi"], deps);
+  assert.equal(code, 0);
+  const jobs = listJobs(stateDir);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].request.profile, "kimi");
+});
+
+test("task with no profiles at all still fails with guidance, creates no job", async () => {
+  const { deps, out, stateDir, dataRoot } = setup();
+  fs.rmSync(path.join(dataRoot, "profiles", "kimi.json")); // 清成 0 profile
   const code = await runCompanion(["task", "hi"], deps);
   assert.notEqual(code, 0);
   assert.equal(listJobs(stateDir).length, 0);
@@ -195,9 +214,9 @@ test("--json on background launch emits the unified launch projection", async ()
     deps,
   );
   const payload = JSON.parse(lines.join("\n"));
-  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.engine, "cc");
   assert.equal(payload.status, "queued");
-  assert.match(payload.jobId, /^delegate-/);
+  assert.match(payload.jobId, /^cc-/);
 });
 
 test("--json on foreground completion emits the unified result projection", async () => {
@@ -210,7 +229,7 @@ test("--json on foreground completion emits the unified result projection", asyn
   );
   assert.equal(code, 0);
   const payload = JSON.parse(lines.join("\n"));
-  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.engine, "cc");
   assert.equal(payload.status, "completed");
   assert.ok(typeof payload.resultText === "string");
   assert.ok("sessionId" in payload && "durationMs" in payload && "errorKind" in payload);
@@ -327,7 +346,7 @@ async function waitForTerminal(stateDir, jobId, deadlineMs) {
 
 test("background e2e: cancel kills the REAL claude child across process boundaries", async () => {
   const { deps, stateDir } = setup();
-  const binDir = makeTempDir("delegate-bin-");
+  const binDir = makeTempDir("cc-bin-");
   const shim = path.join(binDir, "fake-claude");
   fs.writeFileSync(
     shim,
@@ -337,7 +356,7 @@ test("background e2e: cancel kills the REAL claude child across process boundari
   const pidFile = path.join(binDir, "claude.pid");
   deps.env = {
     ...deps.env,
-    DELEGATE_CLAUDE_BIN: shim,
+    CC_CLAUDE_BIN: shim,
     FAKE_CLAUDE_MODE: "hang",
     FAKE_CLAUDE_PIDFILE: pidFile,
   };
@@ -375,7 +394,7 @@ test("background e2e: cancel kills the REAL claude child across process boundari
 test("background end-to-end: REAL detached worker runs fake claude with rebuilt env", async () => {
   const { deps, stateDir } = setup();
   // Executable shim so the detached worker can spawn the fixture as `claude`.
-  const binDir = makeTempDir("delegate-bin-");
+  const binDir = makeTempDir("cc-bin-");
   const shim = path.join(binDir, "fake-claude");
   fs.writeFileSync(
     shim,
@@ -384,7 +403,7 @@ test("background end-to-end: REAL detached worker runs fake claude with rebuilt 
   );
   deps.env = {
     ...deps.env,
-    DELEGATE_CLAUDE_BIN: shim,
+    CC_CLAUDE_BIN: shim,
     FAKE_CLAUDE_MODE: "env-echo",
     // Polluted main-session env that the worker must strip before spawning.
     ANTHROPIC_BASE_URL: "https://expensive",
@@ -406,7 +425,7 @@ test("background end-to-end: REAL detached worker runs fake claude with rebuilt 
   assert.equal(seen.ANTHROPIC_BASE_URL, "https://cheap");
   assert.equal(seen.ANTHROPIC_MODEL, null);
   assert.equal(seen.CLAUDECODE, null);
-  assert.equal(seen.CLAUDE_DELEGATE_ACTIVE, "1");
+  assert.equal(seen.CLAUDE_CC_ACTIVE, "1");
 });
 
 test("--timeout-ms rejects non-positive and non-numeric values, creates no job", async () => {

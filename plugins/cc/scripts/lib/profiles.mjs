@@ -57,12 +57,22 @@ export function resolveProfile({ dataRoot, profile, settingsPath, env = process.
     const abs = path.resolve(settingsPath);
     return loadProfileFile(abs, path.basename(abs, ".json"));
   }
-  const name = profile ?? env.DELEGATE_DEFAULT_PROFILE;
+  const name = profile ?? env.CC_DEFAULT_PROFILE;
   if (!name) {
     const available = listProfiles(dataRoot);
+    // 恰好一個 profile:無歧義 → 自動採用。這讓 cc:setup 自動建的 native 真正
+    // 開箱即用(/cc:task 免帶 --profile),也讓 raw companion 呼叫端(例如其他
+    // 引擎把任務外包給 cc)免去先查 profile 名。0 個或 2+ 個才需要使用者指定 —
+    // 那才是「猜」,這裡不猜。
+    if (available.length === 1) {
+      return loadProfileFile(
+        path.join(profilesDir(dataRoot), `${available[0]}.json`),
+        available[0],
+      );
+    }
     throw new ProfileError(
       available.length
-        ? `No profile specified. Use --profile <name> or set DELEGATE_DEFAULT_PROFILE. Available: ${available.join(", ")}`
+        ? `No profile specified. Use --profile <name> or set CC_DEFAULT_PROFILE. Available: ${available.join(", ")}`
         : `No profile specified and none exist. Create one at ${profilesDir(dataRoot)}/<name>.json (standard Claude Code settings format).`,
     );
   }

@@ -11,7 +11,7 @@ function scriptFor(engine) {
   const byEngine = {
     codex: ["..", "codex", "scripts", "codex-companion.mjs"],
     antigravity: ["..", "antigravity", "scripts", "commands", "status.mjs"],
-    delegate: ["..", "delegate", "scripts", "delegate-companion.mjs"],
+    cc: ["..", "cc", "scripts", "cc-companion.mjs"],
   };
   return path.resolve(PLUGIN_ROOT, ...byEngine[engine]);
 }
@@ -47,19 +47,19 @@ test("status runs each engine's own status command and normalizes rows", async (
       running: [],
       recent: [{ id: "agy-done", status: "completed" }],
     },
-    delegate: [
-      { engine: "delegate", jobId: "delegate-active", status: "queued" },
-      { engine: "delegate", jobId: "delegate-done", status: "completed" },
+    cc: [
+      { engine: "cc", jobId: "cc-active", status: "queued" },
+      { engine: "cc", jobId: "cc-done", status: "completed" },
     ],
   });
 
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "delegate"]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "cc"]);
   assert.equal(doc.allAvailable, true);
   assert.deepEqual(calls.map((c) => c.args), [
     [scriptFor("codex"), "status", "--json"],
     [scriptFor("antigravity"), "--json"],
-    [scriptFor("delegate"), "status", "--json"],
+    [scriptFor("cc"), "status", "--json"],
   ]);
   assert.equal(calls[0].opts.cwd, "/workspace");
 
@@ -68,20 +68,20 @@ test("status runs each engine's own status command and normalizes rows", async (
     [
       ["codex", true, 1, 1, "active"],
       ["antigravity", true, 0, 1, "completed"],
-      ["delegate", true, 1, 1, "active"],
+      ["cc", true, 1, 1, "active"],
     ],
   );
   assert.ok(doc.rows[0].actions.includes("/codex:logs codex-active"), "logs action present");
   assert.ok(!doc.rows[0].actions.includes("/codex:attach codex-active"), "attach is redundant, should be absent");
   assert.ok(doc.rows[1].actions.includes("/antigravity:logs agy-done --follow"));
-  assert.ok(doc.rows[2].actions.includes("/delegate:logs delegate-active --follow"));
+  assert.ok(doc.rows[2].actions.includes("/cc:logs cc-active --follow"));
 });
 
 test("engine probes run concurrently while rows remain canonical", async () => {
   const payloads = {
     codex: { running: [], recent: [] },
     antigravity: { running: [], recent: [] },
-    delegate: [],
+    cc: [],
   };
   const started = [];
   const resolvers = new Map();
@@ -100,17 +100,17 @@ test("engine probes run concurrently while rows remain canonical", async () => {
     },
   });
 
-  assert.deepEqual(started, ["codex", "antigravity", "delegate"]);
+  assert.deepEqual(started, ["codex", "antigravity", "cc"]);
 
-  resolvers.get("delegate")();
+  resolvers.get("cc")();
   resolvers.get("codex")();
   resolvers.get("antigravity")();
   const result = await resultPromise;
   const doc = JSON.parse(result.stdout);
 
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "delegate"]);
-  assert.deepEqual(doc.rows.map((row) => row.engine), ["codex", "antigravity", "delegate"]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "cc"]);
+  assert.deepEqual(doc.rows.map((row) => row.engine), ["codex", "antigravity", "cc"]);
 });
 
 test("an unrecognized status JSON shape becomes an explicit 'unknown' row, not idle", async () => {
@@ -118,7 +118,7 @@ test("an unrecognized status JSON shape becomes an explicit 'unknown' row, not i
     {
       codex: { unexpected: true },
       antigravity: { running: [], recent: [] },
-      delegate: [],
+      cc: [],
     },
     { argv: ["--only", "codex"] },
   );
@@ -138,7 +138,7 @@ test("a jobs envelope is recognized and tallied", async () => {
         ],
       },
       antigravity: { running: [], recent: [] },
-      delegate: [],
+      cc: [],
     },
     { argv: ["--only", "codex"] },
   );
@@ -153,7 +153,7 @@ test("codex actions do not list both logs and attach (same handler)", async () =
     {
       codex: { running: [{ id: "codex-1", status: "running" }], recent: [] },
       antigravity: { running: [], recent: [] },
-      delegate: [],
+      cc: [],
     },
     { argv: ["--only", "codex"] },
   );
@@ -166,26 +166,26 @@ test("--only canonicalizes engine order and filters spawned commands", async () 
   const { calls, doc } = await runWith(
     {
       codex: { running: [], recent: [] },
-      delegate: [],
+      cc: [],
     },
-    { argv: ["--only", "delegate,codex"] },
+    { argv: ["--only", "cc,codex"] },
   );
 
-  assert.deepEqual(doc.checkedEngines, ["codex", "delegate"]);
-  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("delegate")]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "cc"]);
+  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("cc")]);
 });
 
 test("raw quoted slash arguments are split in-process", async () => {
   const { calls, doc } = await runWith(
     {
       codex: { running: [], recent: [] },
-      delegate: [],
+      cc: [],
     },
-    { argv: ["--only delegate,codex"] },
+    { argv: ["--only cc,codex"] },
   );
 
-  assert.deepEqual(doc.checkedEngines, ["codex", "delegate"]);
-  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("delegate")]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "cc"]);
+  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("cc")]);
 });
 
 test("--raw-args-stdin reads safely quoted slash arguments from stdin", async () => {
@@ -197,17 +197,17 @@ test("--raw-args-stdin reads safely quoted slash arguments from stdin", async ()
     runEngineImpl: runEngineByEngine(
       {
         codex: { running: [], recent: [] },
-        delegate: [],
+        cc: [],
       },
       calls,
     ),
-    readStdinImpl: () => "--json --only delegate,codex\n",
+    readStdinImpl: () => "--json --only cc,codex\n",
   });
   const doc = JSON.parse(result.stdout);
 
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(doc.checkedEngines, ["codex", "delegate"]);
-  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("delegate")]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "cc"]);
+  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("cc")]);
 });
 
 test("missing status script becomes an unavailable row instead of a crash", async () => {
@@ -215,7 +215,7 @@ test("missing status script becomes an unavailable row instead of a crash", asyn
     {
       codex: { running: [], recent: [] },
       antigravity: { running: [], recent: [] },
-      delegate: [],
+      cc: [],
     },
     {
       existsSyncImpl: (p) => p !== scriptFor("antigravity"),
@@ -226,14 +226,14 @@ test("missing status script becomes an unavailable row instead of a crash", asyn
   assert.equal(doc.rows[1].engine, "antigravity");
   assert.equal(doc.rows[1].available, false);
   assert.match(doc.rows[1].summary, /status script missing/);
-  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("delegate")]);
+  assert.deepEqual(calls.map((c) => c.args[0]), [scriptFor("codex"), scriptFor("cc")]);
 });
 
 test("bad JSON and non-zero exits become unavailable rows", async () => {
   const { doc } = await runWith({
     codex: { raw: { status: 0, stdout: "{not json", stderr: "" } },
     antigravity: { raw: { status: 7, stdout: "", stderr: "boom\n" } },
-    delegate: [],
+    cc: [],
   });
 
   assert.equal(doc.allAvailable, false);
@@ -252,14 +252,14 @@ test("human output is a compact markdown table", async () => {
     runEngineImpl: runEngineByEngine({
       codex: { running: [], recent: [] },
       antigravity: { running: [], recent: [] },
-      delegate: [],
+      cc: [],
     }),
   });
 
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /\| Engine \| Available \| Active \| Recent \| Status \| Summary \| Actions \|/);
   assert.match(result.stdout, /codex/);
-  assert.match(result.stdout, /delegate/);
+  assert.match(result.stdout, /cc/);
 });
 
 test("usage errors are JSON when --json is present", async () => {
@@ -270,7 +270,7 @@ test("usage errors are JSON when --json is present", async () => {
 
   assert.equal(result.exitCode, 2);
   assert.deepEqual(JSON.parse(result.stdout), {
-    error: "unknown engine: nope; allowed: codex,antigravity,delegate",
+    error: "unknown engine: nope; allowed: codex,antigravity,cc",
   });
 });
 
@@ -282,7 +282,7 @@ test("raw quoted slash usage errors still honor --json", async () => {
 
   assert.equal(result.exitCode, 2);
   assert.deepEqual(JSON.parse(result.stdout), {
-    error: "unknown engine: nope; allowed: codex,antigravity,delegate",
+    error: "unknown engine: nope; allowed: codex,antigravity,cc",
   });
 });
 
@@ -295,6 +295,6 @@ test("--raw-args-stdin usage errors still honor --json", async () => {
 
   assert.equal(result.exitCode, 2);
   assert.deepEqual(JSON.parse(result.stdout), {
-    error: "unknown engine: nope; allowed: codex,antigravity,delegate",
+    error: "unknown engine: nope; allowed: codex,antigravity,cc",
   });
 });

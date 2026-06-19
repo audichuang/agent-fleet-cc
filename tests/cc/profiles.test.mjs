@@ -5,7 +5,7 @@ import {
   listProfiles,
   resolveProfile,
   ProfileError,
-} from "../../plugins/delegate/scripts/lib/profiles.mjs";
+} from "../../plugins/cc/scripts/lib/profiles.mjs";
 
 test("listProfiles returns sorted names, empty when dir missing", () => {
   const dataRoot = makeDataRoot();
@@ -27,22 +27,38 @@ test("resolveProfile by name loads env block and path", () => {
   assert.equal(profile.env.ANTHROPIC_BASE_URL, "https://cheap");
 });
 
-test("falls back to DELEGATE_DEFAULT_PROFILE", () => {
+test("falls back to CC_DEFAULT_PROFILE", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "glm", { env: {} });
   const profile = resolveProfile({
     dataRoot,
-    env: { DELEGATE_DEFAULT_PROFILE: "glm" },
+    env: { CC_DEFAULT_PROFILE: "glm" },
   });
   assert.equal(profile.name, "glm");
 });
 
-test("no profile and no default → ProfileError listing available", () => {
+test("exactly one profile auto-selects it (no name, no default)", () => {
+  const dataRoot = makeDataRoot();
+  writeProfile(dataRoot, "kimi", { env: { ANTHROPIC_BASE_URL: "https://x" } });
+  const profile = resolveProfile({ dataRoot, env: {} });
+  assert.equal(profile.name, "kimi");
+});
+
+test("2+ profiles and no default → ProfileError listing available", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "kimi", { env: {} });
+  writeProfile(dataRoot, "glm", { env: {} });
   assert.throws(
     () => resolveProfile({ dataRoot, env: {} }),
     (error) => error instanceof ProfileError && /kimi/.test(error.message),
+  );
+});
+
+test("no profiles and no default → ProfileError (none exist)", () => {
+  const dataRoot = makeDataRoot();
+  assert.throws(
+    () => resolveProfile({ dataRoot, env: {} }),
+    (error) => error instanceof ProfileError && /none exist/.test(error.message),
   );
 });
 
