@@ -6,11 +6,11 @@
   "description": "One marketplace for delegation plugins: codex, antigravity (agy), delegate (cheap-model Claude Code)",
   "engines": { "node": ">=22.3" },
   "scripts": {
-    "test": "npm run test:structure && npm run test:shared && npm run test:delegate && npm run test:antigravity && npm run test:codex && npm run test:fleet",
+    "test": "npm run test:structure && npm run test:shared && npm run test:delegate && npm run test:antigravity && npm run test:codex && npm run test:fleet && npm run test:e2e",
     "test:structure": "node --test tests/fleet-structure.test.mjs",
     "test:shared": "node --test \"tests/shared/*.test.mjs\" \"tests/shared/conformance/*.test.mjs\"",
     "test:delegate": "node --test tests/delegate/*.test.mjs",
-    "test:e2e": "node --test tests/delegate/e2e-cli.test.mjs",
+    "test:e2e": "node --test tests/delegate/e2e-cli.test.mjs tests/codex/e2e-cli.test.mjs tests/antigravity/e2e-cli.test.mjs tests/fleet/e2e-cli.test.mjs",
     "test:antigravity": "node --test --experimental-test-module-mocks tests/antigravity/*.test.mjs",
     "test:codex": "node --test tests/codex/*.test.mjs",
     "test:fleet": "node --test \"tests/fleet/*.test.mjs\"",
