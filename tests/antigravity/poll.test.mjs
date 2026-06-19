@@ -41,6 +41,20 @@ describe("poll helpers", () => {
     assert.equal(TERMINAL_STATUSES.has("pending"), false);
   });
 
+  test("TERMINAL_STATUSES is the single set shared with state.mjs (drift guard)", async () => {
+    // Dynamic import so a missing export surfaces as a clean assertion failure
+    // rather than a module-link error that crashes the whole file.
+    const state = await import("../../plugins/antigravity/scripts/lib/state.mjs");
+    assert.ok(state.TERMINAL_STATUSES, "state.mjs must export TERMINAL_STATUSES");
+    // Identity, not equality: re-exporting one source of truth is the only way
+    // these stay the same object. A future `new Set(...)` copy fails here.
+    assert.strictEqual(
+      TERMINAL_STATUSES,
+      state.TERMINAL_STATUSES,
+      "poll.mjs and state.mjs must share one TERMINAL_STATUSES set",
+    );
+  });
+
   test("POLL_MS is a positive interval", () => {
     assert.equal(typeof POLL_MS, "number");
     assert.equal(POLL_MS >= 1, true);

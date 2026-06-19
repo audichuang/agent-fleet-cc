@@ -1,6 +1,10 @@
+import { TERMINAL_STATUSES } from "./state.mjs";
+
 export const POLL_MS = 1000;
 
-export const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+// Re-export the canonical set from state.mjs so wait.mjs/logs.mjs keep importing
+// it from here while there remains exactly one TERMINAL_STATUSES in the plugin.
+export { TERMINAL_STATUSES };
 
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

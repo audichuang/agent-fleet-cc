@@ -80,7 +80,8 @@ export function resolveJobLockFile(cwd, jobId) {
   return path.join(resolveJobsDir(cwd), `${jobId}.lock`);
 }
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+/** Job states that gate a terminal transition. Canonical antigravity-local source of truth. */
+export const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 
 /** A job is "active" (still finalizable) when queued or running. */
