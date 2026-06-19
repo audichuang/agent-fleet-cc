@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { makeTempDir } from "./helpers.mjs";
 import { writeJobFile, saveState, resolveJobLogFile } from "../../plugins/codex/scripts/lib/state.mjs";
 import { appendLogLine } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
-import { streamJobLog, handleAttach } from "../../plugins/codex/scripts/codex-companion.mjs";
+import { streamJobLog, handleAttach, makeUtf8LogReader } from "../../plugins/codex/scripts/codex-companion.mjs";
 
 test("streamJobLog writes new chunks until terminal, then flushes the tail and exits", async () => {
   const out = [];
@@ -152,4 +152,25 @@ test("handleAttach tails a real job log from disk and exits when the job is term
   assert.equal(status, "completed");
   assert.match(out.join(""), /first line/);
   assert.match(out.join(""), /second line/);
+});
+
+test("makeUtf8LogReader reassembles a multibyte char (é = C3 A9) split across two poll reads", async () => {
+  const dir = makeTempDir();
+  const logFile = path.join(dir, "utf8-split.log");
+  const reader = makeUtf8LogReader(logFile);
+
+  // Write only the first byte of é (U+00E9 = 0xC3 0xA9 in UTF-8).
+  fs.writeFileSync(logFile, Buffer.from([0xc3]));
+  const first = reader.readChunk();
+  assert.equal(first, "", "incomplete multibyte sequence should not emit a replacement char");
+  assert.ok(!first.includes("�"), "no replacement char from first partial byte");
+
+  fs.appendFileSync(logFile, Buffer.from([0xa9]));
+  const second = reader.readChunk();
+  assert.equal(second, "é", "second read must deliver the complete character");
+  assert.ok(!second.includes("�"), "no replacement char after completing the sequence");
+
+  const combined = first + second;
+  assert.equal(combined, "é");
+  assert.ok(!combined.includes("�"), "combined output must not contain a replacement char");
 });

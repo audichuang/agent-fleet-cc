@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
@@ -1197,6 +1198,34 @@ export async function streamJobLog(deps = {}) {
   }
 }
 
+/**
+ * Returns a readChunk() closure that reads newly-appended bytes from logFile
+ * and decodes them through a single persistent StringDecoder so multibyte
+ * codepoints that straddle a poll boundary are reassembled correctly.
+ *
+ * @param {string} logFile  absolute path to the log file
+ * @returns {{ readChunk: () => string, flush: () => string }}
+ */
+export function makeUtf8LogReader(logFile) {
+  const decoder = new StringDecoder("utf8");
+  let offset = 0;
+  function readChunk() {
+    try {
+      const buf = fs.readFileSync(logFile);
+      if (buf.length <= offset) return "";
+      const slice = buf.subarray(offset);
+      offset = buf.length;
+      return decoder.write(slice);
+    } catch {
+      return ""; // log not created yet / transient read error — try again next poll
+    }
+  }
+  function flush() {
+    return decoder.end();
+  }
+  return { readChunk, flush };
+}
+
 export async function handleAttach(argv, deps = {}) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd", "poll-interval-ms"],
@@ -1235,22 +1264,8 @@ export async function handleAttach(argv, deps = {}) {
     statusFile = resolveJobFile(workspaceRoot, jobId);
   }
 
-  let offset = 0;
-  const readChunk =
-    deps.readChunk ??
-    (() => {
-      try {
-        const buf = fs.readFileSync(logFile);
-        if (buf.length <= offset) {
-          return "";
-        }
-        const slice = buf.subarray(offset).toString("utf8");
-        offset = buf.length;
-        return slice;
-      } catch {
-        return ""; // log not created yet / transient read error — try again next poll
-      }
-    });
+  const { readChunk: defaultReadChunk } = makeUtf8LogReader(logFile);
+  const readChunk = deps.readChunk ?? defaultReadChunk;
   const readStatus =
     deps.readStatus ??
     (() => {
