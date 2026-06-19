@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // fleet-status.mjs — read-only, non-TUI status board for installed engines.
 // It shells out to each engine's own status command and normalizes the result.
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -68,6 +68,55 @@ function pluginRootFromModule() {
 
 function engineScriptPath(pluginRoot, engine) {
   return path.resolve(pluginRoot, ...ENGINE_COMMANDS[engine].script);
+}
+
+function defaultRunEngineImpl({ script, args, cwd }) {
+  return new Promise((resolve) => {
+    let child;
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    let timeout;
+
+    function settle(result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    }
+
+    try {
+      child = spawn(process.execPath, [script, ...args], { cwd });
+    } catch (error) {
+      settle({ status: null, stdout: "", stderr: "", error });
+      return;
+    }
+
+    timeout = setTimeout(() => {
+      child.kill();
+      settle({
+        status: null,
+        stdout: "",
+        stderr: "",
+        error: { message: "timed out", code: "ETIMEDOUT" },
+      });
+    }, 10000);
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      settle({ status: null, stdout: "", stderr: "", error });
+    });
+    child.on("close", (status) => {
+      settle({ status, stdout, stderr });
+    });
+  });
 }
 
 function unavailableRow(engine, summary) {
@@ -159,20 +208,15 @@ function buildActions(engine, job) {
   return actions;
 }
 
-function runEngineStatus(engine, options) {
-  const { pluginRoot, cwd, spawnSyncImpl, existsSyncImpl } = options;
+async function runEngineStatus(engine, options) {
+  const { pluginRoot, cwd, runEngineImpl, existsSyncImpl } = options;
   const script = engineScriptPath(pluginRoot, engine);
   if (!existsSyncImpl(script)) {
     return unavailableRow(engine, `status script missing: ${script}`);
   }
 
-  const args = [script, ...ENGINE_COMMANDS[engine].args];
-  const result = spawnSyncImpl(process.execPath, args, {
-    cwd,
-    encoding: "utf8",
-    input: "",
-    timeout: 10000,
-  });
+  const args = ENGINE_COMMANDS[engine].args;
+  const result = await runEngineImpl({ script, args, cwd });
   if (result?.error) {
     return unavailableRow(engine, `status command failed: ${result.error.message ?? result.error.code ?? result.error}`);
   }
@@ -217,7 +261,7 @@ function escapeCell(value) {
   return String(value).replaceAll("|", "\\|");
 }
 
-export function runStatus(argv = [], deps = {}) {
+export async function runStatus(argv = [], deps = {}) {
   let parsed;
   let engines;
   const normalizedArgv = normalizeArgv(argv, deps);
@@ -237,10 +281,12 @@ export function runStatus(argv = [], deps = {}) {
 
   const pluginRoot = deps.pluginRoot ?? pluginRootFromModule();
   const cwd = parsed.cwd ?? deps.cwd ?? process.cwd();
-  const spawnSyncImpl = deps.spawnSyncImpl ?? spawnSync;
+  const runEngineImpl = deps.runEngineImpl ?? defaultRunEngineImpl;
   const existsSyncImpl = deps.existsSyncImpl ?? fs.existsSync;
-  const rows = engines.map((engine) =>
-    runEngineStatus(engine, { pluginRoot, cwd, spawnSyncImpl, existsSyncImpl }),
+  const rows = await Promise.all(
+    engines.map((engine) =>
+      runEngineStatus(engine, { pluginRoot, cwd, runEngineImpl, existsSyncImpl }),
+    ),
   );
   const doc = {
     checkedEngines: engines,
@@ -254,8 +300,8 @@ export function runStatus(argv = [], deps = {}) {
   return { stdout: renderHuman(doc), stderr: "", exitCode: 0 };
 }
 
-function main() {
-  const { stdout, stderr, exitCode } = runStatus(process.argv.slice(2));
+async function main() {
+  const { stdout, stderr, exitCode } = await runStatus(process.argv.slice(2));
   if (stdout) process.stdout.write(stdout);
   if (stderr) process.stderr.write(stderr);
   process.exit(exitCode);
