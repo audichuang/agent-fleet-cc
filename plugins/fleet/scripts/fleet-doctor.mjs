@@ -1,5 +1,5 @@
 // fleet-doctor.mjs — deterministic, network-free readiness checks for the
-// agent-fleet engines (codex, antigravity, delegate). Self-contained: it does
+// agent-fleet engines (codex, antigravity, cc). Self-contained: it does
 // NOT import sibling-plugin code and NEVER probes auth or makes a network call.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -197,7 +197,7 @@ function checkAntigravity(deps) {
   };
 }
 
-// Mirrors plugins/delegate/scripts/lib/profiles.mjs PROFILE_NAME_RE — re-declared
+// Mirrors plugins/cc/scripts/lib/profiles.mjs PROFILE_NAME_RE — re-declared
 // inline so fleet-doctor stays self-contained (no sibling-plugin import).
 export const PROFILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
@@ -254,15 +254,15 @@ function discoverProfiles(dataRoot) {
 }
 
 function resolveDataRoot(env) {
-  if (env.DELEGATE_PLUGIN_DATA) return env.DELEGATE_PLUGIN_DATA;
+  if (env.CC_PLUGIN_DATA) return env.CC_PLUGIN_DATA;
   if (env.CLAUDE_PLUGIN_DATA) return env.CLAUDE_PLUGIN_DATA;
   const home = env.HOME ?? process.env.HOME ?? "";
-  return path.join(home, ".claude", "plugins", "data", "delegate");
+  return path.join(home, ".claude", "plugins", "data", "cc");
 }
 
-function checkDelegate(deps) {
+function checkCc(deps) {
   const env = deps.env ?? process.env;
-  const binaryName = env.DELEGATE_CLAUDE_BIN ?? "claude";
+  const binaryName = env.CC_CLAUDE_BIN ?? "claude";
   const probe = probeBinary(binaryName, deps);
   const cliRunnable = probe.ok;
   const cliVersion = probe.ok ? probe.version : null;
@@ -271,14 +271,14 @@ function checkDelegate(deps) {
     const reason = probe.found ? "cli-version-failed" : "cli-missing";
     const summary = probe.found
       ? `${binaryName} found but '--version' failed`
-      : `${binaryName} CLI not found — delegate needs the claude CLI`;
+      : `${binaryName} CLI not found — cc needs the claude CLI`;
     return {
-      engine: "delegate",
+      engine: "cc",
       status: "not-ready",
       authVerified: false,
       reason,
       summary,
-      deepFixCommand: "/delegate:setup",
+      deepFixCommand: "/cc:setup",
       binaryName,
       cliRunnable: false,
       cliVersion: null,
@@ -298,11 +298,11 @@ function checkDelegate(deps) {
 
   if (validProfileCount >= 1) {
     return {
-      engine: "delegate",
+      engine: "cc",
       status: "ready",
       authVerified: false,
       reason: null,
-      summary: `delegate ready (${binaryName} ${cliVersion}, ${validProfileCount} valid profile(s)) — token not checked`,
+      summary: `cc ready (${binaryName} ${cliVersion}, ${validProfileCount} valid profile(s)) — token not checked`,
       deepFixCommand: null,
       binaryName,
       cliRunnable: true,
@@ -319,12 +319,12 @@ function checkDelegate(deps) {
     ? "claude CLI ready but no valid profiles (fix the listed file(s))"
     : `claude CLI ready but no profiles found in ${path.join(dataRoot, "profiles")}`;
   return {
-    engine: "delegate",
+    engine: "cc",
     status: "not-ready",
     authVerified: false,
     reason,
     summary,
-    deepFixCommand: "/delegate:setup",
+    deepFixCommand: "/cc:setup",
     binaryName,
     cliRunnable: true,
     cliVersion,
@@ -339,7 +339,7 @@ function checkDelegate(deps) {
 export function checkEngine(engine, deps) {
   if (engine === "codex") return withActionMetadata(checkCodex(deps));
   if (engine === "antigravity") return withActionMetadata(checkAntigravity(deps));
-  if (engine === "delegate") return withActionMetadata(checkDelegate(deps));
+  if (engine === "cc") return withActionMetadata(checkCc(deps));
   return withActionMetadata({
     engine,
     status: "not-ready",

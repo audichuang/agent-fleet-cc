@@ -15,35 +15,35 @@ function baseEnv(extra = {}) {
   return { HOME: "/tmp/fleet-noexist-home", ...extra };
 }
 
-test("--only delegate,codex canonical re-sorts to codex,delegate", () => {
-  const r = runDoctor(["--json", "--only", "delegate,codex"], {
+test("--only cc,codex canonical re-sorts to codex,cc", () => {
+  const r = runDoctor(["--json", "--only", "cc,codex"], {
     spawnSyncImpl: readySpawn,
     env: baseEnv(),
   });
   assert.equal(r.exitCode, 0);
   const doc = JSON.parse(r.stdout);
-  assert.deepEqual(doc.checkedEngines, ["codex", "delegate"]);
-  assert.deepEqual(Object.keys(doc.engines), ["codex", "delegate"]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "cc"]);
+  assert.deepEqual(Object.keys(doc.engines), ["codex", "cc"]);
   assert.ok(!("antigravity" in doc.engines), "antigravity must be absent");
 });
 
 test("raw quoted slash arguments are split in-process", () => {
-  const r = runDoctor(["--json --only delegate,codex"], {
+  const r = runDoctor(["--json --only cc,codex"], {
     spawnSyncImpl: readySpawn,
     env: baseEnv(),
   });
   assert.equal(r.exitCode, 0);
-  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "delegate"]);
+  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "cc"]);
 });
 
 test("--raw-args-stdin reads safely quoted slash arguments from stdin", () => {
   const r = runDoctor(["--raw-args-stdin"], {
     spawnSyncImpl: readySpawn,
     env: baseEnv(),
-    readStdinImpl: () => "--json --only delegate,codex\n",
+    readStdinImpl: () => "--json --only cc,codex\n",
   });
   assert.equal(r.exitCode, 0);
-  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "delegate"]);
+  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "cc"]);
 });
 
 test("--only codex,codex dedupes to a single codex", () => {
@@ -56,7 +56,7 @@ test("--only codex,codex dedupes to a single codex", () => {
 
 test("no --only checks all three in canonical order", () => {
   const r = runDoctor(["--json"], { spawnSyncImpl: readySpawn, env: baseEnv() });
-  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "antigravity", "delegate"]);
+  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "antigravity", "cc"]);
 });
 
 test("unknown engine under --json writes {error} to stdout and exits 2", () => {
@@ -67,7 +67,7 @@ test("unknown engine under --json writes {error} to stdout and exits 2", () => {
   assert.equal(r.exitCode, 2);
   assert.equal(r.stderr, "");
   assert.deepEqual(JSON.parse(r.stdout), {
-    error: "unknown engine: foo; allowed: codex,antigravity,delegate",
+    error: "unknown engine: foo; allowed: codex,antigravity,cc",
   });
 });
 
@@ -79,7 +79,7 @@ test("raw quoted slash usage errors still honor --json", () => {
   assert.equal(r.exitCode, 2);
   assert.equal(r.stderr, "");
   assert.deepEqual(JSON.parse(r.stdout), {
-    error: "unknown engine: foo; allowed: codex,antigravity,delegate",
+    error: "unknown engine: foo; allowed: codex,antigravity,cc",
   });
 });
 
@@ -92,7 +92,7 @@ test("--raw-args-stdin usage errors still honor --json", () => {
   assert.equal(r.exitCode, 2);
   assert.equal(r.stderr, "");
   assert.deepEqual(JSON.parse(r.stdout), {
-    error: "unknown engine: foo; allowed: codex,antigravity,delegate",
+    error: "unknown engine: foo; allowed: codex,antigravity,cc",
   });
 });
 
@@ -100,7 +100,7 @@ test("unknown engine without --json writes to stderr, stdout empty, exit 2", () 
   const r = runDoctor(["--only", "foo"], { spawnSyncImpl: readySpawn, env: baseEnv() });
   assert.equal(r.exitCode, 2);
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /unknown engine: foo; allowed: codex,antigravity,delegate/);
+  assert.match(r.stderr, /unknown engine: foo; allowed: codex,antigravity,cc/);
 });
 
 test("empty --only is a usage error (exit 2)", () => {
@@ -444,36 +444,36 @@ test("antigravity version-failed: resolved real path but spawn ENOENT (NOT binar
 });
 
 // ---------------------------------------------------------------------------
-// Task 6: checkDelegate — DELEGATE_CLAUDE_BIN override, cliRunnable
+// Task 6: checkCc — CC_CLAUDE_BIN override, cliRunnable
 // ---------------------------------------------------------------------------
 
-function onlyDelegate(spawnResult, env = {}) {
+function onlyCc(spawnResult, env = {}) {
   const spawn = (bin, args, opts) => {
-    onlyDelegate._lastBin = bin;
+    onlyCc._lastBin = bin;
     return spawnResult;
   };
   return {
     doc: JSON.parse(
-      runDoctor(["--json", "--only", "delegate"], {
+      runDoctor(["--json", "--only", "cc"], {
         spawnSyncImpl: spawn,
         env: { HOME: "/tmp/fleet-noexist-home", ...env },
       }).stdout,
     ),
-    lastBin: () => onlyDelegate._lastBin,
+    lastBin: () => onlyCc._lastBin,
   };
 }
 
-test("delegate cli-missing (ENOENT) → cliRunnable false", () => {
-  const { doc } = onlyDelegate({ error: { code: "ENOENT" }, status: null });
-  const d = doc.engines.delegate;
+test("cc cli-missing (ENOENT) → cliRunnable false", () => {
+  const { doc } = onlyCc({ error: { code: "ENOENT" }, status: null });
+  const d = doc.engines.cc;
   assert.equal(d.status, "not-ready");
   assert.equal(d.reason, "cli-missing");
   assert.equal(d.cliRunnable, false);
   assert.equal(d.cliVersion, null);
   assert.equal(d.binaryName, "claude");
   assert.equal(d.authVerified, false);
-  assert.equal(d.deepFixCommand, "/delegate:setup");
-  // §5.4 delegate field shape must stay uniform even on the cli-missing leg
+  assert.equal(d.deepFixCommand, "/cc:setup");
+  // §5.4 cc field shape must stay uniform even on the cli-missing leg
   // (no profile discovery happens, but the keys must be present).
   assert.equal(typeof d.dataRoot, "string");
   assert.ok(Array.isArray(d.profiles));
@@ -481,34 +481,34 @@ test("delegate cli-missing (ENOENT) → cliRunnable false", () => {
   assert.equal(d.firstValidProfile, null);
 });
 
-test("delegate cli-version-failed (status 1) → cliRunnable false, cliVersion null", () => {
-  const { doc } = onlyDelegate({ status: 1, stdout: "", stderr: "x" });
-  const d = doc.engines.delegate;
+test("cc cli-version-failed (status 1) → cliRunnable false, cliVersion null", () => {
+  const { doc } = onlyCc({ status: 1, stdout: "", stderr: "x" });
+  const d = doc.engines.cc;
   assert.equal(d.reason, "cli-version-failed");
   assert.equal(d.cliRunnable, false);
   assert.equal(d.cliVersion, null);
 });
 
-test("delegate honors DELEGATE_CLAUDE_BIN override for binaryName and spawn", () => {
-  const { doc, lastBin } = onlyDelegate(
+test("cc honors CC_CLAUDE_BIN override for binaryName and spawn", () => {
+  const { doc, lastBin } = onlyCc(
     { error: { code: "ENOENT" }, status: null },
-    { DELEGATE_CLAUDE_BIN: "/opt/bin/claude" },
+    { CC_CLAUDE_BIN: "/opt/bin/claude" },
   );
-  assert.equal(doc.engines.delegate.binaryName, "/opt/bin/claude");
+  assert.equal(doc.engines.cc.binaryName, "/opt/bin/claude");
   assert.equal(lastBin(), "/opt/bin/claude");
 });
 
 // ---------------------------------------------------------------------------
-// Task 7: delegate profile discovery + validation + readiness gate
+// Task 7: cc profile discovery + validation + readiness gate
 // ---------------------------------------------------------------------------
 
-function delegateWith(dataRoot, spawnResult = { status: 0, stdout: "claude 1.2.3\n", stderr: "" }) {
+function ccWith(dataRoot, spawnResult = { status: 0, stdout: "claude 1.2.3\n", stderr: "" }) {
   return JSON.parse(
-    runDoctor(["--json", "--only", "delegate"], {
+    runDoctor(["--json", "--only", "cc"], {
       spawnSyncImpl: () => spawnResult,
-      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: dataRoot },
+      env: { HOME: "/tmp/fleet-noexist-home", CC_PLUGIN_DATA: dataRoot },
     }).stdout,
-  ).engines.delegate;
+  ).engines.cc;
 }
 
 test("PROFILE_NAME_RE rejects leading . _ - and spaces; accepts normal names", () => {
@@ -520,10 +520,10 @@ test("PROFILE_NAME_RE rejects leading . _ - and spaces; accepts normal names", (
   assert.ok(!PROFILE_NAME_RE.test("a b"));
 });
 
-test("delegate ready: CLI ok + 1 valid profile (authVerified false)", () => {
+test("cc ready: CLI ok + 1 valid profile (authVerified false)", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "work", { env: { ANTHROPIC_BASE_URL: "https://x", ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_MODEL: "m" } });
-  const d = delegateWith(dataRoot);
+  const d = ccWith(dataRoot);
   assert.equal(d.status, "ready");
   assert.equal(d.reason, null);
   assert.equal(d.cliRunnable, true);
@@ -535,21 +535,21 @@ test("delegate ready: CLI ok + 1 valid profile (authVerified false)", () => {
   assert.equal(d.authVerified, false);
 });
 
-test("delegate no-profiles: CLI ok, empty dir", () => {
+test("cc no-profiles: CLI ok, empty dir", () => {
   const dataRoot = makeDataRoot();
-  const d = delegateWith(dataRoot);
+  const d = ccWith(dataRoot);
   assert.equal(d.status, "not-ready");
   assert.equal(d.reason, "no-profiles");
   assert.equal(d.validProfileCount, 0);
   assert.equal(d.firstValidProfile, null);
 });
 
-test("delegate no-valid-profiles: nested-object env, ARRAY env, unparseable JSON", () => {
+test("cc no-valid-profiles: nested-object env, ARRAY env, unparseable JSON", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "nested", { env: { X: {} } });
   writeProfile(dataRoot, "arr", { env: ["x"] }); // an ARRAY env is invalid
   writeProfile(dataRoot, "broken", "{ not json");
-  const d = delegateWith(dataRoot);
+  const d = ccWith(dataRoot);
   assert.equal(d.status, "not-ready");
   assert.equal(d.reason, "no-valid-profiles");
   assert.equal(d.validProfileCount, 0);
@@ -559,11 +559,11 @@ test("delegate no-valid-profiles: nested-object env, ARRAY env, unparseable JSON
   assert.equal(byName.broken, "unparseable-json");
 });
 
-test("delegate invalid-name: leading-underscore basename skipped before parse", () => {
+test("cc invalid-name: leading-underscore basename skipped before parse", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "_foo", { env: { X: "ok" } }); // would be valid if parsed
   writeProfile(dataRoot, "good", { env: { X: "ok" } });
-  const d = delegateWith(dataRoot);
+  const d = ccWith(dataRoot);
   assert.equal(d.status, "ready"); // "good" is valid
   assert.equal(d.validProfileCount, 1);
   assert.equal(d.firstValidProfile, "good");
@@ -571,32 +571,32 @@ test("delegate invalid-name: leading-underscore basename skipped before parse", 
   assert.equal(bad.error, "invalid-name");
 });
 
-test("delegate firstValidProfile is basename-sorted", () => {
+test("cc firstValidProfile is basename-sorted", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "zeta", { env: { X: "ok" } });
   writeProfile(dataRoot, "alpha", { env: { X: "ok" } });
-  const d = delegateWith(dataRoot);
+  const d = ccWith(dataRoot);
   assert.equal(d.firstValidProfile, "alpha");
   assert.equal(d.validProfileCount, 2);
 });
 
-test("delegate scalar env values (string/number/boolean/null) are valid", () => {
+test("cc scalar env values (string/number/boolean/null) are valid", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "scalars", { env: { S: "x", N: 1, B: true, Z: null } });
-  const d = delegateWith(dataRoot);
+  const d = ccWith(dataRoot);
   assert.equal(d.status, "ready");
   assert.equal(d.validProfileCount, 1);
 });
 
-test("delegate default dataRoot derives from env.HOME, not os.homedir()", () => {
+test("cc default dataRoot derives from env.HOME, not os.homedir()", () => {
   const fakeHome = makeDataRoot(); // any temp dir path
   const d = JSON.parse(
-    runDoctor(["--json", "--only", "delegate"], {
+    runDoctor(["--json", "--only", "cc"], {
       spawnSyncImpl: () => ({ status: 0, stdout: "claude 1\n", stderr: "" }),
-      env: { HOME: fakeHome }, // no DELEGATE_PLUGIN_DATA / CLAUDE_PLUGIN_DATA
+      env: { HOME: fakeHome }, // no CC_PLUGIN_DATA / CLAUDE_PLUGIN_DATA
     }).stdout,
-  ).engines.delegate;
-  assert.equal(d.dataRoot, `${fakeHome}/.claude/plugins/data/delegate`);
+  ).engines.cc;
+  assert.equal(d.dataRoot, `${fakeHome}/.claude/plugins/data/cc`);
 });
 
 // ---------------------------------------------------------------------------
@@ -604,7 +604,7 @@ test("delegate default dataRoot derives from env.HOME, not os.homedir()", () => 
 // ---------------------------------------------------------------------------
 
 function allReadyDoc() {
-  // codex (both probes) + antigravity probe ready; delegate ready needs a valid profile.
+  // codex (both probes) + antigravity probe ready; cc ready needs a valid profile.
   // antigravity resolves via the bare default; spawn returns status 0 so it is ready.
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "work", { env: { ANTHROPIC_AUTH_TOKEN: "t" } });
@@ -612,20 +612,20 @@ function allReadyDoc() {
     runDoctor(["--json"], {
       spawnSyncImpl: () => ({ status: 0, stdout: "v 1.0\n", stderr: "" }),
       existsSyncImpl: () => false, // antigravity falls through to bare "agy", which spawns ok
-      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: dataRoot },
+      env: { HOME: "/tmp/fleet-noexist-home", CC_PLUGIN_DATA: dataRoot },
     }).stdout,
   );
 }
 
 function allNotReadyDoc() {
-  // Every probe ENOENT (codex/antigravity binary-missing, delegate cli-missing);
-  // delegate dataRoot empty. No engine is ready.
+  // Every probe ENOENT (codex/antigravity binary-missing, cc cli-missing);
+  // cc dataRoot empty. No engine is ready.
   const emptyRoot = makeDataRoot();
   return JSON.parse(
     runDoctor(["--json"], {
       spawnSyncImpl: () => ({ error: { code: "ENOENT" }, status: null }),
       existsSyncImpl: () => false,
-      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: emptyRoot },
+      env: { HOME: "/tmp/fleet-noexist-home", CC_PLUGIN_DATA: emptyRoot },
     }).stdout,
   );
 }
@@ -633,15 +633,15 @@ function allNotReadyDoc() {
 test("allReady is true only when every checked engine is ready", () => {
   const doc = allReadyDoc();
   assert.equal(doc.allReady, true);
-  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "delegate"]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "cc"]);
 
-  // Flip delegate to not-ready by withholding profiles.
+  // Flip cc to not-ready by withholding profiles.
   const emptyRoot = makeDataRoot();
   const doc2 = JSON.parse(
     runDoctor(["--json"], {
       spawnSyncImpl: () => ({ status: 0, stdout: "v 1.0\n", stderr: "" }),
       existsSyncImpl: () => false,
-      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: emptyRoot },
+      env: { HOME: "/tmp/fleet-noexist-home", CC_PLUGIN_DATA: emptyRoot },
     }).stdout,
   );
   assert.equal(doc2.allReady, false);
@@ -649,14 +649,14 @@ test("allReady is true only when every checked engine is ready", () => {
 
 test("--only filters the engines map to exactly the checked keys (canonical insertion order)", () => {
   const doc = JSON.parse(
-    runDoctor(["--json", "--only", "codex,delegate"], {
+    runDoctor(["--json", "--only", "codex,cc"], {
       spawnSyncImpl: () => ({ status: 0, stdout: "v 1.0\n", stderr: "" }),
-      env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: makeDataRoot() },
+      env: { HOME: "/tmp/fleet-noexist-home", CC_PLUGIN_DATA: makeDataRoot() },
     }).stdout,
   );
-  assert.deepEqual(doc.checkedEngines, ["codex", "delegate"]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "cc"]);
   // unsorted: pins the canonical INSERTION order of the engines map keys.
-  assert.deepEqual(Object.keys(doc.engines), ["codex", "delegate"]);
+  assert.deepEqual(Object.keys(doc.engines), ["codex", "cc"]);
   assert.ok(!("antigravity" in doc.engines));
 });
 
@@ -688,7 +688,7 @@ function assertSchemaInvariants(doc) {
       assert.equal(typeof e.binPath, "string");
       assert.equal(typeof e.resolvedFrom, "string");
     }
-    if (name === "delegate") assert.equal(typeof e.cliRunnable, "boolean");
+    if (name === "cc") assert.equal(typeof e.cliRunnable, "boolean");
   }
 }
 
@@ -724,7 +724,7 @@ test("exit code is 0 for a completed not-ready run", () => {
 test("human output: one line per engine, marks ready, routes not-ready, prints auth caveat", () => {
   const dataRoot = makeDataRoot();
   writeProfile(dataRoot, "work", { env: { ANTHROPIC_AUTH_TOKEN: "t" } });
-  // codex ready (both probes status 0), antigravity missing, delegate ready.
+  // codex ready (both probes status 0), antigravity missing, cc ready.
   const spawn = (bin) =>
     bin === "agy"
       ? { error: { code: "ENOENT" }, status: null }
@@ -732,13 +732,13 @@ test("human output: one line per engine, marks ready, routes not-ready, prints a
   const r = runDoctor([], {
     spawnSyncImpl: spawn,
     existsSyncImpl: () => false, // antigravity resolves to bare "agy" → ENOENT
-    env: { HOME: "/tmp/fleet-noexist-home", DELEGATE_PLUGIN_DATA: dataRoot },
+    env: { HOME: "/tmp/fleet-noexist-home", CC_PLUGIN_DATA: dataRoot },
   });
   assert.equal(r.exitCode, 0);
   assert.equal(r.stderr, "");
   assert.match(r.stdout, /codex/);
   assert.match(r.stdout, /antigravity/);
-  assert.match(r.stdout, /delegate/);
+  assert.match(r.stdout, /cc/);
   // not-ready antigravity surfaces its deep-fix route.
   assert.match(r.stdout, /\/antigravity:setup/);
   // the auth-not-verified caveat must be present (ready != logged in).
@@ -760,7 +760,7 @@ test("a probe ENOENT never throws — classified as missing across all engines",
   const doc = JSON.parse(r.stdout);
   assert.equal(doc.engines.codex.reason, "binary-missing");
   assert.equal(doc.engines.antigravity.reason, "binary-missing");
-  assert.equal(doc.engines.delegate.reason, "cli-missing");
+  assert.equal(doc.engines.cc.reason, "cli-missing");
   assert.equal(doc.allReady, false);
 });
 

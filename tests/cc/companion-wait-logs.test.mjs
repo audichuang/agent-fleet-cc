@@ -6,14 +6,14 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
-import { runCompanion } from "../../plugins/delegate/scripts/delegate-companion.mjs";
+import { runCompanion } from "../../plugins/cc/scripts/cc-companion.mjs";
 import {
   listJobs,
   readJob,
-} from "../../plugins/delegate/scripts/lib/shared/core/state-store.mjs";
-import { TERMINAL_STATUSES } from "../../plugins/delegate/scripts/lib/shared/core/job.mjs";
-import { isPidAlive } from "../../plugins/delegate/scripts/lib/shared/core/reconcile.mjs";
-import { workspaceStateDir } from "../../plugins/delegate/scripts/lib/adapter.mjs";
+} from "../../plugins/cc/scripts/lib/shared/core/state-store.mjs";
+import { TERMINAL_STATUSES } from "../../plugins/cc/scripts/lib/shared/core/job.mjs";
+import { isPidAlive } from "../../plugins/cc/scripts/lib/shared/core/reconcile.mjs";
+import { workspaceStateDir } from "../../plugins/cc/scripts/lib/adapter.mjs";
 
 const FIXTURE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,11 +30,11 @@ const fakeSpawn =
 
 function setup() {
   const dataRoot = makeDataRoot();
-  const cwd = makeTempDir("delegate-ws-");
+  const cwd = makeTempDir("cc-ws-");
   writeProfile(dataRoot, "kimi", { env: { ANTHROPIC_BASE_URL: "https://cheap" } });
   const out = [];
   const deps = {
-    env: { DELEGATE_PLUGIN_DATA: dataRoot, PATH: process.env.PATH },
+    env: { CC_PLUGIN_DATA: dataRoot, PATH: process.env.PATH },
     cwd,
     out: (line) => out.push(line),
     claudeSpawnImpl: fakeSpawn("success"),
@@ -56,7 +56,7 @@ async function waitForTerminal(stateDir, jobId, deadlineMs = 10_000) {
 // Helper: build a real e2e shim for tests that need a detached worker
 function setupE2E(mode = "success") {
   const { dataRoot, cwd, out, deps, stateDir } = setup();
-  const binDir = makeTempDir("delegate-bin-");
+  const binDir = makeTempDir("cc-bin-");
   const shim = path.join(binDir, "fake-claude");
   fs.writeFileSync(
     shim,
@@ -65,7 +65,7 @@ function setupE2E(mode = "success") {
   );
   deps.env = {
     ...deps.env,
-    DELEGATE_CLAUDE_BIN: shim,
+    CC_CLAUDE_BIN: shim,
     FAKE_CLAUDE_MODE: mode,
   };
   delete deps.workerSpawnImpl; // use real spawn
@@ -98,7 +98,7 @@ test("wait blocks until terminal state and exits 0; --json emits result projecti
   // Output should be valid JSON with status=completed
   const payload = JSON.parse(waitOut.join("\n"));
   assert.equal(payload.status, "completed", "payload.status should be completed");
-  assert.equal(payload.engine, "delegate");
+  assert.equal(payload.engine, "cc");
   assert.ok("jobId" in payload);
   assert.ok("resultText" in payload);
 });
@@ -106,7 +106,7 @@ test("wait blocks until terminal state and exits 0; --json emits result projecti
 test("wait on a still-running job with tiny timeout exits 10 and reports running", async () => {
   const { deps, stateDir } = setupE2E("hang");
 
-  const pidFile = path.join(makeTempDir("delegate-pid-"), "claude.pid");
+  const pidFile = path.join(makeTempDir("cc-pid-"), "claude.pid");
   deps.env = { ...deps.env, FAKE_CLAUDE_PIDFILE: pidFile };
 
   // Start background hanging job
@@ -234,20 +234,20 @@ test("wait/logs on unknown job exit 1 with a clear message", async () => {
   const { deps, out } = setup();
 
   // wait on unknown job
-  const waitCode = await runCompanion(["wait", "delegate-nonexistent"], deps);
+  const waitCode = await runCompanion(["wait", "cc-nonexistent"], deps);
   assert.equal(waitCode, 1, "wait on unknown job should exit 1");
   assert.ok(
-    out.some((l) => l.includes("delegate-nonexistent") || l.toLowerCase().includes("no job")),
+    out.some((l) => l.includes("cc-nonexistent") || l.toLowerCase().includes("no job")),
     `expected clear error message, got: ${out.join("\n")}`,
   );
 
   out.length = 0;
 
   // logs on unknown job
-  const logsCode = await runCompanion(["logs", "delegate-nonexistent"], deps);
+  const logsCode = await runCompanion(["logs", "cc-nonexistent"], deps);
   assert.equal(logsCode, 1, "logs on unknown job should exit 1");
   assert.ok(
-    out.some((l) => l.includes("delegate-nonexistent") || l.toLowerCase().includes("no job")),
+    out.some((l) => l.includes("cc-nonexistent") || l.toLowerCase().includes("no job")),
     `expected clear error message, got: ${out.join("\n")}`,
   );
 });

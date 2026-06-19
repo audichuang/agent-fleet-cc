@@ -6,13 +6,13 @@ Four Claude Code plugins, one marketplace:
 |---|---|---|
 | `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server) |
 | `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, image, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
-| `delegate` | `/delegate:*` (task, status, wait, logs, result, cancel, setup) | Cheap-model headless Claude Code via settings profiles |
+| `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
 | `fleet` | `/fleet:*` (setup, doctor, status) | Guided onboarding plus read-only fleet diagnostics/status |
 
-> **`delegate` v0.2.0** runs on the shared job runtime (`shared/lib/`). Its companion
+> **`cc` v0.3.0** runs on the shared job runtime (`shared/lib/`). Its companion
 > CLI also exposes machine-layer re-entry verbs `wait` and `logs` (with `--json`
 > projections) for editors/orchestrators, and the same verbs are now exposed as
-> `/delegate:wait` and `/delegate:logs`. `execute-plan` was removed in v0.2.0;
+> `/cc:wait` and `/cc:logs`. `execute-plan` was removed in v0.2.0;
 > hand a plan to `task` directly (or via `--prompt-file <path>`).
 
 ## Install
@@ -28,7 +28,7 @@ Four Claude Code plugins, one marketplace:
 # their /<engine>:setup commands exist:
 /plugin install codex@agent-fleet
 /plugin install antigravity@agent-fleet
-/plugin install delegate@agent-fleet
+/plugin install cc@agent-fleet
 /reload-plugins
 ```
 
@@ -47,7 +47,7 @@ under `plugins/<name>/`.
 `/fleet:setup` asks which engines you want (multi-select), runs one fast,
 network-free readiness check, then — one decision at a time — explains any gap and
 points you at that engine's own `/<engine>:setup` to fix it (install, `codex login`,
-agy OAuth, or a `delegate` profile). It is **guide-only**: it never runs another
+agy OAuth, or a `cc` profile). It is **guide-only**: it never runs another
 command or logs you in for you. A `ready` engine means its binary/profile is
 present, **not** that auth is done — run `/<engine>:setup` once on first use to
 complete login, then re-run `/fleet:setup` to confirm.
@@ -73,9 +73,9 @@ The P0/P1 lifecycle surface is intentionally command-line oriented:
 /antigravity:wait <job-id>
 /antigravity:logs <job-id> [--follow]
 
-/delegate:task "..." --background --profile <name>
-/delegate:wait <job-id>
-/delegate:logs <job-id> [--follow]
+/cc:task "..." --background --profile <name>
+/cc:wait <job-id>
+/cc:logs <job-id> [--follow]
 
 /fleet:doctor
 /fleet:status
@@ -83,35 +83,37 @@ The P0/P1 lifecycle surface is intentionally command-line oriented:
 
 Codex log streaming delegates to its native attach/live-log path. Antigravity logs
 come from persisted job logs; `agy --print` does not expose a tool-event stream, so
-the plugin does not invent one. Delegate logs expose the shared-runtime event log.
+the plugin does not invent one. cc logs expose the shared-runtime event log.
 
-### Quick start: `delegate`
+### Quick start: `cc`
 
 ```text
-/delegate:setup        # checks the `claude` CLI is runnable + lists your profiles
+/cc:setup        # checks the `claude` CLI + auto-creates a `native` profile on first run
 ```
 
-Create a profile (a standard Claude Code settings JSON) at
-`~/.claude/plugins/data/delegate/profiles/<name>.json` with an `env` block pointing
-at your cheap endpoint:
+`cc:setup` auto-creates a `native` profile (empty settings `{}` = your native
+Claude login + default model), so `/cc:task "..."` works immediately. To run a
+*different* engine, add another profile (a standard Claude Code settings JSON) at
+`~/.claude/plugins/data/cc/profiles/<name>.json` with an `env` block pointing at
+that endpoint (e.g. a cheaper model):
 
 ```json
 { "env": { "ANTHROPIC_BASE_URL": "https://...", "ANTHROPIC_AUTH_TOKEN": "sk-...", "ANTHROPIC_MODEL": "..." } }
 ```
 
-Then delegate work:
+Then run work:
 
 ```text
-/delegate:task "a complete, self-contained instruction" --profile <name>
-/delegate:status              # list jobs in this workspace
-/delegate:wait <job-id>       # block until a job reaches a terminal state
-/delegate:logs <job-id>       # print job events; add --follow to stream
-/delegate:result <job-id>     # fetch a job's result
-/delegate:cancel <job-id>     # cancel a running job
+/cc:task "a complete, self-contained instruction" --profile <name>
+/cc:status              # list jobs in this workspace
+/cc:wait <job-id>       # block until a job reaches a terminal state
+/cc:logs <job-id>       # print job events; add --follow to stream
+/cc:result <job-id>     # fetch a job's result
+/cc:cancel <job-id>     # cancel a running job
 ```
 
-Long tasks: add `--background`, then poll `/delegate:status`, block with
-`/delegate:wait <id>`, or inspect events with `/delegate:logs <id> --follow`. Flags:
+Long tasks: add `--background`, then poll `/cc:status`, block with
+`/cc:wait <id>`, or inspect events with `/cc:logs <id> --follow`. Flags:
 `--prompt-file <path>`, `--json`, `--model <id>`, `--read-only`,
 `--resume-job <id>|--resume-last`, `--timeout-ms <n>`. Secrets in a profile's `env`
 are read at spawn time and never written to job state.
@@ -119,7 +121,8 @@ are read at spawn time and never written to job state.
 ## Migrating from the standalone repos
 
 This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-plugin`
-(both archived) plus the local-only delegate plugin. Command prefixes are unchanged.
+(both archived) plus the local-only delegate plugin (since renamed to `cc`). The
+codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/cc:*`.
 
 1. Uninstall the old plugins and remove the old marketplaces
    (`openai-codex`, `antigravity`, `claude-delegate`) — prefixes would collide.
@@ -130,9 +133,9 @@ This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-pl
 ## Development
 
 ```bash
-npm test               # structure + shared + delegate + antigravity + codex + fleet suites (Node >= 22.3)
-npm run test:delegate  # one suite at a time (also test:fleet, test:codex, …)
-npm run test:e2e       # black-box CLI end-to-end regression for delegate (real subprocess, fake engine, no API key)
+npm test               # structure + shared + cc + antigravity + codex + fleet suites (Node >= 22.3)
+npm run test:cc  # one suite at a time (also test:fleet, test:codex, …)
+npm run test:e2e       # black-box CLI end-to-end regression for all 4 plugins (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```
@@ -144,7 +147,7 @@ source repo's hermetic suite (fake binaries, redirected `CLAUDE_PLUGIN_DATA`, no
 directory-per-job state store with O_EXCL CAS terminal transitions, a generic
 adapter-driven worker (process-group spawn/kill so engine grandchildren are reaped),
 mandatory env sanitization with a recursion guard, and a parameterized 10-scenario
-conformance suite. `delegate` (v0.2.0) is fully migrated onto it: engine knowledge
+conformance suite. `cc` (v0.3.0) is fully migrated onto it: engine knowledge
 lives in a `ClaudeAdapter`, the job runtime in the shared lib. Each plugin carries a
 vendored copy under `scripts/lib/shared/` kept in sync by `npm run sync-shared` and
 drift-checked in CI. Migrating `antigravity` and `codex` onto the same base is the

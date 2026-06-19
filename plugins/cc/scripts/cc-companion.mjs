@@ -3,7 +3,7 @@
 // Testable via runCompanion(argv, deps) with injectable seams.
 //
 // Job runtime (state/worker/cancel/reconcile) lives in the vendored shared lib;
-// the delegate-specific engine knowledge lives in ./lib/adapter.mjs. This
+// the cc-specific engine knowledge lives in ./lib/adapter.mjs. This
 // companion only orchestrates: parse flags, build a job record, drive the
 // shared runWorker (foreground) or spawn worker-entry.mjs (background).
 import fs from "node:fs";
@@ -35,7 +35,7 @@ import { renderStatus, renderResult } from "./lib/render.mjs";
 // Job timeout default (1h) — inlined from the retired claude helper module.
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
-const USAGE = `usage: delegate-companion <command> [...]
+const USAGE = `usage: cc-companion <command> [...]
   setup
   task <prompt...>|--prompt-file <path> [--profile <name>|--settings <path>] [--background|--wait] [--json] [--model <id>] [--read-only|--write] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status
@@ -59,7 +59,7 @@ function safeJobId(value) {
 
 function parseTimeoutMs(value, env) {
   if (value === undefined) {
-    const raw = Number(env.DELEGATE_JOB_TIMEOUT_MS);
+    const raw = Number(env.CC_JOB_TIMEOUT_MS);
     return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
   }
   const n = Number(value);
@@ -73,7 +73,7 @@ function parseTimeoutMs(value, env) {
 // Unified result projection (spec §2.1): the shape result/--json speak.
 function resultProjection(job) {
   return {
-    engine: "delegate",
+    engine: "cc",
     jobId: job.id,
     status: job.status,
     resultText: job.resultText ?? null,
@@ -88,8 +88,8 @@ function resultProjection(job) {
 export async function runCompanion(argv, deps = {}) {
   const env = deps.env ?? process.env;
   const out = deps.out ?? ((line) => process.stdout.write(line + "\n"));
-  if (env.CLAUDE_DELEGATE_ACTIVE === "1") {
-    out("delegate: disabled inside a delegate session (recursion guard).");
+  if (env.CLAUDE_CC_ACTIVE === "1") {
+    out("cc: disabled inside a cc session (recursion guard).");
     return 0;
   }
   const cwd = deps.cwd ?? process.cwd();
@@ -118,7 +118,7 @@ export async function runCompanion(argv, deps = {}) {
     }
   } catch (error) {
     if (error instanceof UsageError || error instanceof ProfileError) {
-      out(`delegate: ${error.message}`);
+      out(`cc: ${error.message}`);
       return 1;
     }
     throw error;
@@ -127,7 +127,7 @@ export async function runCompanion(argv, deps = {}) {
 
 function cmdSetup({ env, out, dataRoot, deps }) {
   const spawnSyncImpl = deps.spawnSyncImpl ?? spawnSync;
-  const binary = env.DELEGATE_CLAUDE_BIN ?? "claude";
+  const binary = env.CC_CLAUDE_BIN ?? "claude";
   let healthy = true;
   const probe = spawnSyncImpl(binary, ["--version"], { encoding: "utf8" });
   if (probe.error || probe.status !== 0) {
@@ -136,10 +136,21 @@ function cmdSetup({ env, out, dataRoot, deps }) {
   } else {
     out(`✓ claude CLI: ${String(probe.stdout).trim()}`);
   }
-  const names = listProfiles(dataRoot);
+  let names = listProfiles(dataRoot);
   if (!names.length) {
-    out(`✗ no profiles. Create <name>.json under ${path.join(dataRoot, "profiles")} (standard Claude Code settings format, env block carries ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN).`);
-    healthy = false;
+    // 零 profile 時自動建立 native(空 settings = 原生 claude),讓原生開箱即用。
+    // 單一 profile 時 task 會自動採用它,所以裝好 → setup → /cc:task 直接跑原生。
+    const nativePath = path.join(dataRoot, "profiles", "native.json");
+    try {
+      fs.mkdirSync(path.dirname(nativePath), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(nativePath, "{}\n", { mode: 0o600 });
+      out(`✓ created native profile (empty settings = 原生 claude) at ${nativePath}`);
+      out(`  use it directly: /cc:task "..." (single profile is auto-selected)`);
+      names = listProfiles(dataRoot);
+    } catch (error) {
+      out(`✗ no profiles and failed to create native: ${error.message}`);
+      healthy = false;
+    }
   }
   for (const name of names) {
     try {
@@ -151,9 +162,9 @@ function cmdSetup({ env, out, dataRoot, deps }) {
     }
   }
   out(
-    env.DELEGATE_DEFAULT_PROFILE
-      ? `default profile: ${env.DELEGATE_DEFAULT_PROFILE}`
-      : "default profile: (none — pass --profile per call or set DELEGATE_DEFAULT_PROFILE)",
+    env.CC_DEFAULT_PROFILE
+      ? `default profile: ${env.CC_DEFAULT_PROFILE}`
+      : "default profile: (none — pass --profile per call or set CC_DEFAULT_PROFILE)",
   );
   return healthy ? 0 : 1;
 }
@@ -202,9 +213,9 @@ async function startJob({ prompt, title, flags, env, out, cwd, dataRoot, stateDi
   // legacy default (bypassPermissions).
   const permissionMode = flags["read-only"]
     ? "default"
-    : (env.DELEGATE_PERMISSION_MODE ?? "bypassPermissions");
+    : (env.CC_PERMISSION_MODE ?? "bypassPermissions");
   const record = createJobRecord({
-    engine: "delegate",
+    engine: "cc",
     title: title ?? prompt.slice(0, 120),
     cwd,
     timeoutMs: parseTimeoutMs(flags["timeout-ms"], env),
@@ -248,13 +259,13 @@ async function startJob({ prompt, title, flags, env, out, cwd, dataRoot, stateDi
       out(
         flags.json
           ? JSON.stringify(resultProjection(finished))
-          : `delegate: failed to launch background worker: ${message}`,
+          : `cc: failed to launch background worker: ${message}`,
       );
       return 1;
     }
     child.unref();
     if (flags.json) {
-      out(JSON.stringify({ engine: "delegate", jobId: record.id, status: "queued" }));
+      out(JSON.stringify({ engine: "cc", jobId: record.id, status: "queued" }));
     } else {
       out(`Started background job ${record.id} (profile=${record.request.profile}).`);
       out(`Check: status | result ${record.id} | cancel ${record.id}`);
@@ -332,7 +343,7 @@ function cmdResult({ argv, out, stateDir }) {
     ? readJob(stateDir, safeJobId(positionals[0]))
     : listJobs(stateDir)[0];
   if (!job) {
-    out(flags.json ? JSON.stringify({ error: "no jobs" }) : "No delegate jobs in this workspace.");
+    out(flags.json ? JSON.stringify({ error: "no jobs" }) : "No cc jobs in this workspace.");
     return 1;
   }
   out(flags.json
@@ -436,7 +447,7 @@ if (isCliEntry) {
   runCompanion(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (error) => {
-      process.stderr.write(`delegate: ${error?.stack ?? error}\n`);
+      process.stderr.write(`cc: ${error?.stack ?? error}\n`);
       process.exit(1);
     },
   );

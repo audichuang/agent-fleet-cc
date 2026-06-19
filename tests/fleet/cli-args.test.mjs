@@ -34,13 +34,13 @@ test("normalizeArgv splits a single raw argv string", () => {
 });
 
 test("resolveEngines defaults to canonical order", () => {
-  assert.deepEqual(resolveEngines(null), ["codex", "antigravity", "delegate"]);
+  assert.deepEqual(resolveEngines(null), ["codex", "antigravity", "cc"]);
   assert.deepEqual(resolveEngines(null), CANONICAL);
 });
 
 test("resolveEngines filters and canonicalizes requested engines", () => {
   assert.deepEqual(resolveEngines("codex"), ["codex"]);
-  assert.deepEqual(resolveEngines("delegate,codex"), ["codex", "delegate"]);
+  assert.deepEqual(resolveEngines("cc,codex"), ["codex", "cc"]);
 });
 
 test("resolveEngines rejects empty or unknown requests", () => {

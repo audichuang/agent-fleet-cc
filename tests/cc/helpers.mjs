@@ -1,12 +1,12 @@
 // Hermetic test base: import this FIRST in every test file.
 // Redirects HOME/data dirs to throwaway temp dirs and strips ambient
-// ANTHROPIC_*/CLAUDE_*/CLAUDECODE*/DELEGATE_* so the suite never reads the
+// ANTHROPIC_*/CLAUDE_*/CLAUDECODE*/CC_* so the suite never reads the
 // real ~/.claude and never inherits the developer's provider env.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "delegate-test-home-"));
+const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "cc-test-home-"));
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
 
@@ -15,21 +15,21 @@ for (const key of Object.keys(process.env)) {
     key.startsWith("ANTHROPIC_") ||
     key.startsWith("CLAUDE_") ||
     key.startsWith("CLAUDECODE") ||
-    key.startsWith("DELEGATE_")
+    key.startsWith("CC_")
   ) {
     delete process.env[key];
   }
 }
-process.env.DELEGATE_PLUGIN_DATA = fs.mkdtempSync(
-  path.join(os.tmpdir(), "delegate-test-data-"),
+process.env.CC_PLUGIN_DATA = fs.mkdtempSync(
+  path.join(os.tmpdir(), "cc-test-data-"),
 );
 
-export function makeTempDir(prefix = "delegate-test-") {
+export function makeTempDir(prefix = "cc-test-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
 export function makeDataRoot() {
-  return makeTempDir("delegate-data-");
+  return makeTempDir("cc-data-");
 }
 
 export function writeProfile(dataRoot, name, contents) {
