@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const REAL_SCRIPT = path.join(ROOT, "plugins/fleet/scripts/fleet-status.mjs");
+const REAL_CLI_ARGS = path.join(ROOT, "plugins/fleet/scripts/lib/cli-args.mjs");
 
 function ws() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "fleet-e2e-"));
@@ -30,6 +31,8 @@ function fakeTree(payloads) {
   const fleetScript = path.join(root, "fleet/scripts/fleet-status.mjs");
   fs.mkdirSync(path.dirname(fleetScript), { recursive: true });
   fs.copyFileSync(REAL_SCRIPT, fleetScript);
+  fs.mkdirSync(path.join(root, "fleet/scripts/lib"), { recursive: true });
+  fs.copyFileSync(REAL_CLI_ARGS, path.join(root, "fleet/scripts/lib/cli-args.mjs"));
   writeFakeScript(path.join(root, "codex/scripts/codex-companion.mjs"), payloads.codex ?? []);
   writeFakeScript(path.join(root, "antigravity/scripts/commands/status.mjs"), payloads.antigravity ?? []);
   writeFakeScript(path.join(root, "delegate/scripts/delegate-companion.mjs"), payloads.delegate ?? []);

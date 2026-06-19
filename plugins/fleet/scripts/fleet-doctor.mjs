@@ -4,68 +4,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-
-const CANONICAL = ["codex", "antigravity", "delegate"];
-
-class UsageError extends Error {}
-
-function normalizeArgv(argv, deps = {}) {
-  return argv.flatMap((arg) => {
-    if (arg === "--raw-args-stdin") {
-      const readStdinImpl = deps.readStdinImpl ?? (() => fs.readFileSync(0, "utf8"));
-      return splitRawArgumentString(String(readStdinImpl()));
-    }
-    if (!arg || typeof arg !== "string") return [];
-    const hasRawOptionBoundary = /\s/.test(arg) && /(^|\s)--\S/.test(arg);
-    if (argv.length === 1 || hasRawOptionBoundary) return splitRawArgumentString(arg);
-    return [arg];
-  });
-}
-
-function splitRawArgumentString(raw) {
-  const tokens = [];
-  let current = "";
-  let quote = null;
-  let escaping = false;
-
-  for (const character of raw) {
-    if (escaping) {
-      current += character;
-      escaping = false;
-      continue;
-    }
-    if (quote === "'") {
-      if (character === "'") quote = null;
-      else current += character;
-      continue;
-    }
-    if (character === "\\") {
-      escaping = true;
-      continue;
-    }
-    if (quote) {
-      if (character === quote) quote = null;
-      else current += character;
-      continue;
-    }
-    if (character === "'" || character === "\"") {
-      quote = character;
-      continue;
-    }
-    if (/\s/.test(character)) {
-      if (current) {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += character;
-  }
-
-  if (escaping) current += "\\";
-  if (current) tokens.push(current);
-  return tokens;
-}
+import { splitRawArgumentString, normalizeArgv, UsageError, resolveEngines, CANONICAL, isMainModule } from "./lib/cli-args.mjs";
 
 // Parse argv into { json, only }. Throws UsageError on bad input.
 function parseArgs(argv) {
@@ -92,21 +31,6 @@ function parseArgs(argv) {
     }
   }
   return { json, only };
-}
-
-// Resolve the engines to check: canonical order, deduped, filtered by --only.
-function resolveEngines(only) {
-  if (only === null) return [...CANONICAL];
-  const requested = only.split(",").map((s) => s.trim());
-  for (const name of requested) {
-    if (!CANONICAL.includes(name)) {
-      throw new UsageError(
-        `unknown engine: ${name}; allowed: ${CANONICAL.join(",")}`,
-      );
-    }
-  }
-  // Canonical re-sort + dedup: walk CANONICAL, keep those that were requested.
-  return CANONICAL.filter((name) => requested.includes(name));
 }
 
 // Uniform binary probe + ORDERED detection rule (spec §5.3).
@@ -505,6 +429,6 @@ function main() {
   process.exit(exitCode);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   main();
 }
