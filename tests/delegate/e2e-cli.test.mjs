@@ -54,7 +54,10 @@ function makeWorkspace() {
   const env = { PATH: process.env.PATH, HOME: process.env.HOME, DELEGATE_PLUGIN_DATA: data, DELEGATE_CLAUDE_BIN: shim };
   return {
     env, ws, data, pidfile,
-    cleanup() { for (const d of [data, ws, bin]) fs.rmSync(d, { recursive: true, force: true }); },
+    // maxRetries/retryDelay: a detached worker may still be finalizing a job into
+    // `data` when teardown runs; recursive rmSync otherwise races its writes and
+    // throws ENOTEMPTY. Node retries the removal on ENOTEMPTY/EBUSY between delays.
+    cleanup() { for (const d of [data, ws, bin]) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); },
   };
 }
 
@@ -190,11 +193,12 @@ test("e2e: two-stage cancel actually REAPS the running engine process", async ()
 
 test("e2e: wait on a still-running job times out with the dedicated exit code 10", async () => {
   const w = makeWorkspace();
-  let enginePid;
+  let enginePid, workerPid;
   try {
     const jobId = jsonOne(cli(w, ["task", "hang again", "--profile", "p-hang", "--background", "--json"])).jobId;
     enginePid = await readPidWhenAlive(w.pidfile);
     assert.ok(enginePid, "engine up");
+    workerPid = readJobJson(w, jobId).pid; // the detached worker that owns the data dir
     const waitRes = cli(w, ["wait", jobId, "--timeout-s", "1", "--json"], { timeout: 10000 });
     assert.equal(waitRes.status, 10, "timeout is exit 10 (not an error) for clean orchestrator re-entry");
     assert.equal(jsonOne(waitRes).status, "running");
@@ -202,6 +206,10 @@ test("e2e: wait on a still-running job times out with the dedicated exit code 10
     assert.equal(await waitGone(enginePid), true, "engine reaped on cleanup cancel");
   } finally {
     if (enginePid && alive(enginePid)) { try { process.kill(-enginePid, "SIGKILL"); } catch {} try { process.kill(enginePid, "SIGKILL"); } catch {} }
+    // The detached worker finalizes the cancelled job (writes status + a 'finalized'
+    // event) AFTER the engine child dies; wait for it to exit before teardown so
+    // cleanup's recursive rmSync doesn't race its writes (the intermittent ENOTEMPTY).
+    if (workerPid) await waitGone(workerPid);
     w.cleanup();
   }
 });
