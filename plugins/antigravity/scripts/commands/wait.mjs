@@ -16,15 +16,13 @@
 
 import { parseCommandInput } from "../lib/args.mjs";
 import { runAsMain } from "../lib/cli-entry.mjs";
-import { buildSingleJobSnapshot } from "../lib/job-control.mjs";
+import { sleep, POLL_MS, TERMINAL_STATUSES, parseTimeoutMs, waitForTerminal } from "../lib/poll.mjs";
 import {
   outputCommandResult,
   renderSingleJobStatus,
 } from "../lib/render.mjs";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
-const POLL_MS = 1000;
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 export async function run(argv = [], ctx = {}) {
   const { options, positionals } = parseCommandInput(argv, {
@@ -45,7 +43,7 @@ export async function run(argv = [], ctx = {}) {
 
   let result;
   try {
-    result = await waitForTerminal(cwd, reference, parseTimeoutMs(options["timeout-ms"]));
+    result = await waitForTerminal(cwd, reference, parseTimeoutMs(options["timeout-ms"], DEFAULT_WAIT_TIMEOUT_MS));
   } catch (err) {
     process.stderr.write(`antigravity:wait — ${err?.message ?? err}\n`);
     return 1;
@@ -55,37 +53,6 @@ export async function run(argv = [], ctx = {}) {
   const rendered = renderWaitOutput(result.snapshot, { timedOut: result.timedOut });
   outputCommandResult(payload, rendered, json);
   return exitCodeFor(payload.status, result.timedOut);
-}
-
-async function waitForTerminal(cwd, reference, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let snapshot;
-
-  while (true) {
-    snapshot = buildSingleJobSnapshot(cwd, reference);
-    if (TERMINAL_STATUSES.has(snapshot.job?.status)) {
-      return { snapshot, timedOut: false };
-    }
-
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      return { snapshot, timedOut: true };
-    }
-
-    await sleep(Math.min(POLL_MS, remainingMs));
-  }
-}
-
-function parseTimeoutMs(value) {
-  if (value === undefined) return DEFAULT_WAIT_TIMEOUT_MS;
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error("--timeout-ms must be a non-negative number of milliseconds");
-  }
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error("--timeout-ms must be a non-negative number of milliseconds");
-  }
-  return parsed;
 }
 
 function buildWaitPayload(snapshot, { timedOut }) {
@@ -118,10 +85,6 @@ function exitCodeFor(status, timedOut) {
   if (status === "completed") return 0;
   if (status === "cancelled") return 2;
   return 1;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export default run;

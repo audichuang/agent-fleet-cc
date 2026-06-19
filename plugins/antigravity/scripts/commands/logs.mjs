@@ -15,12 +15,11 @@ import { StringDecoder } from "node:string_decoder";
 import { parseCommandInput } from "../lib/args.mjs";
 import { runAsMain } from "../lib/cli-entry.mjs";
 import { buildSingleJobSnapshot } from "../lib/job-control.mjs";
+import { sleep, POLL_MS, TERMINAL_STATUSES, parseTimeoutMs, waitForTerminal } from "../lib/poll.mjs";
 import { readJobLog, resolveJobLogFile } from "../lib/state.mjs";
 import { outputCommandResult } from "../lib/render.mjs";
 
-const POLL_MS = 1000;
 const DEFAULT_FOLLOW_TIMEOUT_MS = 15 * 60 * 1000;
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 export async function run(argv = [], ctx = {}) {
   const { options, positionals } = parseCommandInput(argv, {
@@ -35,7 +34,7 @@ export async function run(argv = [], ctx = {}) {
   let timeoutMs = DEFAULT_FOLLOW_TIMEOUT_MS;
   try {
     if (follow || options["timeout-ms"] !== undefined) {
-      timeoutMs = parseTimeoutMs(options["timeout-ms"]);
+      timeoutMs = parseTimeoutMs(options["timeout-ms"], DEFAULT_FOLLOW_TIMEOUT_MS);
     }
   } catch (err) {
     process.stderr.write(`antigravity:logs — ${err?.message ?? err}\n`);
@@ -111,18 +110,6 @@ async function followLog(initialSnapshot, cwd, timeoutMs) {
   return { snapshot, timedOut };
 }
 
-async function waitForTerminal(cwd, jobId, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let snapshot;
-  while (true) {
-    snapshot = buildSingleJobSnapshot(cwd, jobId);
-    if (TERMINAL_STATUSES.has(snapshot.job.status)) return { snapshot, timedOut: false };
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) return { snapshot, timedOut: true };
-    await sleep(Math.min(POLL_MS, remainingMs));
-  }
-}
-
 function buildLogPayload(snapshot, log, { timedOut = false } = {}) {
   const job = snapshot.job;
   return {
@@ -137,18 +124,6 @@ function buildLogPayload(snapshot, log, { timedOut = false } = {}) {
     timedOut,
     log,
   };
-}
-
-function parseTimeoutMs(value) {
-  if (value === undefined) return DEFAULT_FOLLOW_TIMEOUT_MS;
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error("--timeout-ms must be a non-negative number of milliseconds");
-  }
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error("--timeout-ms must be a non-negative number of milliseconds");
-  }
-  return parsed;
 }
 
 function readFullLogBytes(workspaceRoot, jobId) {
@@ -184,10 +159,6 @@ function readAppendedBytes(workspaceRoot, jobId, offset) {
       }
     }
   }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Test seam: prove the streaming decoder reassembles characters split across chunks.
