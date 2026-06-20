@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# cc launcher — 裝後進 PATH。resolve 自身真實位置(跟隨 symlink),
+# 再 exec 相鄰的 ../scripts/cc-companion.mjs。skill 的 resolver 主路徑。
+set -euo pipefail
+src="${BASH_SOURCE[0]}"
+while [ -h "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+here="$(cd -P "$(dirname "$src")" && pwd)"
+exec node "$here/../scripts/cc-companion.mjs" "$@"

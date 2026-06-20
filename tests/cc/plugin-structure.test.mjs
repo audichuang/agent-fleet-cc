@@ -70,4 +70,47 @@ test("marketplace entry and plugin.json agree for cc", () => {
   );
   assert.equal(plugin.name, "cc");
   assert.equal(entry.version, plugin.version);
+
+  // Phase 2: cc 是雙宿主 plugin —— .codex-plugin 必須存在且三方 name/version 一致
+  const codexManifest = JSON.parse(
+    fs.readFileSync(
+      path.join(REPO_ROOT, "plugins/cc/.codex-plugin/plugin.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(codexManifest.name, "cc", ".codex-plugin name must be cc");
+  assert.equal(
+    codexManifest.version,
+    plugin.version,
+    ".codex-plugin version must match .claude-plugin",
+  );
+  assert.equal(
+    codexManifest.skills,
+    "./skills/",
+    ".codex-plugin must declare skills: ./skills/",
+  );
+  // interface 是 codex plugin-creator validator 的必填(已實證)—— hermetic 防回歸
+  assert.equal(
+    typeof codexManifest.interface,
+    "object",
+    ".codex-plugin must have an interface object (codex validator requires it)",
+  );
+  for (const k of [
+    "displayName",
+    "shortDescription",
+    "longDescription",
+    "developerName",
+    "category",
+    "capabilities",
+  ]) {
+    assert.ok(
+      codexManifest.interface[k] != null,
+      `.codex-plugin interface missing required field: ${k}`,
+    );
+  }
+  assert.ok(
+    codexManifest.interface.defaultPrompt != null ||
+      codexManifest.interface.default_prompt != null,
+    ".codex-plugin interface missing defaultPrompt",
+  );
 });
