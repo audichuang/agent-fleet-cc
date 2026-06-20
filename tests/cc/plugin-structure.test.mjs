@@ -70,4 +70,23 @@ test("marketplace entry and plugin.json agree for cc", () => {
   );
   assert.equal(plugin.name, "cc");
   assert.equal(entry.version, plugin.version);
+
+  // Phase 2: cc 是雙宿主 plugin —— .codex-plugin 必須存在且三方 name/version 一致
+  const codexManifest = JSON.parse(
+    fs.readFileSync(
+      path.join(REPO_ROOT, "plugins/cc/.codex-plugin/plugin.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(codexManifest.name, "cc", ".codex-plugin name must be cc");
+  assert.equal(
+    codexManifest.version,
+    plugin.version,
+    ".codex-plugin version must match .claude-plugin",
+  );
+  assert.equal(
+    codexManifest.skills,
+    "./skills/",
+    ".codex-plugin must declare skills: ./skills/",
+  );
 });
