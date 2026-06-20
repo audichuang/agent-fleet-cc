@@ -6,5 +6,17 @@
     "name": "audichuang"
   },
   "license": "MIT",
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "cc",
+    "shortDescription": "Hand a subtask to a headless Claude Code worker",
+    "longDescription": "Run tasks on a headless Claude Code instance selected by profile (native Claude, a cheap endpoint, or any model); usable from Claude Code or a Codex host via explicit handoff.",
+    "developerName": "audichuang",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Hand this subtask to Claude and bring back the result.",
+      "這段交給 Claude 跑,把結果帶回來。"
+    ]
+  }
 }
