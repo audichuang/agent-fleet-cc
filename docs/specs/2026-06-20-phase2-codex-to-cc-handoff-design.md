@@ -318,7 +318,13 @@ skill 依賴的是 `cc-companion task` 的**現有**行為(讀自 `plugins/cc/sc
 ### V-6(A2 降為 smoke gate,解前後矛盾)
 - A2 從「已實證可觸發」**降級**為:**安裝佈局已實證**(本機 `.codex-plugin`+`skills` cache 先例);但「第三方 marketplace 安裝後 `cc-handoff` 在對話中**自動觸發**」**未證,列為實作後 Layer2 真 smoke gate**。auto-trigger 未過 → 本期不算達成;README 手動 fallback 不冒充原目標。
 
+### V-7(解 Q-interface — codex validator 證實 `interface{}` 必填)
+- 用 codex 官方 `plugin-creator` validator(`~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py`)實證:**`.codex-plugin/plugin.json` 的 top-level `interface{}` 是必填**,缺它 validator 直接 fail(`field \`interface\` must be an object`)。**推翻原 §1 / Decision Log 的「不放 interface(YAGNI)」決策** —— antigravity 無 interface 不能當「非必要」證據(它沒過這個 validator)。
+- 補最小必填集:`displayName`/`shortDescription`/`longDescription`/`developerName`/`category`/`capabilities`/`defaultPrompt`。補完 validator 回 `Plugin validation passed`。**不加** `hooks`(spec notes 說 validator reject)。
+- 測試:`tests/cc/plugin-structure.test.mjs` 加 hermetic `interface` 必填斷言;新增 `tests/cc/codex-plugin-validator.test.mjs` best-effort 閘(本機有 validator+PyYAML 真跑,CI/無 codex 環境 skip)。實作 commit `dad030e`。
+
 ### 未決問題更新
+- **Q-interface:已解**(V-7 — 必填,已補,validator pass)。
 - **Q-cwd:已解**(V-3)。 **Q-env:已解方向**(無 plugin-root env → 改 PATH/`CODEX_HOME` 錨)。
 - **新增 Q-binpath**:codex plugin `bin/` 是否進 codex PATH(決定 resolver 主路徑;實作 smoke 驗)。
 - **A2**:保留為 Layer2 smoke gate(V-6)。
