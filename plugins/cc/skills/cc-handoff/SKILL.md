@@ -28,7 +28,10 @@ else
       root="$(dirname "$(dirname "$f")")"
       if grep -q '"name"[[:space:]]*:[[:space:]]*"cc"' "$root/.codex-plugin/plugin.json" 2>/dev/null \
          || grep -q '"name"[[:space:]]*:[[:space:]]*"cc"' "$root/.claude-plugin/plugin.json" 2>/dev/null; then
-        CC=(node "$f"); break
+        # 優先用 launcher:它會 readlink-resolve 自身。直接 `node <path>/cc-companion.mjs`
+        # 在 orca 重導/symlink 路徑下,可能因 cc-companion 的 CLI-entry realpath 比對而不觸發 → 空輸出。
+        if [ -x "$root/bin/cc-companion" ]; then CC=("$root/bin/cc-companion"); else CC=(node "$f"); fi
+        break
       fi
     done < <(find "$base" -maxdepth 5 -type f -name cc-companion.mjs 2>/dev/null)
     [ ${#CC[@]} -gt 0 ] && break
