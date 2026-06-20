@@ -323,6 +323,14 @@ skill 依賴的是 `cc-companion task` 的**現有**行為(讀自 `plugins/cc/sc
 - 補最小必填集:`displayName`/`shortDescription`/`longDescription`/`developerName`/`category`/`capabilities`/`defaultPrompt`。補完 validator 回 `Plugin validation passed`。**不加** `hooks`(spec notes 說 validator reject)。
 - 測試:`tests/cc/plugin-structure.test.mjs` 加 hermetic `interface` 必填斷言;新增 `tests/cc/codex-plugin-validator.test.mjs` best-effort 閘(本機有 validator+PyYAML 真跑,CI/無 codex 環境 skip)。實作 commit `dad030e`。
 
+### V-8(codex marketplace 入口 + A2 端到端實測 PASS,2026-06-20)
+- **codex marketplace 入口(原 spec/plan 漏)**:`codex plugin marketplace add` 吃 codex 格式的 marketplace manifest(`.agents/plugins/marketplace.json`:`source:{source:"local",path}`/`policy:{installation,authentication}`/`category`),與 Claude Code 的 `.claude-plugin/marketplace.json` 不同。已補 repo `.agents/plugins/marketplace.json`(只列 cc),commit `f47dc82`。
+- **A2 端到端實測 PASS**:真 codex(orca)上 `marketplace add <repo>` → `plugin add cc@agent-fleet`(installed/enabled)→ 明確指派子任務 → **codex 自動觸發 cc-handoff** → 定位 launcher → 設 `CC_PLUGIN_DATA` → **原生 claude 真跑** → `{"status":"completed","resultText":"hello from cc handoff smoke","exitCode":0}` → git 無變更。**spec V-6 的 ship gate 達成**。
+- **Q-binpath(已解)**:bin **沒**進 codex PATH;靠 skill 的 cache 搜尋退路命中 `$CODEX_HOME/plugins/cache/agent-fleet/cc/<ver>`。
+- **isCliEntry(orca)**:orca symlink 路徑下直接 `node cc-companion.mjs` 的 CLI-entry realpath 比對不觸發 → 空輸出;skill 退路已改**優先 `bin/cc-companion` launcher**(readlink-resolve 繞過),commit `10b3630`。
+- **分發知識**:codex local marketplace 對**同 version** plugin 不重抓 cache(清 cache 目錄 + re-add 也不夠);更新內容要 cachebuster(`plugin-creator/scripts/update_plugin_cachebuster.py`)或 bump version。
+- **codex 端前置**:該 dataRoot 需有 profile —— `cc-companion setup` 建 native(本次已建於 `~/.claude/plugins/data/cc`)。
+
 ### 未決問題更新
 - **Q-interface:已解**(V-7 — 必填,已補,validator pass)。
 - **Q-cwd:已解**(V-3)。 **Q-env:已解方向**(無 plugin-root env → 改 PATH/`CODEX_HOME` 錨)。
