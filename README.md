@@ -118,6 +118,16 @@ Long tasks: add `--background`, then poll `/cc:status`, block with
 `--resume-job <id>|--resume-last`, `--timeout-ms <n>`. Secrets in a profile's `env`
 are read at spawn time and never written to job state.
 
+### codex → cc handoff (Phase 2)
+
+`cc` 是雙宿主 plugin:除了在 Claude Code 用 `/cc:*`,也能在 **Codex 當 host** 時把明確指派的子任務交給 headless Claude。
+
+**安裝到 codex(使用者操作)**:將本 repo 註冊為 codex marketplace 後 `codex plugin add cc@<marketplace>`,確認 `~/.codex/config.toml` 出現 `[plugins."cc@<marketplace>"] enabled = true`。
+
+**用法**:在給 codex 的 prompt 裡明確指派,例如「這段翻譯交給 Claude 跑」。codex 會載入 `cc-handoff` skill → 定位 `cc-companion`(PATH launcher 或搜尋)→ 設 `CC_PLUGIN_DATA` → 在專案根以 `cc-companion task --prompt-file <abs> --json` 前景同步跑 → 回報結果與「claude 改了哪些檔」。
+
+**注意**:handoff 預設可寫(`bypassPermissions`);要唯讀加 `--read-only`。codex 端需先有 cc profile(`cc-companion setup` 會自動建 native)。
+
 ## Migrating from the standalone repos
 
 This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-plugin`
