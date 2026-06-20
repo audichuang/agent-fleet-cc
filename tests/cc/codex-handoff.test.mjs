@@ -55,3 +55,58 @@ test("cc-handoff skill 存在、frontmatter 正確、含關鍵操作指令", () 
   assert.match(text, /--json/, "body must use --json");
   assert.match(text, /明確指派|explicit/i, "body must state explicit-assignment-only");
 });
+
+const COMPANION = path.join(REPO_ROOT, "plugins/cc/scripts/cc-companion.mjs");
+const FAKE_CLAUDE = path.join(REPO_ROOT, "tests/cc/fake-claude.mjs");
+
+test("污染回歸:同時有 CC_PLUGIN_DATA 與被污染的 CLAUDE_PLUGIN_DATA 時,job/state 落 CC_PLUGIN_DATA（V-2/#2）", () => {
+  const want = fs.mkdtempSync(path.join(os.tmpdir(), "cc-want-"));   // cc 真正的 dataRoot
+  const wrong = fs.mkdtempSync(path.join(os.tmpdir(), "cc-wrong-")); // codex 環境注入的 CLAUDE_PLUGIN_DATA
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "cc-ws-"));
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "cc-bin-"));
+  const shim = path.join(bin, "claude");
+  fs.writeFileSync(
+    shim,
+    `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "fake 0.0.0"; exit 0; fi\nexec "${process.execPath}" "${FAKE_CLAUDE}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  // 單一 profile 放在 want → auto-select
+  fs.mkdirSync(path.join(want, "profiles"), { recursive: true });
+  fs.writeFileSync(
+    path.join(want, "profiles", "native.json"),
+    JSON.stringify({ env: { FAKE_CLAUDE_MODE: "success" } }),
+  );
+  const prompt = path.join(ws, "task.md");
+  fs.writeFileSync(prompt, "do the thing");
+
+  const res = spawnSync(
+    process.execPath,
+    [COMPANION, "task", "--prompt-file", prompt, "--json"],
+    {
+      cwd: ws,
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        CC_PLUGIN_DATA: want,        // cc 的 dataRoot
+        CLAUDE_PLUGIN_DATA: wrong,   // 模擬 orca codex 污染
+        CC_CLAUDE_BIN: shim,
+      },
+      encoding: "utf8",
+      timeout: 20000,
+    },
+  );
+  const line = res.stdout.split("\n").find((l) => l.trim().startsWith("{"));
+  assert.ok(line, `no JSON in stdout: ${res.stdout}\n${res.stderr}`);
+  const j = JSON.parse(line);
+  assert.equal(j.status, "completed", `${res.stdout}\n${res.stderr}`);
+  // 坐實:state 落在 want(CC_PLUGIN_DATA),wrong 完全沒被用
+  assert.ok(fs.existsSync(path.join(want, "state")), "state must live under CC_PLUGIN_DATA");
+  assert.ok(
+    !fs.existsSync(path.join(wrong, "state")),
+    "CLAUDE_PLUGIN_DATA must NOT be used when CC_PLUGIN_DATA is set",
+  );
+
+  for (const d of [want, wrong, ws, bin]) {
+    fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
