@@ -55,6 +55,9 @@ test("cc-handoff skill 存在、frontmatter 正確、含關鍵操作指令", () 
   assert.match(text, /--json/, "body must use --json");
   assert.match(text, /明確指派|explicit/i, "body must state explicit-assignment-only");
   assert.match(text, /bin\/cc-companion/, "body must prefer bin/cc-companion launcher (orca isCliEntry workaround)");
+  // profile 選擇:明確分辨(沒指定→native / 指定→看 profiles 用對應),不依賴單一 profile auto-select
+  assert.match(text, /--profile/, "body must pass --profile explicitly, not rely on auto-select");
+  assert.match(text, /CC_PROFILE/, "body must select profile via CC_PROFILE (native default + explicit pick)");
 });
 
 const COMPANION = path.join(REPO_ROOT, "plugins/cc/scripts/cc-companion.mjs");

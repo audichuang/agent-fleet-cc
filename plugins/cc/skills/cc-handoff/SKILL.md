@@ -40,13 +40,19 @@ else
 fi
 ```
 
-### 1. 釘住工作目錄與環境（V-2 / V-3）
+### 1. 釘住環境、選 profile（V-2 / V-3）
 
 ```bash
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
 # 必設 CC_PLUGIN_DATA —— 否則被 codex 環境的 CLAUDE_PLUGIN_DATA 拖走,profile 找不到
 export CC_PLUGIN_DATA="${CC_PLUGIN_DATA:-$HOME/.claude/plugins/data/cc}"
+# 看有哪些 profile 可選(每個 <name>.json = 一個引擎設定:native=原生 claude、其它=各自 endpoint/模型)
+ls "$CC_PLUGIN_DATA/profiles/" 2>/dev/null
 ```
+
+**選 profile —— 分辨要跑哪個,不要假設只有一個**:
+- **使用者沒指明引擎 → `CC_PROFILE=native`**(原生 Claude;`cc-companion setup` 保證 native 存在)。
+- **使用者指明了引擎**(prompt 裡說「用 deepseek 跑」「交給便宜的模型」「用 <X>」)→ 從上面 `ls` 列出的可用 profile 找對應的,設 `CC_PROFILE=<name>`。講的名字對不上任何 profile 時,把可用清單列給使用者選,**不要亂猜也不要硬用 native**。
 
 ### 2. 備妥 prompt（temp file,絕對路徑）
 
@@ -68,12 +74,12 @@ BEFORE="$(cd "$PROJECT_ROOT" && git status --porcelain --untracked-files=all 2>/
 ### 4. 同步 spawn（在專案根 cwd,傳絕對 prompt 路徑）
 
 ```bash
-OUT="$(cd "$PROJECT_ROOT" && "${CC[@]}" task --prompt-file "$TMP" --json 2>/tmp/cc-handoff.err)"
+OUT="$(cd "$PROJECT_ROOT" && "${CC[@]}" task --profile "$CC_PROFILE" --prompt-file "$TMP" --json 2>/tmp/cc-handoff.err)"
 RC=$?
 ```
 
 - 預設權限可寫（`bypassPermissions`）。只有使用者要求「不要用 bypass 權限」時,在 `task` 後加 `--read-only`（語意:改用 claude 預設權限模式,**非**保證禁寫)。
-- 不帶 `--profile`(單一 profile auto-select)。本流程**不**用背景模式。
+- `--profile "$CC_PROFILE"` 用 step 1 選好的(沒指定 → native;指定 → 對應引擎)。**不要**靠「單一 profile auto-select」——多 profile 是常態,明確指定才不會在你裝了第二個 profile 後壞掉。本流程**不**用背景模式。
 
 ### 5. 讀回結果（先解析 JSON,失敗再分類；V-4）
 

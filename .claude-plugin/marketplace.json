@@ -30,7 +30,7 @@
       "name": "cc",
       "source": "./plugins/cc",
       "description": "Run tasks on a headless Claude Code instance, selected by profile — usable from Claude Code or a Codex host via handoff",
-      "version": "0.4.0"
+      "version": "0.4.1"
     },
     {
       "name": "fleet",
