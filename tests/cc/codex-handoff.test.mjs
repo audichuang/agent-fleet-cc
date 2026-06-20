@@ -110,3 +110,18 @@ test("污染回歸:同時有 CC_PLUGIN_DATA 與被污染的 CLAUDE_PLUGIN_DATA �
     fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
+
+const CODEX_MKT = path.join(REPO_ROOT, ".agents/plugins/marketplace.json");
+
+test("codex marketplace manifest 列出 cc 且指向 ./plugins/cc", () => {
+  assert.ok(fs.existsSync(CODEX_MKT), ".agents/plugins/marketplace.json missing");
+  const m = JSON.parse(fs.readFileSync(CODEX_MKT, "utf8"));
+  assert.ok(typeof m.name === "string" && m.name, "marketplace needs a name");
+  const entry = m.plugins.find((p) => p.name === "cc");
+  assert.ok(entry, "cc entry missing from codex marketplace");
+  assert.equal(entry.source.source, "local", "source.source must be local");
+  assert.equal(entry.source.path, "./plugins/cc", "source.path must point at ./plugins/cc");
+  assert.ok(entry.policy && entry.policy.installation, "entry needs policy.installation");
+  assert.ok(entry.policy.authentication, "entry needs policy.authentication");
+  assert.ok(entry.category, "entry needs category");
+});
