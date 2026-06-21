@@ -38,3 +38,17 @@ test("task: partial triplet is rejected (all-or-none)", () => {
   assert.notEqual(r.status, 0);
   assert.match(r.stderr + r.stdout, /all-or-none/i);
 });
+
+test("task: valid triplet passes the gate and enqueues the job (--background)", () => {
+  const { dir, base } = makeRepo();
+  // branch is "feat" (from git init -b feat), base is the HEAD commit SHA
+  const r = runTask(dir, [
+    "--expected-worktree", dir,
+    "--expected-branch", "feat",
+    "--expected-base", base,
+    "--background"
+  ]);
+  assert.equal(r.status, 0, `expected exit 0 but got ${r.status}; stderr: ${r.stderr}`);
+  // renderQueuedTaskLaunch emits "started in the background" and the sentinel
+  assert.match(r.stdout, /started in the background|status=dispatched/i);
+});

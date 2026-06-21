@@ -694,7 +694,7 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
     write,
     resumeLast,
     jobId,
-    expected
+    ...(expected != null && { expected })
   };
 }
 
