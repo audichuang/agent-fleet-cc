@@ -4,6 +4,10 @@
 > 主要修正:expected 改 all-or-none triplet;broker env 防線真正接上(且修正 env 名稱);
 > subagent enforcement 誠實降級(hard gate 來自 host preflight + companion gate);
 > `GIT_DIR/GIT_WORK_TREE` 從軟清單升級為硬 sanitize;validation 用 git hard check 不信 fallback。
+>
+> **v3 — 落點定案 + 範圍縮小**:維度 B 落 `agent-fleet-cc/plugins/codex`(`README.md:133` 宣告本 repo
+> supersedes `codex-plugin-cc`,執行期自包含、無反向 sync);plugin 既有 per-worktree 隔離(realpath hash /
+> per-worktree broker)是對的、**不動**,維度 B 只在其上游加 expected gate;新增 B1c 約束 cross-workspace fallback。
 
 **Goal:** 當 host(Claude Code）開出 git worktree、用 subagent 逐 task 開發、再交 Codex review 時,
 **強制保證** Codex(engine 層）與盡力保證 subagent 的工作目錄與 git 上下文落在那個 worktree——杜絕
@@ -34,8 +38,10 @@
   它**不是**可靠的 git toplevel oracle,validation 不可信它(見維度 B)。
 - Codex app-server / broker 進程以該 `cwd` spawn(`app-server.mjs:251`、`broker-lifecycle.mjs:112`),
   **env 整包繼承 host 的 `process.env`**(`process.mjs:4`);每個 thread 也帶 `cwd`(`codex.mjs:82`)。
-- broker / job 狀態目錄以 **workspaceRoot 路徑 hash** 為鍵(`state.mjs:56-70`)→ 主 repo 與 worktree
-  天然是兩套獨立 broker / job 狀態。
+- broker / job 狀態目錄以 **workspaceRoot 路徑 hash** 為鍵(`state.mjs:56-70`,realpath 正規化)→ 主 repo 與 worktree
+  天然是兩套獨立 broker / job 狀態。⚠️ **這是「被動隔離」**:plugin 忠實服務「傳入的 cwd」,**不驗證 cwd 是不是預期那棵**;
+  cwd 餵錯時它會「完美地隔離到錯誤的 workspace」——前一個 bug 的精確機制。另有 `findJobByIdAcrossWorkspaces`
+  (`state.mjs:552`)在「明確 id + 當前找不到」時掃全域,是跨 worktree 逃生口,但 expected 模式下需受約束(見 B1c)。
 - ⚠️ **broker endpoint env 優先於 cwd**:`CodexAppServerClient.connect`(`app-server.mjs:396`)會優先採用
   env 指定的 endpoint(實際常數為 **`CODEX_COMPANION_APP_SERVER_ENDPOINT`**,動工前以源碼為準再核對一次),
   **不看 cwd**。⇒ 即使 cwd 對、assert 過,只要這個 env 殘留指向別樹 broker,Codex 仍可能在別樹動手。
@@ -144,7 +150,12 @@ git -C "$CWD" merge-base --is-ancestor "$WT_BASE" HEAD     || die "baseline 不�
 
 ## 維度 B:Engine 契約(`plugins/codex/`,companion 硬驗)
 
-**受 IRONCLAD 約束:只動 `plugins/codex/` + `tests/codex/`。**
+**受 IRONCLAD 約束:只動 `plugins/codex/` + `tests/codex/`。落點定案:改 `agent-fleet-cc/plugins/codex`**——
+`README.md:133` 已宣告本 repo supersedes `codex-plugin-cc`,codex plugin 是自包含 payload(marketplace
+`source: ./plugins/codex`)、無反向 sync,故不動已退役的上游 repo。
+
+**設計原則(本輪研究後縮小範圍):** plugin 既有的 per-worktree 隔離(realpath hash + per-worktree broker)
+**是對的,不要改**;維度 B 只在它「上游」加一道 expected gate——gate 過了就交給既有隔離機制接手。範圍更小、回歸風險更低。
 
 - **B1 — companion expected-triplet gate(核心 hard gate)**
   companion 接受 **all-or-none triplet**:`--expected-worktree --expected-branch --expected-base`
@@ -158,6 +169,9 @@ git -C "$CWD" merge-base --is-ancestor "$WT_BASE" HEAD     || die "baseline 不�
   worker spawn 目前只傳 `--cwd/--job-id`、queued request 只存 cwd/model/prompt/write/resume
   (`codex-companion.mjs:687/727/912`)。把 triplet **寫入 queued request**,`task-worker` 啟動後、
   執行前**再跑一次 B1 的驗證**(背景路徑不能漏接 CLI 契約)。
+- **B1c — expected 模式約束 cross-workspace fallback**
+  `findJobByIdAcrossWorkspaces`(`state.mjs:552`)在 expected 模式下需**受 triplet 約束或停用**,否則
+  `/codex:result`、`--resume-last` 可能把操作串到**別樹的 job/thread**(對應 Codex「未涵蓋」清單的 resume 風險)。
 - **B2 — 呼叫方顯式傳 triplet(調用契約,主要落 host 側)**
   「缺 triplet 即 fail-fast」的責任在**呼叫方**:host named workflow(**不在 codex plugin、不受 IRONCLAD**)、
   以及維度 A 的 skill。codex plugin 內的 command templates(markdown 吃 `$ARGUMENTS`,如 `task.md`、`handoff.md`)
@@ -203,7 +217,7 @@ git -C "$CWD" merge-base --is-ancestor "$WT_BASE" HEAD     || die "baseline 不�
 |---|---|
 | 本設計文件 | `agent-fleet-cc/docs/superpowers/specs/2026-06-21-worktree-codex-cwd-contract-design.md` |
 | 維度 A skill | `/home/audichuang/research/audi-skill/worktree-cwd-guard/SKILL.md` |
-| 維度 B code | `agent-fleet-cc/plugins/codex/`(companion gate + worker 二次驗 + `commands/handoff.md`)+ `tests/codex/` |
+| 維度 B code | `agent-fleet-cc/plugins/codex/`(companion gate + worker 二次驗 + cross-workspace 約束 + `commands/handoff.md`)+ `tests/codex/` **← 定案;不動已退役的 `codex-plugin-cc`** |
 | B2 呼叫契約(host 側) | host named workflow / 維度 A skill —— **不在** codex plugin、不受 IRONCLAD |
 
 **IRONCLAD:** 不碰 `plugins/{antigravity,cc}/` 或其 tests;不改其他 engine。
