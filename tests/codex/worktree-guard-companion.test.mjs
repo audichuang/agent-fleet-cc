@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
 import { resolveWorkspaceRoot } from "../../plugins/codex/scripts/lib/workspace.mjs";
+import { buildSingleJobSnapshot } from "../../plugins/codex/scripts/lib/job-control.mjs";
 
 const COMPANION = path.resolve("plugins/codex/scripts/codex-companion.mjs");
 
@@ -113,4 +114,51 @@ test("review: mismatched expected-worktree exits non-zero before engine", () => 
     { encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")) } });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr + r.stdout, /worktree mismatch|WorktreeMismatch/i);
+});
+
+test("expected mode disables cross-workspace job fallback in buildSingleJobSnapshot", () => {
+  // Workspace A: has a job seeded in a shared state dir
+  const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "pd-cwguard-"));
+  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+
+  const { dir: dirA, base: baseA } = makeRepo();
+  const { dir: dirB, base: baseB } = makeRepo();
+
+  let workspaceRootA;
+  const jobId = "cross-ws-guard-test-" + Date.now();
+
+  try {
+    workspaceRootA = resolveWorkspaceRoot(dirA);
+    // Seed a completed job into workspace A's state
+    writeJobFile(workspaceRootA, jobId, {
+      id: jobId,
+      status: "completed",
+      phase: "done",
+      workspaceRoot: workspaceRootA,
+      title: "test",
+      summary: "test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    });
+
+    // Without expected triplet: cross-workspace fallback finds the job from B's cwd
+    const snapDefault = buildSingleJobSnapshot(dirB, jobId /* no options → allowCrossWorkspace defaults true */);
+    assert.equal(snapDefault.job.id, jobId, "default mode must find cross-workspace job");
+    assert.equal(snapDefault.crossWorkspace, true, "must be flagged as cross-workspace");
+
+    // With allowCrossWorkspace: false (expected mode): must NOT find it, must throw
+    assert.throws(
+      () => buildSingleJobSnapshot(dirB, jobId, { allowCrossWorkspace: false }),
+      /No job found/i,
+      "expected mode must throw instead of crossing workspace boundary"
+    );
+  } finally {
+    if (origPluginData === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+    }
+  }
 });

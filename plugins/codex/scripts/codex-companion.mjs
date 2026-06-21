@@ -967,11 +967,12 @@ async function handleTaskWorker(argv) {
 
 async function handleStatus(argv) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"],
+    valueOptions: ["cwd", "timeout-ms", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json", "all", "wait"]
   });
 
   const cwd = resolveCommandCwd(options);
+  const expected = parseExpectedTriplet(options);
   const reference = positionals[0] ?? "";
   if (reference) {
     const snapshot = options.wait
@@ -979,7 +980,7 @@ async function handleStatus(argv) {
           timeoutMs: options["timeout-ms"],
           pollIntervalMs: options["poll-interval-ms"]
         })
-      : buildSingleJobSnapshot(cwd, reference);
+      : buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
     outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
     return;
   }
@@ -1017,13 +1018,14 @@ async function handleWait(argv) {
 
 function handleResult(argv) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["cwd"],
+    valueOptions: ["cwd", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json"]
   });
 
   const cwd = resolveCommandCwd(options);
+  const expected = parseExpectedTriplet(options);
   const reference = positionals[0] ?? "";
-  const { workspaceRoot, job } = resolveResultJob(cwd, reference);
+  const { workspaceRoot, job } = resolveResultJob(cwd, reference, { allowCrossWorkspace: !expected });
   const storedJob = readStoredJob(workspaceRoot, job.id);
   const payload = {
     job,
@@ -1070,13 +1072,14 @@ function handleTaskResumeCandidate(argv) {
 
 async function handleCancel(argv) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["cwd"],
+    valueOptions: ["cwd", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json"]
   });
 
   const cwd = resolveCommandCwd(options);
+  const expected = parseExpectedTriplet(options);
   const reference = positionals[0] ?? "";
-  const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env });
+  const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env, allowCrossWorkspace: !expected });
   const existing = readStoredJob(workspaceRoot, job.id) ?? {};
   const threadId = existing.threadId ?? job.threadId ?? null;
   const turnId = existing.turnId ?? job.turnId ?? null;
@@ -1239,10 +1242,11 @@ export function makeUtf8LogReader(logFile) {
 
 export async function handleAttach(argv, deps = {}) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "poll-interval-ms"],
+    valueOptions: ["cwd", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json"]
   });
   const cwd = resolveCommandCwd(options);
+  const expected = parseExpectedTriplet(options);
   const reference = positionals.join(" ").trim() || null;
 
   // Resolve the job: an explicit reference (local, then cross-workspace via
@@ -1253,7 +1257,7 @@ export async function handleAttach(argv, deps = {}) {
   let logFile;
   let statusFile;
   if (reference) {
-    const snapshot = buildSingleJobSnapshot(cwd, reference);
+    const snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
     workspaceRoot = snapshot.workspaceRoot;
     jobId = snapshot.job.id;
     logFile = snapshot.job.logFile ?? resolveJobLogFile(workspaceRoot, jobId);

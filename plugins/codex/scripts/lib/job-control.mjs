@@ -294,6 +294,7 @@ export function buildStatusSnapshot(cwd, options = {}) {
 }
 
 export function buildSingleJobSnapshot(cwd, reference, options = {}) {
+  const allowCrossWorkspace = options.allowCrossWorkspace !== false; // default preserves current behaviour
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
   let selected;
@@ -304,7 +305,9 @@ export function buildSingleJobSnapshot(cwd, reference, options = {}) {
     // from another workspace. Fall back to an exact cross-workspace lookup
     // (read-only) so the id does not dead-end as "Job not found". A bare prefix
     // won't match the per-job file, so it correctly re-throws the local error.
-    if (reference) {
+    // In expected (worktree) mode allowCrossWorkspace=false: skip the fallback
+    // so lookups stay workspace-scoped and never bleed into sibling worktrees.
+    if (allowCrossWorkspace && reference) {
       const found = findJobByIdAcrossWorkspaces(cwd, reference);
       if (found) {
         return {
@@ -330,7 +333,7 @@ export function buildSingleJobSnapshot(cwd, reference, options = {}) {
   };
 }
 
-export function resolveResultJob(cwd, reference) {
+export function resolveResultJob(cwd, reference, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const jobs = sortJobsNewestFirst(reference ? listJobs(workspaceRoot) : filterJobsForCurrentSession(listJobs(workspaceRoot)));
   const selected = matchJobReference(
