@@ -63,30 +63,37 @@ test("task-worker: re-verifies expected from stored request, exits non-zero on m
   const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
   process.env.CLAUDE_PLUGIN_DATA = pluginData;
 
-  const workspaceRoot = resolveWorkspaceRoot(dir);
-  const jobId = "test-worker-gate-" + Date.now();
-  const record = {
-    id: jobId,
-    status: "queued",
-    phase: "queued",
-    workspaceRoot,
-    title: "test",
-    summary: "test",
-    request: {
-      cwd: dir,
-      prompt: "noop",
-      // expected points at a non-existent path — this should cause mismatch
-      expected: {
-        worktreePath: "/nope",
-        worktreeBranch: "feat",
-        worktreeBase: base
+  let workspaceRoot, jobId;
+  try {
+    workspaceRoot = resolveWorkspaceRoot(dir);
+    jobId = "test-worker-gate-" + Date.now();
+    const record = {
+      id: jobId,
+      status: "queued",
+      phase: "queued",
+      workspaceRoot,
+      title: "test",
+      summary: "test",
+      request: {
+        cwd: dir,
+        prompt: "noop",
+        // expected points at a non-existent path — this should cause mismatch
+        expected: {
+          worktreePath: "/nope",
+          worktreeBranch: "feat",
+          worktreeBase: base
+        }
       }
+    };
+    writeJobFile(workspaceRoot, jobId, record);
+  } finally {
+    // Always restore so we don't affect other tests even if an exception occurs
+    if (origPluginData === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
     }
-  };
-  writeJobFile(workspaceRoot, jobId, record);
-
-  // Restore so we don't affect other tests
-  process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+  }
 
   const r = spawnSync(process.execPath, [COMPANION, "task-worker", "--cwd", dir, "--job-id", jobId], {
     encoding: "utf8",
