@@ -935,6 +935,10 @@ async function handleTaskWorker(argv) {
     throw new Error(`Stored job ${options["job-id"]} is missing its task request payload.`);
   }
 
+  // B1b: background task-worker re-verifies the expected-worktree contract from the
+  // stored request. assertWorktreeAlignment is a no-op when request.expected is absent.
+  assertWorktreeAlignment({ cwd, expected: request.expected });
+
   const { logFile, progress } = createTrackedProgress(
     {
       ...storedJob,

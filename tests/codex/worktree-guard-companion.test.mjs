@@ -5,6 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
+import { resolveWorkspaceRoot } from "../../plugins/codex/scripts/lib/workspace.mjs";
+
 const COMPANION = path.resolve("plugins/codex/scripts/codex-companion.mjs");
 
 function makeRepo() {
@@ -51,4 +54,46 @@ test("task: valid triplet passes the gate and enqueues the job (--background)", 
   assert.equal(r.status, 0, `expected exit 0 but got ${r.status}; stderr: ${r.stderr}`);
   // renderQueuedTaskLaunch emits "started in the background" and the sentinel
   assert.match(r.stdout, /started in the background|status=dispatched/i);
+});
+
+test("task-worker: re-verifies expected from stored request, exits non-zero on mismatch", () => {
+  const { dir, base } = makeRepo();
+  const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "pd-worker-"));
+  // Override CLAUDE_PLUGIN_DATA for this process so writeJobFile uses the same state dir
+  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+
+  const workspaceRoot = resolveWorkspaceRoot(dir);
+  const jobId = "test-worker-gate-" + Date.now();
+  const record = {
+    id: jobId,
+    status: "queued",
+    phase: "queued",
+    workspaceRoot,
+    title: "test",
+    summary: "test",
+    request: {
+      cwd: dir,
+      prompt: "noop",
+      // expected points at a non-existent path — this should cause mismatch
+      expected: {
+        worktreePath: "/nope",
+        worktreeBranch: "feat",
+        worktreeBase: base
+      }
+    }
+  };
+  writeJobFile(workspaceRoot, jobId, record);
+
+  // Restore so we don't affect other tests
+  process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+
+  const r = spawnSync(process.execPath, [COMPANION, "task-worker", "--cwd", dir, "--job-id", jobId], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData }
+  });
+
+  assert.notEqual(r.status, 0, `expected non-zero exit but got ${r.status}; stdout: ${r.stdout}; stderr: ${r.stderr}`);
+  assert.match(r.stderr + r.stdout, /worktree mismatch|WorktreeMismatch/i,
+    `expected mismatch message but got:\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
 });
