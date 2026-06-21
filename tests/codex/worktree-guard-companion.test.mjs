@@ -104,3 +104,13 @@ test("task-worker: re-verifies expected from stored request, exits non-zero on m
   assert.match(r.stderr + r.stdout, /worktree mismatch|WorktreeMismatch/i,
     `expected mismatch message but got:\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
 });
+
+test("review: mismatched expected-worktree exits non-zero before engine", () => {
+  const { dir, base } = makeRepo();
+  const r = spawnSync(process.execPath,
+    [COMPANION, "review", "--cwd", dir, "--scope", "working-tree",
+     "--expected-worktree", "/nope", "--expected-branch", "feat", "--expected-base", base],
+    { encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")) } });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr + r.stdout, /worktree mismatch|WorktreeMismatch/i);
+});

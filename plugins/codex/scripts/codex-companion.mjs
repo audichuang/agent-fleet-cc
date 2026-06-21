@@ -800,7 +800,7 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
 
 async function handleReviewCommand(argv, config) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "cwd"],
+    valueOptions: ["base", "scope", "model", "cwd", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json", "background", "wait"],
     aliasMap: {
       m: "model"
@@ -809,6 +809,8 @@ async function handleReviewCommand(argv, config) {
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
+  const expected = parseExpectedTriplet(options);
+  assertWorktreeAlignment({ cwd, expected });
   const focusText = positionals.join(" ").trim();
   const target = resolveReviewTarget(cwd, {
     base: options.base,
