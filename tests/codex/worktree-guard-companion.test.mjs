@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
+import { writeJobFile, saveState } from "../../plugins/codex/scripts/lib/state.mjs";
 import { resolveWorkspaceRoot } from "../../plugins/codex/scripts/lib/workspace.mjs";
 import { buildSingleJobSnapshot } from "../../plugins/codex/scripts/lib/job-control.mjs";
 
@@ -161,4 +161,139 @@ test("expected mode disables cross-workspace job fallback in buildSingleJobSnaps
       process.env.CLAUDE_PLUGIN_DATA = origPluginData;
     }
   }
+});
+
+// B1c -- wait path: status --wait with expected triplet must not cross workspace
+test("status --wait --expected-worktree blocks cross-workspace lookup (non-zero exit, no foreign job returned)", () => {
+  // Create workspace A (foreign) and workspace B (current).
+  // Seed a completed job into A. Then invoke `status --wait <foreignJobId>` from B
+  // with --expected-worktree pointing at B + B's branch/base.
+  // With allowCrossWorkspace: false the companion must exit non-zero (job not found).
+  const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "pd-wait-cwguard-"));
+
+  // Workspace A: foreign repo with the job
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "wtguard-A-"));
+  const runA = (args) => spawnSync("git", args, { cwd: dirA, encoding: "utf8" });
+  runA(["init", "-q", "-b", "feat"]);
+  runA(["config", "user.email", "t@t"]); runA(["config", "user.name", "t"]);
+  fs.writeFileSync(path.join(dirA, "f"), "1");
+  runA(["add", "."]); runA(["commit", "-qm", "base"]);
+
+  // Workspace B: the "current" repo
+  const { dir: dirB, base: baseB } = makeRepo(); // branch = "feat"
+
+  // Seed completed job into A's state (using dirA as cwd so resolveWorkspaceRoot picks the right dir)
+  const workspaceRootA = resolveWorkspaceRoot(dirA);
+  const foreignJobId = "foreign-wait-guard-" + Date.now();
+  const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginData };
+
+  // Temporarily redirect process CLAUDE_PLUGIN_DATA so writeJobFile goes to the shared pluginData
+  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  try {
+    writeJobFile(workspaceRootA, foreignJobId, {
+      id: foreignJobId,
+      status: "completed",
+      phase: "done",
+      workspaceRoot: workspaceRootA,
+      title: "foreign",
+      summary: "foreign",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    });
+    saveState(workspaceRootA, {
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: []
+    });
+  } finally {
+    if (origPluginData === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+    }
+  }
+
+  // Invoke: status --wait <foreignJobId> from dirB with expected triplet pointing at dirB
+  // Use --timeout-ms 0 so the wait loop exits immediately instead of blocking.
+  const r = spawnSync(process.execPath, [
+    COMPANION, "status",
+    "--cwd", dirB,
+    "--wait",
+    "--timeout-ms", "0",
+    "--expected-worktree", dirB,
+    "--expected-branch", "feat",
+    "--expected-base", baseB,
+    foreignJobId
+  ], { encoding: "utf8", env });
+
+  assert.notEqual(r.status, 0,
+    `expected non-zero (job not found) but got ${r.status}; stdout: ${r.stdout}; stderr: ${r.stderr}`);
+  // Must not have returned the foreign job as found
+  assert.doesNotMatch(r.stdout + r.stderr, new RegExp(foreignJobId.replace(/-/g, "\\-") + ".*completed", "i"),
+    "foreign job must not appear as completed in output");
+});
+
+// B1c -- wait command: `wait` with expected triplet must not cross workspace
+test("wait --expected-worktree blocks cross-workspace lookup (non-zero exit, no foreign job returned)", () => {
+  const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "pd-wait2-cwguard-"));
+
+  // Workspace A: foreign repo
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "wtguard-A2-"));
+  const runA = (args) => spawnSync("git", args, { cwd: dirA, encoding: "utf8" });
+  runA(["init", "-q", "-b", "feat"]);
+  runA(["config", "user.email", "t@t"]); runA(["config", "user.name", "t"]);
+  fs.writeFileSync(path.join(dirA, "f"), "1");
+  runA(["add", "."]); runA(["commit", "-qm", "base"]);
+
+  // Workspace B: current repo
+  const { dir: dirB, base: baseB } = makeRepo();
+
+  const workspaceRootA = resolveWorkspaceRoot(dirA);
+  const foreignJobId = "foreign-wait2-guard-" + Date.now();
+  const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginData };
+
+  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  try {
+    writeJobFile(workspaceRootA, foreignJobId, {
+      id: foreignJobId,
+      status: "completed",
+      phase: "done",
+      workspaceRoot: workspaceRootA,
+      title: "foreign2",
+      summary: "foreign2",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    });
+    saveState(workspaceRootA, {
+      version: 1,
+      config: { stopReviewGate: false },
+      jobs: []
+    });
+  } finally {
+    if (origPluginData === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+    }
+  }
+
+  // Invoke: `wait <foreignJobId>` from dirB with expected triplet pointing at dirB
+  const r = spawnSync(process.execPath, [
+    COMPANION, "wait",
+    "--cwd", dirB,
+    "--timeout-ms", "0",
+    "--expected-worktree", dirB,
+    "--expected-branch", "feat",
+    "--expected-base", baseB,
+    foreignJobId
+  ], { encoding: "utf8", env });
+
+  assert.notEqual(r.status, 0,
+    `expected non-zero (job not found) but got ${r.status}; stdout: ${r.stdout}; stderr: ${r.stderr}`);
+  assert.doesNotMatch(r.stdout + r.stderr, new RegExp(foreignJobId.replace(/-/g, "\\-") + ".*completed", "i"),
+    "foreign job must not appear as completed in output");
 });

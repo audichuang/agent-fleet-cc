@@ -397,12 +397,13 @@ function waitExitCode(snapshot) {
 async function waitForSingleJobSnapshot(cwd, reference, options = {}) {
   const timeoutMs = coerceMs(options.timeoutMs, DEFAULT_STATUS_WAIT_TIMEOUT_MS, 0);
   const pollIntervalMs = coerceMs(options.pollIntervalMs, DEFAULT_STATUS_POLL_INTERVAL_MS, 100);
+  const allowCrossWorkspace = options.allowCrossWorkspace;
   const deadline = Date.now() + timeoutMs;
-  let snapshot = buildSingleJobSnapshot(cwd, reference);
+  let snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace });
 
   while (isActiveJobStatus(snapshot.job.status) && Date.now() < deadline) {
     await sleep(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
-    snapshot = buildSingleJobSnapshot(cwd, reference);
+    snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace });
   }
 
   return {
@@ -978,7 +979,8 @@ async function handleStatus(argv) {
     const snapshot = options.wait
       ? await waitForSingleJobSnapshot(cwd, reference, {
           timeoutMs: options["timeout-ms"],
-          pollIntervalMs: options["poll-interval-ms"]
+          pollIntervalMs: options["poll-interval-ms"],
+          allowCrossWorkspace: !expected
         })
       : buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
     outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
@@ -995,11 +997,12 @@ async function handleStatus(argv) {
 
 async function handleWait(argv) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "timeout-ms", "poll-interval-ms"],
+    valueOptions: ["cwd", "timeout-ms", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json"]
   });
 
   const cwd = resolveCommandCwd(options);
+  const expected = parseExpectedTriplet(options);
   const reference = positionals[0] ?? "";
   if (!reference) {
     throw new Error("`wait` requires a job id.");
@@ -1010,7 +1013,8 @@ async function handleWait(argv) {
 
   const snapshot = await waitForSingleJobSnapshot(cwd, reference, {
     timeoutMs: options["timeout-ms"],
-    pollIntervalMs: options["poll-interval-ms"]
+    pollIntervalMs: options["poll-interval-ms"],
+    allowCrossWorkspace: !expected
   });
   outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
   process.exitCode = waitExitCode(snapshot);
