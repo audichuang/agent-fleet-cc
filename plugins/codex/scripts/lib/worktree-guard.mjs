@@ -38,10 +38,6 @@ export function parseExpectedTriplet(source = {}) {
   return picked;
 }
 
-export function expectedFromRequest(request = {}) {
-  return parseExpectedTriplet(request ?? {});
-}
-
 export function sanitizeGitEnv(env) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;

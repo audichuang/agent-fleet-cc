@@ -333,6 +333,7 @@ export function buildSingleJobSnapshot(cwd, reference, options = {}) {
   };
 }
 
+// allowCrossWorkspace accepted for caller-uniformity; already workspace-scoped (no cross-workspace fallback here)
 export function resolveResultJob(cwd, reference, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const jobs = sortJobsNewestFirst(reference ? listJobs(workspaceRoot) : filterJobsForCurrentSession(listJobs(workspaceRoot)));
@@ -358,6 +359,7 @@ export function resolveResultJob(cwd, reference, options = {}) {
   throw new Error("No finished Codex jobs found for this repository yet.");
 }
 
+// allowCrossWorkspace accepted for caller-uniformity; already workspace-scoped (no cross-workspace fallback here)
 export function resolveCancelableJob(cwd, reference, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
