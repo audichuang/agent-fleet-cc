@@ -177,9 +177,10 @@ git -C "$CWD" merge-base --is-ancestor "$WT_BASE" HEAD     || die "baseline 不�
   以及維度 A 的 skill。codex plugin 內的 command templates(markdown 吃 `$ARGUMENTS`,如 `task.md`、`handoff.md`)
   **不會自動補 `--cwd`/triplet**;若要讓 slash command 也走契約,需顯式改 command template 接受並轉傳這些旗標
   (列為選配)。**codex plugin 這側的真防線是 B1,不依賴 B2。**
-- **B3 — handoff payload + template**
-  cc→codex handoff 帶 `{ worktreePath, worktreeBranch, worktreeBase }`;codex 端經 B1 驗後才動手,
-  回來時回報自己實際的 workspaceRoot 供 cc 比對。對應改 `commands/handoff.md` 模板(在 IRONCLAD 範圍內)。
+- **B3 — handoff triplet(本期:CLI 介面;template 自動傳遞 → follow-up)**
+  本期讓 companion 具備經 CLI/env 接收 `{ worktreePath, worktreeBranch, worktreeBase }`、驗證、並回報實際 workspaceRoot
+  的能力(屬 B1)。**改 `commands/handoff.md` / `task.md` 模板讓 slash command 自動組這些旗標 → 留 follow-up**
+  (本期 engine gate 先立起來)。
 - **(future)broker handshake 驗 workspaceRoot** — broker 連上後回報自身 workspaceRoot,companion 比對不符即拒連。
   最強(連 foreign broker 都擋),但需改 broker 協議;本期不做,列 future。
 
@@ -202,8 +203,9 @@ git -C "$CWD" merge-base --is-ancestor "$WT_BASE" HEAD     || die "baseline 不�
   - 非 git repo 的 cwd → 斷言 hard check 直接失敗(不 fallback 成 cwd)。
   - background:triplet 入 queued request → `task-worker` 啟動後二次驗;不符即終止 job。
 - **維度 B(e2e)**:用 `e2e-testing` 的 fake-engine 框架黑箱驗落點與退出碼。
-  - **foreign-broker smoke(Need to verify)**:Codex 指出「real app-server 是否完全尊重 per-thread cwd」
-    本 repo 無法證明;需一個對真 Codex 的 smoke,確認連到別樹 broker 時會被 B1 的清 env 擋下。
+  - **foreign-broker smoke(本期就建,需真 Codex)**:Codex 指出「real app-server 是否完全尊重 per-thread cwd」
+    無法用 fake-engine 證明 → 本期建一個對真 Codex 的 smoke,確認**連到別樹 broker 時會被 B1 的清 env 擋下**。
+    與 hermetic 測試分開、可獨立跑(沿用 `e2e-testing` 的 real-engine smoke 慣例)。
 - **SSOT 防 drift(minor)**:A 的 shell 片段與 B 的 JS 實作**共用同一組 test vectors / fixture cases**
   (同一批正反例餵兩邊),避免兩份不變量邏輯分叉。
 - **維度 A**:skill 的 assert 片段 / prompt 範本正確性 + 正反例走查。
@@ -231,12 +233,13 @@ git -C "$CWD" merge-base --is-ancestor "$WT_BASE" HEAD     || die "baseline 不�
 - **不做 repo-identity gitdir 指紋**(本期);列已知限制 / future。
 - **不自動把未提交變更帶過 worktree**——軟清單提醒即可。
 - **不改 antigravity / delegate**,也不把 codex 強推 shared runtime。
+- **本期不改 slash command templates**(`task.md`/`handoff.md`)接 triplet 旗標 → follow-up;本期先立 engine gate(B1)。
 
 ---
 
-## Open questions(留給 user review)
+## 決議記錄(user review 拍板)
 
-1. skill 名稱 `worktree-cwd-guard` 可以嗎?還是要更口語的中文友善名?
-2. 要不要連 codex plugin 的 slash command templates(`task.md`/`handoff.md`)也改成顯式接 triplet 旗標
-   (B2 選配),還是本期只做 B1/B1b/B3、command 契約留待之後?
-3. e2e 的 foreign-broker smoke 需要真 Codex(非 fake-engine);本期就建,還是先標 Need-to-verify、留 follow-up?
+1. **skill 名稱 = `worktree-cwd-guard`**。
+2. **本期只做 engine gate**:B1/B1b/B1c + companion 具備接收 triplet 的 CLI/env 能力。
+   slash command templates(`task.md`/`handoff.md`)自動組/轉傳 triplet 旗標 → **follow-up**。
+3. **本期就建真 Codex foreign-broker smoke**(非僅 fake-engine):驗證連到別樹 broker 時被 B1 清 env 擋下。
