@@ -13,6 +13,7 @@
     "test:e2e": "node --test tests/cc/e2e-cli.test.mjs tests/codex/e2e-cli.test.mjs tests/antigravity/e2e-cli.test.mjs tests/fleet/e2e-cli.test.mjs",
     "test:antigravity": "node --test --experimental-test-module-mocks tests/antigravity/*.test.mjs",
     "test:codex": "node --test tests/codex/*.test.mjs",
+    "test:codex:smoke": "node --test tests/codex/worktree-guard-foreign-broker.smoke.mjs",
     "test:fleet": "node --test \"tests/fleet/*.test.mjs\"",
     "sync-shared": "node scripts/sync-shared.mjs",
     "prebuild:codex": "mkdir -p plugins/codex/.generated/app-server-types && codex app-server generate-ts --out plugins/codex/.generated/app-server-types",
