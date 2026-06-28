@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.26
+
+Reply to server-initiated requests with typed graceful declines (C2). The app-server
+can send the CLIENT requests — approvals, `requestUserInput`, MCP elicitation,
+ChatGPT auth-token refresh, … — and `handleServerRequest` answered every one with a
+blanket `-32601`. Codex does unwind on that (it is not the hang — an UNANSWERED
+request is), but with poor semantics: a command approval rendered as "failed" rather
+than "declined", and an auth-token refresh surfaced as a generic IO error.
+
+- `app-server.mjs`: `handleServerRequest` now sends the typed decline each method's
+  response expects (command/fileChange approval → `{decision:"decline"}`; permissions
+  → empty grant; `requestUserInput` → `{answers:{}}`; MCP elicitation →
+  `{action:"decline"}`; dynamic tool call → unsupported result), and a clear `-32000`
+  "re-login to Codex" error for `account/chatgptAuthTokens/refresh` (which the client
+  genuinely cannot perform). Genuinely unknown methods keep `-32601`. Every server
+  request is now logged (method + id + outcome) so a turn that stalls/declines on one
+  is debuggable in the job log. Shapes grounded in the Codex app-server-protocol v2.
+  (Under `danger-full-access` + `approval:never` the approval/permissions variants are
+  auto-resolved server-side; `requestUserInput`, elicitation, and auth refresh are the
+  ones that realistically reach the client.)
+
 ## 1.0.25
 
 Fix cancel ordering + pid source (C1). `/codex:cancel` interrupted the turn and killed

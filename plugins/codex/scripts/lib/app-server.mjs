@@ -67,6 +67,40 @@ export function resolveRequestTimeoutMs(env = process.env) {
   return Math.trunc(value); // 0 disables the per-request timeout
 }
 
+// C2: typed graceful declines for server-initiated requests this client cannot
+// fulfil (no approval UI, no elicitation, no user input, no auth-refresh). Each is
+// the shape the Codex app-server expects so it unwinds the turn cleanly — a blanket
+// -32601 made it render a command approval as "failed" and auth-token refresh as a
+// generic IO error. Shapes grounded in ../codex app-server-protocol v2. Unknown
+// methods keep -32601. (Under danger-full-access + approval:never the
+// approval/permissions variants are auto-resolved server-side and should not reach
+// us; requestUserInput, MCP elicitation, and auth-token refresh are the realistic
+// ones.) A `result` entry is sent as a typed decline; an `errorCode` entry as a
+// JSON-RPC error (the client genuinely cannot produce a valid response).
+const SERVER_REQUEST_REPLIES = {
+  "item/commandExecution/requestApproval": { result: { decision: "decline" } },
+  "item/fileChange/requestApproval": { result: { decision: "decline" } },
+  "item/permissions/requestApproval": { result: { permissions: {}, scope: "turn", strictAutoReview: false } },
+  "item/tool/requestUserInput": { result: { answers: {} } },
+  "mcpServer/elicitation/request": { result: { action: "decline", content: null, _meta: null } },
+  "item/tool/call": {
+    result: {
+      contentItems: [{ type: "inputText", text: "Dynamic tool calls are not supported by this client." }],
+      success: false
+    }
+  },
+  "account/chatgptAuthTokens/refresh": {
+    errorCode: -32000,
+    errorMessage: "ChatGPT auth token refresh is not supported by this client. Re-login to Codex (`codex login`) and retry."
+  },
+  "attestation/generate": { errorCode: -32000, errorMessage: "attestation/generate is not supported by this client." },
+  "currentTime/read": { errorCode: -32000, errorMessage: "currentTime/read is not supported by this client." },
+  // Deprecated v1 (SendUserTurn/SendUserMessage; not used for turn/start) — v1 uses
+  // the core ReviewDecision enum, serialized snake_case.
+  applyPatchApproval: { result: { decision: "denied" } },
+  execCommandApproval: { result: { decision: "denied" } }
+};
+
 export class AppServerClientBase {
   constructor(cwd, options = {}) {
     this.cwd = cwd;
@@ -229,10 +263,29 @@ export class AppServerClientBase {
   }
 
   handleServerRequest(message) {
-    this.sendMessage({
-      id: message.id,
-      error: buildJsonRpcError(-32601, `Unsupported server request: ${message.method}`)
-    });
+    const method = message.method;
+    const reply = SERVER_REQUEST_REPLIES[method];
+    let payload;
+    let outcome;
+    if (reply?.result !== undefined) {
+      payload = { id: message.id, result: reply.result };
+      outcome = "typed-decline";
+    } else if (reply?.errorCode !== undefined) {
+      payload = { id: message.id, error: buildJsonRpcError(reply.errorCode, reply.errorMessage) };
+      outcome = `error ${reply.errorCode}`;
+    } else {
+      payload = { id: message.id, error: buildJsonRpcError(-32601, `Unsupported server request: ${method}`) };
+      outcome = "error -32601 (unknown method)";
+    }
+    // Diagnosable: this client cannot fulfil server-initiated requests, so it
+    // auto-declines. Codex forwards the reply to the waiting turn (a typed decline
+    // unwinds cleanly; the real hang mode is an UNANSWERED request), but log every
+    // one — method + id + outcome — so a turn that stalls/declines on one is
+    // debuggable in the job log (background stderr is teed there).
+    process.stderr.write(
+      `[codex] auto-declined server request method=${method} id=${message.id ?? "?"} -> ${outcome}\n`
+    );
+    this.sendMessage(payload);
   }
 
   handleExit(error) {
