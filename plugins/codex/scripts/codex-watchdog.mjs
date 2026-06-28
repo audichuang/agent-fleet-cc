@@ -18,6 +18,7 @@ import { isProcessAlive, terminateProcessTree } from "./lib/process.mjs";
 import { loadBrokerSession, waitForBrokerEndpoint } from "./lib/broker-lifecycle.mjs";
 import {
   applyJobPatchIfActive,
+  ensureTerminalSignal,
   readJobFile,
   resolveJobFile,
   writeCompletionSignalFile
@@ -222,7 +223,12 @@ export async function runWatchdog(cwd, jobId, options = {}) {
 
     const { verdict, action } = gate.assess(observation);
     if (action === "stop") {
-      return; // job reached a terminal state on its own.
+      // Job reached a terminal state on its own. If the finalizer crashed after writing
+      // the terminal record but before its .done signal (C5), a `until [ -f signalFile ]`
+      // waiter would hang forever. Heal the stranded signal from the record before
+      // exiting. Idempotent: a present signal makes this a no-op.
+      ensureTerminalSignal(cwd, jobId, deps.readJob(cwd, jobId));
+      return;
     }
     if (action === "terminate") {
       await terminateHungJob(cwd, jobId, observation, deps, verdict);

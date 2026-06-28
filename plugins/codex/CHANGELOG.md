@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.28
+
+Heal a stranded terminal signal (C5). A background job's terminal side-effects — the
+per-job record, the `state.json` index, and the `<jobId>.done` signal a Claude-side
+`until [ -f signalFile ]` waiter blocks on — are written separately, not as one
+transaction. If a finalizer crashed (or an fs write threw) after the terminal record but
+before its `.done`, the waiter hung forever — and the liveness watchdog, observing the job
+already terminal, hit its `stop` branch and exited *without* writing the signal (the exact
+"watchdog exits without writing `.done`" the audit flagged).
+
+- `state.mjs`: new `ensureTerminalSignal(cwd, jobId, record?)` writes the missing `.done`
+  from the authoritative per-job record (the source of truth) when the record is terminal
+  and no signal exists. Idempotent — a present signal is a no-op. It is SIGNAL-ONLY by
+  design: it never touches the `state.json` index, because an index write routes through
+  `saveState → pruneJobs`, which (with a full set of active jobs) would evict this terminal
+  job and DELETE its own record + `.done`. A stale index is a separate, rarer, non-hanging
+  symptom (`wait` has a deadline) whose safe fix is the state-store migration (roadmap).
+- Invoked from the two points a finalizer observes an already-terminal record:
+  `applyJobPatchIfActive` (after the per-job write lock releases, when it lost the
+  active-state gate) and `runWatchdog`'s `stop` branch (before returning). So a torn
+  finalize self-heals on the next watchdog tick or the next late finalizer.
+
+Residuals (documented, accepted): the `exists → write` is not atomic, so a healer can still
+overwrite a caller's richer `.done` written in that window; and a healed reason is
+record-derived (a non-error completion summary that lives only in the index becomes null).
+Both are cosmetic — `/codex:result` reads the per-job record for detail, not `.done` — and a
+torn-write recovery with a slightly-less-rich signal beats a hung waiter.
+
 ## 1.0.27
 
 Self-heal a wedged terminal claim (C3). `claimTerminalTransition` reclaims a stale

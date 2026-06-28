@@ -442,3 +442,33 @@ test("runWatchdog stops without killing when the job reaches a terminal state on
 
   assert.deepEqual(calls.terminate, []);
 });
+
+// C5: if the worker finalized the per-job record but crashed before writing its .done
+// signal, the watchdog observes the job already terminal and STOPS. It must not exit
+// leaving the signal unwritten — a Claude-side `until [ -f signalFile ]` waiter would
+// hang forever. The stop path heals the stranded signal from the record first.
+test("runWatchdog heals a stranded .done when the job finalized but its signal tore", async () => {
+  const workspace = makeTempDir();
+  const jobId = "job-stranded-signal";
+  const deps = {
+    readJob: () => ({ status: "failed", pid: 1, logFile: "/tmp/x.log", errorMessage: "worker exited" }),
+    isProcessAlive: () => false,
+    statLogMtimeMs: () => 0,
+    probeBroker: async () => true,
+    terminate: () => {},
+    now: () => 1
+  };
+  assert.equal(fs.existsSync(resolveJobDoneFile(workspace, jobId)), false, "precondition: signal stranded");
+
+  await runWatchdog(workspace, jobId, {
+    deps,
+    config: { intervalMs: 1, hangQuietMs: 1, hardQuietMs: 1, confirmRounds: 2 },
+    sleep: async () => {
+      throw new Error("should not sleep after a terminal verdict");
+    }
+  });
+
+  const done = JSON.parse(fs.readFileSync(resolveJobDoneFile(workspace, jobId), "utf8"));
+  assert.equal(done.status, "failed");
+  assert.equal(done.reason, "worker exited", "the reason is carried from the authoritative record");
+});

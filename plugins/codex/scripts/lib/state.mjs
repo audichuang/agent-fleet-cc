@@ -489,7 +489,7 @@ export function applyJobPatchIfActive(cwd, jobId, patchOrBuilder, extraGuard = n
   // interleave: without it a progress write that read the record as active could
   // re-persist {...stored, ...patch} AFTER another process finalized the job,
   // resurrecting a stale active status over the terminal record (B3).
-  return withJobWriteLock(cwd, jobId, () => {
+  const result = withJobWriteLock(cwd, jobId, () => {
     const jobFile = resolveJobFile(cwd, jobId);
     let stored;
     try {
@@ -548,6 +548,16 @@ export function applyJobPatchIfActive(cwd, jobId, patchOrBuilder, extraGuard = n
 
     return { applied: true, stored, patch };
   });
+
+  // C5: if we lost the active-state gate because the job is ALREADY terminal, a prior
+  // finalize may have torn (terminal record written but its .done signal lost to a crash
+  // or fs error). Write the missing signal from the record so a `until [ -f .done ]`
+  // waiter is never stranded. Done OUTSIDE the write lock and gated on a missing signal,
+  // so the common already-terminal case is just one stat.
+  if (!result.applied && result.stored && TERMINAL_STATUSES.has(result.stored.status)) {
+    ensureTerminalSignal(cwd, jobId, result.stored);
+  }
+  return result;
 }
 
 function reconcileDeadPidJobs(cwd, jobs) {
@@ -804,4 +814,51 @@ export function writeCompletionSignalFile(cwd, jobId, signal = {}) {
   };
   atomicWriteFileSync(doneFile, `${JSON.stringify(payload, null, 2)}\n`);
   return doneFile;
+}
+
+/**
+ * Writes a job's <jobId>.done signal from its authoritative per-job record when that
+ * signal is missing. The per-job record is the source of truth; the .done file is a
+ * separate cache that a Claude-side `until [ -f <jobId>.done ]` waiter blocks on. If a
+ * finalizer crashed (or an fs write threw) after the terminal record but before its .done,
+ * the waiter hangs forever and the watchdog — seeing the job already terminal — exits
+ * without writing it (C5). Any actor that observes the already-terminal record (the
+ * watchdog stop path, a late finalizer) calls this to heal the stranded signal.
+ *
+ * SIGNAL-ONLY by design. It deliberately does NOT repair the state.json index: an index
+ * write routes through saveState → pruneJobs, which (with a full set of active jobs)
+ * would EVICT this terminal job and DELETE its per-job record + .done — destroying the
+ * very source of truth we read from. A stale index (terminal record but index still
+ * "running") is a separate, rarer, non-hanging symptom (`wait` has a deadline) whose safe
+ * fix is the directory-per-job state-store migration (roadmap), not an upsert here.
+ *
+ * Idempotent: a present .done means the finalize landed, so this no-ops. `record` may be
+ * passed to avoid re-reading. Returns true iff it wrote the signal.
+ *
+ * ponytail: the existsSync→write is not atomic, so a healer can still overwrite a caller's
+ * richer .done written in that window — but both carry the same terminal status from the
+ * same record, and /codex:result reads the per-job record (not .done) for detail, so the
+ * lost nuance (e.g. a non-error completion summary that lives only in the index) is
+ * cosmetic. A torn-write recovery with a slightly-less-rich signal beats a hung waiter.
+ */
+export function ensureTerminalSignal(cwd, jobId, record = null) {
+  let stored = record;
+  if (!stored) {
+    try {
+      stored = readJobFile(resolveJobFile(cwd, jobId));
+    } catch {
+      return false;
+    }
+  }
+  if (!stored || !TERMINAL_STATUSES.has(stored.status)) {
+    return false;
+  }
+  if (fs.existsSync(resolveJobDoneFile(cwd, jobId))) {
+    return false;
+  }
+  writeCompletionSignalFile(cwd, jobId, {
+    status: stored.status,
+    reason: stored.errorMessage ?? stored.reason ?? null
+  });
+  return true;
 }
