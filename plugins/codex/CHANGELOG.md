@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.27
+
+Self-heal a wedged terminal claim (C3). `claimTerminalTransition` reclaims a stale
+per-job `.lock` only when its owner pid is recoverable AND dead. Two crash shapes
+escaped that and deadlocked an active job forever — it could never transition to a
+terminal status:
+
+- a claimer that crashed between `openSync('wx')` and `writeSync` left an EMPTY,
+  unparseable lock — `isStaleTerminalClaim` read it as "live holder, refuse";
+- a claimer's pid that was later RECYCLED by an unrelated live process read as alive,
+  so the dead-owner reclaim never fired.
+
+`state.mjs`: `isStaleTerminalClaim` now also reclaims when a claim outlives a 60s TTL
+on a still-active job — the claim is held only for the microseconds between the O_EXCL
+CAS and the terminal-record write, so any lock older than that on an active job is a
+crashed claimer, whatever the pid liveness says. Age is read from the lock's recorded
+`stamp`, falling back to the file mtime for an empty/malformed lock. A FRESH empty lock
+is still treated as a live holder mid-acquire (not stolen), and a finalized job's lock
+still stands (the active gate). TTL, not process start-time identity: pid reuse is slow
+enough that the TTL catches a recycled pid cleanly without Linux-only `/proc` code.
+
 ## 1.0.26
 
 Reply to server-initiated requests with typed graceful declines (C2). The app-server

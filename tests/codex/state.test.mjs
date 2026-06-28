@@ -67,6 +67,80 @@ test("claimTerminalTransition does not reclaim when the job already finalized (t
   );
 });
 
+// C3: a terminal claim is held only for the microseconds between the O_EXCL CAS and
+// the terminal-record write. Two crash shapes used to wedge an active job forever:
+// (1) the claimer crashed between openSync('wx') and writeSync, leaving an EMPTY,
+// unparseable lock; (2) the claimer's pid was later RECYCLED by an unrelated live
+// process, so isProcessAlive reports it alive. Both made isStaleTerminalClaim return
+// false → the active job could never finalize. A lock-age TTL (gated on the job still
+// being active) reclaims both, while still refusing to steal a genuinely live holder.
+
+test("claimTerminalTransition reclaims a malformed lock left by a claimer that crashed mid-write (C3)", () => {
+  const workspace = makeTempDir();
+  const jobId = "job-malformed-lock";
+  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
+  const lockFile = resolveJobLockFile(workspace, jobId);
+  fs.writeFileSync(lockFile, "", "utf8"); // crashed between openSync('wx') and writeSync
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(lockFile, old, old); // aged well past the lock TTL
+
+  assert.equal(
+    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
+    true,
+    "a malformed lock older than the TTL on an active job must be reclaimable"
+  );
+});
+
+test("claimTerminalTransition does not reclaim a FRESH empty lock (a live holder mid-acquire)", () => {
+  const workspace = makeTempDir();
+  const jobId = "job-fresh-empty-lock";
+  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
+  // Empty but just created: a live holder between openSync('wx') and writeSync.
+  fs.writeFileSync(resolveJobLockFile(workspace, jobId), "", "utf8");
+
+  assert.equal(
+    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
+    false,
+    "a freshly-created empty lock is a live holder mid-acquire and must not be stolen"
+  );
+});
+
+test("claimTerminalTransition reclaims a lock whose pid was recycled (alive pid, stamp older than TTL) (C3)", () => {
+  const workspace = makeTempDir();
+  const jobId = "job-recycled-pid";
+  // Our own (alive) pid stands in for an unrelated process that recycled the dead
+  // claimer's pid; the ancient stamp proves the real claimer died long ago.
+  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
+  fs.writeFileSync(
+    resolveJobLockFile(workspace, jobId),
+    `${JSON.stringify({ status: "failed", stamp: "2020-01-01T00:00:00.000Z", pid: process.pid })}\n`,
+    "utf8"
+  );
+
+  assert.equal(
+    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
+    true,
+    "an alive-but-stale (recycled-pid) lock older than the TTL must be reclaimable"
+  );
+});
+
+test("claimTerminalTransition does not reclaim a live owner whose claim is still fresh", () => {
+  const workspace = makeTempDir();
+  const jobId = "job-live-fresh";
+  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
+  fs.writeFileSync(
+    resolveJobLockFile(workspace, jobId),
+    `${JSON.stringify({ status: "failed", stamp: new Date().toISOString(), pid: process.pid })}\n`,
+    "utf8"
+  );
+
+  assert.equal(
+    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
+    false,
+    "a live owner with a fresh claim must not be stolen"
+  );
+});
+
 test("applyJobPatchIfActive wins the cross-process terminal CAS and records an O_EXCL claim", () => {
   const workspace = makeTempDir();
   const jobId = "job-cas-win";

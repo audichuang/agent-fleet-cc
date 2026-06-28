@@ -220,22 +220,67 @@ function defaultActivePredicate(stored) {
   return stored?.status === "queued" || stored?.status === "running";
 }
 
-// True only when an existing .lock is stale: its owner process is gone AND the
-// per-job record is still active (the previous claimer crashed after creating
-// the lock but before writing the terminal record). A finalized job legitimately
-// keeps its lock, so we never reclaim once the per-job record is terminal. An
-// unreadable/legacy lock (no recoverable owner pid) is treated as NOT stale —
-// safer to refuse the claim than to risk stealing a live one.
-function isStaleTerminalClaim(cwd, jobId, lockFile) {
-  let ownerPid = null;
+// A terminal claim is held only for the microseconds between the O_EXCL CAS and the
+// terminal-record write — a live finalize never straddles this. So a claim still
+// present on a STILL-ACTIVE job after this long is a crashed claimer, whatever the pid
+// liveness says. Generous (clearly beyond any GC/IO stall) yet small enough that a
+// wedged job self-heals within a minute.
+const TERMINAL_LOCK_TTL_MS = 60_000;
+
+// Age of a terminal claim: prefer its recorded stamp; fall back to the lock file's
+// mtime when the payload is empty/malformed (a claimer that crashed mid-write left no
+// stamp). Returns NaN if the lock vanished mid-check (let the EEXIST retry resolve it).
+function terminalLockAgeMs(lockFile, payload) {
+  const stampMs = payload?.stamp ? Date.parse(payload.stamp) : NaN;
+  if (Number.isFinite(stampMs)) {
+    return Date.now() - stampMs;
+  }
   try {
-    ownerPid = normalizeTrackedPid(JSON.parse(fs.readFileSync(lockFile, "utf8")).pid);
+    return Date.now() - fs.statSync(lockFile).mtimeMs;
   } catch {
-    return false;
+    return Number.NaN;
   }
-  if (ownerPid === null || isProcessAlive(ownerPid)) {
-    return false;
+}
+
+// True only when an existing .lock is stale and may be reclaimed. A finalized job
+// legitimately keeps its lock, so we never reclaim once the per-job record is terminal
+// (the active gate below). Three crash shapes reach the reclaim path:
+//   - owner pid recoverable AND dead → reclaim immediately (the original behaviour).
+//   - owner pid alive but the claim is older than the TTL → a RECYCLED pid (the real
+//     claimer died; pid reuse takes minutes, so a >60s-old claim is never the holder).
+//   - lock empty/unparseable AND older than the TTL → claimer crashed between
+//     openSync('wx') and writeSync. (A FRESH empty lock is a live holder mid-acquire —
+//     refuse it.)
+// Without the TTL, the last two wedged an active job forever (C3).
+//
+// ponytail: TTL, not process start-time identity. Start-time would detect a recycled
+// pid faster, but pid reuse is slow enough that the TTL already catches it cleanly, and
+// start-time is Linux-only (/proc) — extra platform code for no real gain. The residual
+// (a LIVE holder frozen >60s mid-finalize getting reclaimed → double-write) is the same
+// irreducible fail-open the per-job write mutex already tolerates; the real fix is the
+// directory-per-job state-store migration (roadmap), not a smarter lock.
+function isStaleTerminalClaim(cwd, jobId, lockFile) {
+  let payload = null;
+  try {
+    payload = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+  } catch {
+    payload = null; // empty/malformed: claimer crashed between open and write
   }
+  const ownerPid = payload ? normalizeTrackedPid(payload.pid) : null;
+
+  if (ownerPid !== null && isProcessAlive(ownerPid)) {
+    // Live pid — normally the holder. Only an expired claim means a recycled pid.
+    if (terminalLockAgeMs(lockFile, payload) <= TERMINAL_LOCK_TTL_MS) {
+      return false;
+    }
+  } else if (ownerPid === null) {
+    // No recoverable pid — a live holder mid-acquire unless it has gone stale.
+    if (terminalLockAgeMs(lockFile, payload) <= TERMINAL_LOCK_TTL_MS) {
+      return false;
+    }
+  }
+  // else: owner pid recoverable AND dead → reclaim now (no TTL wait).
+
   let stored;
   try {
     stored = readJobFile(resolveJobFile(cwd, jobId));
@@ -247,13 +292,20 @@ function isStaleTerminalClaim(cwd, jobId, lockFile) {
 
 // Cross-process CAS for a job's terminal transition. The first process to
 // atomically create the per-job .lock (O_CREAT | O_EXCL) wins and may write the
-// terminal record; a racing writer in another process gets EEXIST and returns
-// false, so two processes can never both finalize the same job. The lock records
-// the owner pid so a claim left behind by a CRASHED owner (dead pid + job still
-// active) can be reclaimed instead of wedging the job forever. Returns true if
-// this process won the claim. Exported so the recreate fallbacks (per-job file
-// pruned mid-run) go through the same CAS instead of writing terminal records
-// unguarded.
+// terminal record; a racing writer in another process gets EEXIST and backs off.
+// In the normal path the whole read-check-claim-write runs under withJobWriteLock,
+// so two LIVE finalizers cannot both win. The lock records the owner pid + stamp so
+// a claim left behind by a crashed owner (dead pid, OR a recycled/empty lock past the
+// TTL — see isStaleTerminalClaim) can be reclaimed instead of wedging the job forever.
+// Returns true if this process won the claim. Exported so the recreate fallbacks
+// (per-job file pruned mid-run) go through the same CAS instead of writing terminal
+// records unguarded.
+//
+// ponytail: the stale-lock reclaim below uses a bare unlink, so two simultaneous
+// reclaimers OUTSIDE the write lock could in theory both delete-and-recreate and both
+// "win" (double finalize). That window is the same irreducible fail-open the per-job
+// write mutex tolerates (the normal path is serialized by it); closing it fully needs
+// the directory-per-job state-store migration (roadmap), not a bigger file lock.
 export function claimTerminalTransition(cwd, jobId, status, stamp) {
   const lockFile = resolveJobLockFile(cwd, jobId);
   const payload = `${JSON.stringify({ status, stamp, pid: process.pid })}\n`;
