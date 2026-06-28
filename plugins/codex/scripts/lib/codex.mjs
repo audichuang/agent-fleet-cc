@@ -660,6 +660,15 @@ function createTurnIdleError(threadId, turnId, idleTimeoutMs) {
   return error;
 }
 
+// Extract the turn id from a turn/start (or review/start) ACK. Current Codex
+// returns `{ turn: { id } }` (see app-server-protocol v2 turn.rs); accept a
+// top-level `turnId` as a harmless forward-compat fallback. Returns null when no id
+// is recoverable, which the caller turns into a fail-fast rather than buffering the
+// turn's notifications forever (A1).
+export function extractTurnIdFromStartResponse(response) {
+  return response?.turn?.id ?? response?.turnId ?? null;
+}
+
 export async function captureTurn(client, threadId, startRequest, options = {}) {
   const state = createTurnCaptureState(threadId, options);
   const previousHandler = client.notificationHandler;
@@ -703,22 +712,20 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
     idleTimer?.unref?.();
   };
 
-  client.setNotificationHandler((message) => {
-    armIdleTimer(); // any inbound notification is liveness — reset the idle window
-    // This runs synchronously inside the transport stream listener, with no
-    // try/catch above it once it reaches the data callback. A notification whose
-    // shape changed across a Codex upgrade (e.g. a `fileChange` item without the
-    // `changes` array our renderer dereferences) would throw and crash the worker
-    // mid-turn — surfacing only as the cryptic "exited without reporting a
-    // terminal status" reconcile. Contain it: skip the notification, log a named
-    // diagnostic to the job log (so the offending shape stays discoverable in all
-    // modes, incl. background where stderr is /dev/null), and keep the turn alive.
+  // Shared guarded dispatch for a single notification, used by BOTH the live handler
+  // and the buffered-replay loop (A4) so replay is exactly as resilient as live
+  // handling. This runs synchronously inside the transport stream listener, with no
+  // try/catch above it once it reaches the data callback: a notification whose shape
+  // changed across a Codex upgrade (e.g. a `fileChange` item without the `changes`
+  // array our renderer dereferences) would throw and crash the worker mid-turn —
+  // surfacing only as the cryptic "exited without reporting a terminal status"
+  // reconcile. Contain it: skip the notification, log a named diagnostic to the job
+  // log (discoverable in all modes, incl. background where stderr is /dev/null), and
+  // keep the turn alive. thread/started and thread/name/updated are applied
+  // regardless of belongsToTurn — a brand-new subthread is not yet in
+  // state.threadIds, so gating them by turn would misroute them to previousHandler.
+  const dispatchNotification = (message) => {
     try {
-      if (!state.turnId) {
-        state.bufferedNotifications.push(message);
-        return;
-      }
-
       if (message.method === "thread/started" || message.method === "thread/name/updated") {
         applyTurnNotification(state, message);
         return;
@@ -741,32 +748,52 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
         null
       );
     }
+  };
+
+  client.setNotificationHandler((message) => {
+    armIdleTimer(); // any inbound notification is liveness — reset the idle window
+    // Until the turn/start ACK gives us a turn id we cannot gate notifications by
+    // turn, so buffer them and replay through the SAME guarded dispatch once the id
+    // is known (see below).
+    if (!state.turnId) {
+      state.bufferedNotifications.push(message);
+      return;
+    }
+    dispatchNotification(message);
   });
 
   try {
     const response = await startRequest();
     options.onResponse?.(response, state);
-    state.turnId = response.turn?.id ?? null;
-    if (state.turnId) {
+    const ackTurnId = extractTurnIdFromStartResponse(response);
+    if (!ackTurnId) {
+      // A1: the ACK returned no recognizable turn id (neither response.turn.id nor a
+      // top-level turnId). We can never gate this turn's notifications — the old code
+      // left state.turnId null, so every notification buffered forever and the turn
+      // hung silently until the hard cap. Fail fast with a clear protocol error.
+      const ackError = new Error(
+        "Codex turn/start did not return a turn id (response.turn.id / response.turnId absent); cannot track the turn."
+      );
+      ackError.code = "ETURNACK";
+      state.error = state.error ?? ackError;
+      state.rejectCompletion(ackError);
+    } else {
+      state.turnId = ackTurnId;
       state.threadTurnIds.set(state.threadId, state.turnId);
-    }
-    // Arm the idle watchdog only once the turn is actually in flight (after the
-    // ACK). The ACK round-trip is separately bounded by the per-RPC wall-clock
-    // timeout, so the idle timer should track post-start silence, not the ACK.
-    armIdleTimer();
-    for (const message of state.bufferedNotifications) {
-      if (belongsToTurn(state, message)) {
-        applyTurnNotification(state, message);
-      } else {
-        if (previousHandler) {
-          previousHandler(message);
-        }
+      // Arm the idle watchdog only once the turn is actually in flight (after the
+      // ACK). The ACK round-trip is separately bounded by the per-RPC wall-clock
+      // timeout, so the idle timer should track post-start silence, not the ACK.
+      armIdleTimer();
+      // Replay buffered notifications through the SAME guarded dispatch as the live
+      // handler (A4): per-message skip+log, and correct thread/started routing.
+      for (const message of state.bufferedNotifications) {
+        dispatchNotification(message);
       }
-    }
-    state.bufferedNotifications.length = 0;
+      state.bufferedNotifications.length = 0;
 
-    if (response.turn?.status && response.turn.status !== "inProgress") {
-      completeTurn(state, response.turn);
+      if (response.turn?.status && response.turn.status !== "inProgress") {
+        completeTurn(state, response.turn);
+      }
     }
 
     // Transport-level watchdog: if the app-server (direct or via broker)

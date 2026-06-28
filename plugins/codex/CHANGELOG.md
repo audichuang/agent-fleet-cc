@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.21
+
+Harden the turn lifecycle in `captureTurn` (`codex.mjs`) against two failure modes
+the v1.0.19 crash-net did not cover. Found by the same Codex deep-audit (theme A).
+
+- A4 (buffered-notification replay): the live notification handler wrapped each
+  notification in a skip-and-log guard, but the post-ACK replay of notifications that
+  arrived before the turn id was known called the renderer UNGUARDED. One malformed
+  buffered notification threw on replay — not a timeout, so no turn interrupt — and
+  orphaned the turn. Both paths now go through one shared `dispatchNotification`
+  (per-message skip+log). The shared path also fixes a replay-only bug: a buffered
+  `thread/started` was routed by `belongsToTurn` (a brand-new subthread is not yet
+  tracked) and misdelivered to the previous handler instead of being applied.
+- A1 (turn-id ACK): the turn id was read only from `response.turn.id`; if the ACK
+  ever lacked it, `state.turnId` stayed null and every notification buffered forever
+  — a silent hang to the hard cap. `extractTurnIdFromStartResponse` now reads
+  `response.turn?.id ?? response.turnId` (the real field plus a forward-compat
+  fallback) and, when no id is recoverable, `captureTurn` fails fast with a protocol
+  error instead of buffering indefinitely. Covers `turn/start` and `review/start`.
+
 ## 1.0.20
 
 Close three cross-process state races in the background-job store (flat `state.json`
