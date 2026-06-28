@@ -765,20 +765,68 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
     // is known (see below).
     if (!state.turnId) {
       state.bufferedNotifications.push(message);
+      // A5: even before the ACK sets state.turnId, capture the turn id from a root
+      // turn/started so a failed/timed-out ACK can still interrupt the turn Codex
+      // actually started (otherwise it is orphaned with no id to interrupt). We only
+      // record the id and surface it (for the per-job file / idle watchdog); the ACK
+      // still drives full tracking and the buffered replay below.
+      if (
+        message?.method === "turn/started" &&
+        (message.params?.threadId ?? null) === state.threadId &&
+        message.params?.turn?.id &&
+        !state.threadTurnIds.has(state.threadId)
+      ) {
+        // Record the id only — no progress emit. The buffered message is replayed in
+        // full once the ACK lands (which applies turn/started and emits its progress),
+        // so emitting here too would duplicate the "Turn started" log line. This
+        // recorded id is what the ACK-failure interrupt below reads.
+        state.threadTurnIds.set(state.threadId, message.params.turn.id);
+      }
       return;
     }
     dispatchNotification(message);
   });
 
+  // A5: best-effort interrupt the turn Codex started when the ACK does not give us a
+  // usable id (rejected/timed-out, OR returned without one). Reads the id captured
+  // above from a buffered root turn/started; no-ops if none was seen. Bounded over the
+  // still-live connection so a wedged broker cannot hang us.
+  const interruptCapturedOrphan = async () => {
+    const orphanTurnId = state.threadTurnIds.get(state.threadId) ?? null;
+    if (!orphanTurnId) {
+      return;
+    }
+    try {
+      await client.request(
+        "turn/interrupt",
+        { threadId: state.threadId, turnId: orphanTurnId },
+        { timeoutMs: 3000 }
+      );
+    } catch {
+      // best effort — the ACK failure is surfaced regardless
+    }
+  };
+
   try {
-    const response = await startRequest();
+    let response;
+    try {
+      response = await startRequest();
+    } catch (ackError) {
+      // The turn/start ACK failed or timed out (the per-RPC wall-clock timeout rejects
+      // after CODEX_REQUEST_TIMEOUT_MS, default 120s) — reap any turn Codex started
+      // before propagating the failure.
+      await interruptCapturedOrphan();
+      throw ackError;
+    }
     options.onResponse?.(response, state);
     const ackTurnId = extractTurnIdFromStartResponse(response);
     if (!ackTurnId) {
       // A1: the ACK returned no recognizable turn id (neither response.turn.id nor a
       // top-level turnId). We can never gate this turn's notifications — the old code
       // left state.turnId null, so every notification buffered forever and the turn
-      // hung silently until the hard cap. Fail fast with a clear protocol error.
+      // hung silently until the hard cap. Reap any turn Codex started (A5), then fail
+      // fast with a clear protocol error.
+      await interruptCapturedOrphan();
       const ackError = new Error(
         "Codex turn/start did not return a turn id (response.turn.id / response.turnId absent); cannot track the turn."
       );

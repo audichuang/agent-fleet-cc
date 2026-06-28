@@ -153,6 +153,89 @@ test("captureTurn converges when turn/completed omits the turn object", { timeou
 
 // --- A3: the final message must survive a missing/reshaped agentMessage notification ---
 
+// --- A5: a failed/timed-out turn/start ACK must not orphan a turn Codex already started ---
+
+test("captureTurn interrupts the orphaned turn when the ACK fails after a turn/started arrived", async () => {
+  const interrupts = [];
+  const client = makeFakeClient();
+  client.request = async (method, params) => {
+    interrupts.push({ method, params });
+    return {};
+  };
+  let rejectAck;
+  const promise = captureTurn(client, "thread1", () => new Promise((_resolve, reject) => (rejectAck = reject)), {
+    idleTimeoutMs: 0
+  });
+  let settled = null;
+  promise.then((s) => (settled = { ok: s }), (e) => (settled = { err: e }));
+  await tick();
+
+  // Codex started the turn and emitted turn/started BEFORE the ACK returned (buffered
+  // because state.turnId is still null), then the ACK fails (e.g. the per-RPC timeout).
+  client.notificationHandler({ method: "turn/started", params: { threadId: "thread1", turn: { id: "turn1" } } });
+  rejectAck(new Error("codex app-server request 'turn/start' timed out after 120000ms"));
+  await tick();
+  await tick();
+
+  const interrupt = interrupts.find((call) => call.method === "turn/interrupt");
+  assert.ok(interrupt, "an ACK failure after turn/started must interrupt the turn Codex started, not orphan it");
+  assert.equal(interrupt.params.threadId, "thread1");
+  assert.equal(interrupt.params.turnId, "turn1");
+  assert.ok(settled && settled.err, "captureTurn still surfaces the ACK failure");
+});
+
+test("captureTurn also interrupts the orphaned turn when the ACK returns WITHOUT an id after turn/started", async () => {
+  const interrupts = [];
+  const client = makeFakeClient();
+  client.request = async (method, params) => {
+    interrupts.push({ method, params });
+    return {};
+  };
+  let resolveAck;
+  const promise = captureTurn(client, "thread1", () => new Promise((resolve) => (resolveAck = resolve)), {
+    idleTimeoutMs: 0
+  });
+  let settled = null;
+  promise.then((s) => (settled = { ok: s }), (e) => (settled = { err: e }));
+  await tick();
+
+  // turn/started buffered before the ACK, then the ACK returns but with NO usable id
+  // (the A1 ETURNACK fail-fast path) — it must still reap the started turn.
+  client.notificationHandler({ method: "turn/started", params: { threadId: "thread1", turn: { id: "turn1" } } });
+  resolveAck({ turn: { status: "inProgress" } });
+  await tick();
+  await tick();
+
+  const interrupt = interrupts.find((call) => call.method === "turn/interrupt");
+  assert.ok(interrupt, "the ETURNACK fail-fast path must also interrupt a turn Codex started");
+  assert.equal(interrupt.params.turnId, "turn1");
+  assert.ok(settled && settled.err && settled.err.code === "ETURNACK", "still fails fast with ETURNACK");
+});
+
+test("captureTurn attempts no interrupt when the ACK fails and no turn was started", async () => {
+  const interrupts = [];
+  const client = makeFakeClient();
+  client.request = async (method, params) => {
+    interrupts.push({ method, params });
+    return {};
+  };
+  let rejectAck;
+  const promise = captureTurn(client, "thread1", () => new Promise((_resolve, reject) => (rejectAck = reject)), {
+    idleTimeoutMs: 0
+  });
+  promise.catch(() => {});
+  await tick();
+  rejectAck(new Error("turn/start failed before any turn was started"));
+  await tick();
+  await tick();
+
+  assert.equal(
+    interrupts.filter((call) => call.method === "turn/interrupt").length,
+    0,
+    "with no turn id captured there is nothing to interrupt"
+  );
+});
+
 test("resolveFinalMessage prefers lastAgentMessage, else surfaces a failed turn's error message", () => {
   // The live-accumulated message (phase-independent) wins, even on a failed turn.
   assert.equal(

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.23
+
+Close the last theme-A gap (A5): a turn/start ACK that fails or times out no longer
+orphans a turn Codex already started.
+
+- `captureTurn` (`codex.mjs`): the turn id was known only after the ACK resolved, so
+  if the ACK rejected (the per-RPC timeout rejects after CODEX_REQUEST_TIMEOUT_MS,
+  default 120s) while Codex had already started the turn, there was no id to interrupt
+  with and the turn was orphaned on the broker. Now a root-thread `turn/started`
+  buffered before the ACK has its thread/turn id captured (and surfaced for the
+  per-job record), and on an ACK failure `captureTurn` best-effort interrupts that
+  turn over the live connection (bounded to 3s) before propagating the error. This
+  completes theme A (A1–A5).
+
 ## 1.0.22
 
 Finish the turn-lifecycle hardening (theme A) in `captureTurn` (`codex.mjs`).
