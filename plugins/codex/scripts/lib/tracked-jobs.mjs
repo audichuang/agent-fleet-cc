@@ -337,8 +337,52 @@ export async function runTrackedJob(job, runner, options = {}) {
     timeoutAt: new Date(Date.now() + timeoutMs).toISOString(),
     timeoutMs
   };
-  writeJobFile(job.workspaceRoot, job.id, runningRecord);
-  upsertJob(job.workspaceRoot, runningRecord);
+
+  if (job.status == null) {
+    // Foreground commands have no pre-written record (createJobRecord sets no
+    // status); promote unconditionally.
+    writeJobFile(job.workspaceRoot, job.id, runningRecord);
+    upsertJob(job.workspaceRoot, runningRecord);
+  } else {
+    // Background worker: the per-job record was pre-written. Promote queued->running
+    // ONLY if the on-disk record is STILL queued. A job cancelled/finalized before
+    // the worker started — whether the worker's in-memory snapshot still says
+    // "queued" or it already read the terminal record — must not be revived or run
+    // (B2). The promotion patch merges onto the stored queued record; the indexPatch
+    // re-supplies the full stored row so background/request survive even if the flat
+    // index lost this job's row to a concurrent whole-array write — otherwise
+    // hasActiveBackgroundJobs would miss a live background job and reap the broker.
+    const promotion = applyJobPatchIfActive(
+      job.workspaceRoot,
+      job.id,
+      () => ({
+        status: "running",
+        startedAt: runningRecord.startedAt,
+        phase: "starting",
+        pid: process.pid,
+        logFile: runningRecord.logFile,
+        timeoutAt: runningRecord.timeoutAt,
+        timeoutMs
+      }),
+      (stored) => stored.status === "queued",
+      (stored) => ({
+        ...stored,
+        status: "running",
+        startedAt: runningRecord.startedAt,
+        phase: "starting",
+        pid: process.pid,
+        logFile: runningRecord.logFile,
+        timeoutAt: runningRecord.timeoutAt,
+        timeoutMs
+      })
+    );
+    if (!promotion.applied) {
+      // Cancelled/finalized before we started, already promoted by another worker,
+      // or the record vanished — the job is no longer ours to run. Do not install
+      // the crash net or start the runner.
+      return { aborted: true, exitStatus: null, payload: null, rendered: null, summary: null };
+    }
+  }
 
   // Crash net for the duration of the run: any uncaught throw / unhandled
   // rejection that bypasses the try/catch below (notably a synchronous throw from

@@ -132,12 +132,15 @@ function cleanupSessionJobs(cwd, sessionId, deps = {}) {
   // jobs while retaining the ones we just marked failed (so /codex:result can
   // still surface them and their .done signal is not pruned).
   const fresh = loadState(workspaceRoot);
-  saveState(workspaceRoot, {
-    ...fresh,
-    jobs: fresh.jobs.filter(
-      (job) => job.sessionId !== sessionId || keptIds.has(job.id) || job.background === true
-    )
-  });
+  const retained = fresh.jobs.filter(
+    (job) => job.sessionId !== sessionId || keptIds.has(job.id) || job.background === true
+  );
+  // This caller bypasses updateState, so pass the dropped jobs explicitly — else
+  // saveState (post-B1) no longer infers deletions from a disk diff and would leak
+  // the per-job files/.done of the session jobs we just reaped.
+  const retainedIds = new Set(retained.map((job) => job.id));
+  const removedJobs = fresh.jobs.filter((job) => !retainedIds.has(job.id));
+  saveState(workspaceRoot, { ...fresh, jobs: retained }, { removedJobs });
 }
 
 // The shared per-workspace broker is torn down at SessionEnd only when it did NOT

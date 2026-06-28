@@ -127,10 +127,10 @@ function removeFileIfExists(filePath) {
   }
 }
 
-export function saveState(cwd, state) {
-  const previousJobs = loadState(cwd).jobs;
+export function saveState(cwd, state, { removedJobs = [] } = {}) {
   ensureStateDir(cwd);
-  const nextJobs = pruneJobs(state.jobs ?? []);
+  const callerJobs = state.jobs ?? [];
+  const nextJobs = pruneJobs(callerJobs);
   const nextState = {
     version: STATE_VERSION,
     config: {
@@ -140,15 +140,25 @@ export function saveState(cwd, state) {
     jobs: nextJobs
   };
 
+  // Only delete artifacts for jobs the CALLER actually knew about and dropped:
+  // jobs it explicitly removed (`removedJobs`, threaded from updateState) plus
+  // jobs pruned out of its own snapshot by pruneJobs (terminal eviction past
+  // MAX_JOBS; pruneJobs never drops an active job). We must NOT delete based on a
+  // fresh disk read of the index: a job another process enqueued after the caller
+  // loaded would appear there, be absent from this snapshot, and lose its per-job
+  // file — the watchdog's source of truth (B1 cross-process delete race).
   const retainedIds = new Set(nextJobs.map((job) => job.id));
-  for (const job of previousJobs) {
-    if (retainedIds.has(job.id)) {
+  const deletedIds = new Set();
+  for (const job of [...removedJobs, ...callerJobs]) {
+    if (!job || retainedIds.has(job.id) || deletedIds.has(job.id)) {
       continue;
     }
+    deletedIds.add(job.id);
     removeJobFile(resolveJobFile(cwd, job.id));
     removeFileIfExists(job.logFile);
     removeFileIfExists(resolveJobDoneFile(cwd, job.id));
     removeFileIfExists(resolveJobLockFile(cwd, job.id));
+    removeFileIfExists(resolveJobWriteLockFile(cwd, job.id));
   }
 
   // Atomic write so a concurrent reader never sees a torn index. NOTE: this does
@@ -163,8 +173,14 @@ export function saveState(cwd, state) {
 
 export function updateState(cwd, mutate) {
   const state = loadState(cwd);
+  // Snapshot the job ids BEFORE the mutation so saveState can clean up exactly the
+  // jobs this caller removed (and only those) — see the B1 note in saveState.
+  // Copy the array so an in-place mutation (splice/reassign) does not corrupt it.
+  const beforeJobs = [...(state.jobs ?? [])];
   mutate(state);
-  return saveState(cwd, state);
+  const afterIds = new Set((state.jobs ?? []).map((job) => job.id));
+  const removedJobs = beforeJobs.filter((job) => !afterIds.has(job.id));
+  return saveState(cwd, state, { removedJobs });
 }
 
 export function generateJobId(prefix = "job") {
@@ -268,6 +284,118 @@ export function claimTerminalTransition(cwd, jobId, status, stamp) {
   return false;
 }
 
+// Synchronous sleep without busy-spinning the CPU. Used only on per-job write-lock
+// contention, where a holder keeps the lock for a single read-check-write
+// (microseconds), so the wait is near-zero in practice.
+function sleepMsSync(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    // SharedArrayBuffer/Atomics unavailable — fall back to a bounded busy wait.
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      /* spin */
+    }
+  }
+}
+
+// Recoverable owner pid of a write lock, or null when the file is empty,
+// unparseable, or carries no pid. A holder acquires by openSync("wx") THEN writes
+// its payload, so a racer can briefly observe an EMPTY lock mid-acquire — that is a
+// LIVE holder, not a dead one. Returning null (and never reclaiming a null owner)
+// keeps us from stealing such a lock, mirroring isStaleTerminalClaim's conservative
+// "refuse the steal when the owner is unrecoverable" choice.
+function readWriteLockOwnerPid(lockFile) {
+  try {
+    return normalizeTrackedPid(JSON.parse(fs.readFileSync(lockFile, "utf8")).pid);
+  } catch {
+    return null;
+  }
+}
+
+// Bounded fail-open ceiling for write-lock acquisition. A holder keeps the lock for
+// one read-check-write, so contention clears in microseconds; this only bounds the
+// pathological case (a leaked lock) so a job is never wedged behind a write lock.
+const WRITE_LOCK_BUDGET_MS = 1000;
+
+// Cross-process per-job write mutex. Holds an O_EXCL <id>.wlock for the duration of
+// `fn` (a single per-job-file read-check-write). progress AND terminal transitions
+// both run through applyJobPatchIfActive under this lock, so a progress write can no
+// longer land between a terminal claim and its record write and re-persist a stale
+// active status over the terminal record (B3).
+//
+// A lock left by a crashed holder (parseable, dead owner pid) is reclaimed AT MOST
+// ONCE per call by moving it aside with an atomic rename — never a bare unlink: only
+// one racing reclaimer wins the rename (the rest get ENOENT), so a fresh lock a
+// winner just created is never displaced. An empty/unparseable lock is treated as a
+// live holder mid-acquire and is NOT reclaimed. The acquire is FAIL-OPEN: if the
+// budget elapses we proceed without the lock (last-writer-wins, the pre-mutex
+// behavior) rather than drop the write or wedge the job.
+//
+// ponytail: a pure-fs file mutex cannot be made fully race-free without OS advisory
+// locks — a second reclaimer can still displace a fresh lock inside the one-syscall
+// gap between its re-confirm and its rename. That residual degrades to the same
+// fail-open last-writer-wins this function already tolerates; eliminating it needs
+// the directory-per-job state-store migration (roadmap), not a bigger file lock.
+function withJobWriteLock(cwd, jobId, fn) {
+  const lockFile = resolveJobWriteLockFile(cwd, jobId);
+  const payload = `${JSON.stringify({ pid: process.pid })}\n`;
+  const deadline = Date.now() + WRITE_LOCK_BUDGET_MS;
+  let held = false;
+  let reclaimAttempted = false;
+  for (;;) {
+    try {
+      const fd = fs.openSync(lockFile, "wx");
+      try {
+        fs.writeSync(fd, payload);
+      } finally {
+        fs.closeSync(fd);
+      }
+      held = true;
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      const ownerPid = readWriteLockOwnerPid(lockFile);
+      if (!reclaimAttempted && ownerPid !== null && !isProcessAlive(ownerPid)) {
+        reclaimAttempted = true;
+        const aside = `${lockFile}.${process.pid}.stale`;
+        try {
+          // Re-confirm the SAME dead owner immediately before moving it, so a lock
+          // already replaced by a live holder (different owner) is left untouched.
+          if (readWriteLockOwnerPid(lockFile) === ownerPid) {
+            fs.renameSync(lockFile, aside);
+            try {
+              fs.unlinkSync(aside);
+            } catch {
+              // Best effort: the stale artifact is harmless if it lingers.
+            }
+          }
+        } catch {
+          // Lost the reclaim race (already moved/replaced) — just retry.
+        }
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        break; // fail-open: never wedge a job behind a write lock.
+      }
+      sleepMsSync(5);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) {
+      try {
+        fs.unlinkSync(lockFile);
+      } catch {
+        // Best effort: a reclaimer may have already moved it.
+      }
+    }
+  }
+}
+
 /**
  * Atomically transitions a job record. Reads the per-job JSON, verifies the
  * job is still in an active status (queued/running), optionally runs an
@@ -304,64 +432,70 @@ export function claimTerminalTransition(cwd, jobId, status, stamp) {
  * file, including the `updatedAt` timestamp the helper stamps.
  */
 export function applyJobPatchIfActive(cwd, jobId, patchOrBuilder, extraGuard = null, indexPatchOrBuilder = null) {
-  const jobFile = resolveJobFile(cwd, jobId);
-  let stored;
-  try {
-    stored = readJobFile(jobFile);
-  } catch {
-    return { applied: false, stored: null, patch: null };
-  }
-
-  if (!defaultActivePredicate(stored)) {
-    return { applied: false, stored, patch: null };
-  }
-  if (extraGuard && !extraGuard(stored)) {
-    return { applied: false, stored, patch: null };
-  }
-
-  const rawPatch =
-    typeof patchOrBuilder === "function" ? patchOrBuilder(stored) : patchOrBuilder;
-  if (!rawPatch) {
-    return { applied: false, stored, patch: null };
-  }
-
-  const updatedAt = nowIso();
-  const patch = { ...rawPatch, updatedAt };
-  const isTerminalTransition = Boolean(patch.status && TERMINAL_STATUSES.has(patch.status));
-
-  // The active-state gate above only serializes writers within THIS process.
-  // For a terminal transition, additionally win a cross-process O_EXCL claim so
-  // a worker, watchdog, cancel, and dead-PID reconcile in separate processes
-  // cannot all finalize the same job. Progress/non-terminal patches are not
-  // gated — they may legitimately repeat.
-  if (isTerminalTransition && !claimTerminalTransition(cwd, jobId, patch.status, updatedAt)) {
-    return { applied: false, stored, patch: null };
-  }
-
-  try {
-    writeJobFile(cwd, jobId, { ...stored, ...patch });
-
-    if (indexPatchOrBuilder == null) {
-      upsertJob(cwd, { id: jobId, ...patch });
-    } else {
-      const indexRaw =
-        typeof indexPatchOrBuilder === "function" ? indexPatchOrBuilder(stored) : indexPatchOrBuilder;
-      upsertJob(cwd, { id: jobId, ...indexRaw, updatedAt });
+  // Serialize the whole read-check-(claim)-write under the per-job write mutex so a
+  // progress write and a terminal transition (both flow through here) cannot
+  // interleave: without it a progress write that read the record as active could
+  // re-persist {...stored, ...patch} AFTER another process finalized the job,
+  // resurrecting a stale active status over the terminal record (B3).
+  return withJobWriteLock(cwd, jobId, () => {
+    const jobFile = resolveJobFile(cwd, jobId);
+    let stored;
+    try {
+      stored = readJobFile(jobFile);
+    } catch {
+      return { applied: false, stored: null, patch: null };
     }
-  } catch (error) {
-    if (isTerminalTransition) {
-      // We won the claim but failed to persist; release it so a later attempt
-      // can still finalize the job instead of wedging behind a stale lock.
-      try {
-        fs.unlinkSync(resolveJobLockFile(cwd, jobId));
-      } catch {
-        // Best effort.
+
+    if (!defaultActivePredicate(stored)) {
+      return { applied: false, stored, patch: null };
+    }
+    if (extraGuard && !extraGuard(stored)) {
+      return { applied: false, stored, patch: null };
+    }
+
+    const rawPatch =
+      typeof patchOrBuilder === "function" ? patchOrBuilder(stored) : patchOrBuilder;
+    if (!rawPatch) {
+      return { applied: false, stored, patch: null };
+    }
+
+    const updatedAt = nowIso();
+    const patch = { ...rawPatch, updatedAt };
+    const isTerminalTransition = Boolean(patch.status && TERMINAL_STATUSES.has(patch.status));
+
+    // For a terminal transition, additionally win the cross-process O_EXCL terminal
+    // claim so a worker, watchdog, cancel, and dead-PID reconcile cannot all
+    // finalize the same job (first-terminal-writer-wins). The write mutex above
+    // already serializes the file write itself.
+    if (isTerminalTransition && !claimTerminalTransition(cwd, jobId, patch.status, updatedAt)) {
+      return { applied: false, stored, patch: null };
+    }
+
+    try {
+      writeJobFile(cwd, jobId, { ...stored, ...patch });
+
+      if (indexPatchOrBuilder == null) {
+        upsertJob(cwd, { id: jobId, ...patch });
+      } else {
+        const indexRaw =
+          typeof indexPatchOrBuilder === "function" ? indexPatchOrBuilder(stored) : indexPatchOrBuilder;
+        upsertJob(cwd, { id: jobId, ...indexRaw, updatedAt });
       }
+    } catch (error) {
+      if (isTerminalTransition) {
+        // We won the claim but failed to persist; release it so a later attempt
+        // can still finalize the job instead of wedging behind a stale lock.
+        try {
+          fs.unlinkSync(resolveJobLockFile(cwd, jobId));
+        } catch {
+          // Best effort.
+        }
+      }
+      throw error;
     }
-    throw error;
-  }
 
-  return { applied: true, stored, patch };
+    return { applied: true, stored, patch };
+  });
 }
 
 function reconcileDeadPidJobs(cwd, jobs) {
@@ -590,6 +724,15 @@ export function resolveJobDoneFile(cwd, jobId) {
 export function resolveJobLockFile(cwd, jobId) {
   ensureStateDir(cwd);
   return path.join(resolveJobsDir(cwd), `${jobId}.lock`);
+}
+
+// Short-lived per-job write mutex (see withJobWriteLock). Distinct from the
+// one-shot terminal .lock: this is held only for the duration of a single
+// read-check-write in applyJobPatchIfActive, by progress AND terminal writers
+// alike, so the two cannot interleave (B3).
+export function resolveJobWriteLockFile(cwd, jobId) {
+  ensureStateDir(cwd);
+  return path.join(resolveJobsDir(cwd), `${jobId}.wlock`);
 }
 
 /**

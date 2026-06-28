@@ -15,7 +15,10 @@ import {
   resolveJobLogFile,
   resolveStateDir,
   resolveStateFile,
+  resolveJobWriteLockFile,
   saveState,
+  updateState,
+  upsertJob,
   writeJobFile
 } from "../../plugins/codex/scripts/lib/state.mjs";
 
@@ -456,4 +459,109 @@ test("listJobs reconciliation PID-identity guard: skips when persisted pid no lo
   // Per-job file pid disagrees with the dead-pid candidate, so reconcile skipped.
   assert.equal(persisted.status, "running");
   assert.equal(persisted.autoReconciled, undefined);
+});
+
+// B1: saveState computed its deletion set from a FRESH disk read of the index but
+// the retention set from the CALLER's (possibly stale) snapshot. A job another
+// process enqueued after the caller loaded — but before it saved — appeared in the
+// fresh read, was absent from the stale snapshot, and got its per-job file (the
+// watchdog's source of truth) plus .log/.done/.lock deleted. saveState must only
+// delete artifacts for jobs the caller actually knew about and dropped.
+test("saveState does not delete the artifacts of a job another process enqueued concurrently", () => {
+  const workspace = makeTempDir();
+
+  // Process A's in-memory snapshot: one running job it knows about.
+  const known = {
+    id: "job-known",
+    status: "running",
+    phase: "starting",
+    pid: process.pid,
+    logFile: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+  writeJobFile(workspace, known.id, known);
+  saveState(workspace, { version: 1, config: { stopReviewGate: false }, jobs: [known] });
+
+  // Process B concurrently enqueues a NEW active job (per-job file + index) AFTER
+  // process A loaded its snapshot but before A persists.
+  const enqueued = {
+    id: "job-enqueued-elsewhere",
+    status: "queued",
+    phase: "queued",
+    pid: process.pid,
+    logFile: null,
+    createdAt: "2026-01-01T00:00:01.000Z",
+    updatedAt: "2026-01-01T00:00:01.000Z"
+  };
+  writeJobFile(workspace, enqueued.id, enqueued);
+  upsertJob(workspace, enqueued);
+
+  // Process A persists its STALE snapshot (it never saw job-enqueued-elsewhere).
+  saveState(workspace, { version: 1, config: { stopReviewGate: false }, jobs: [known] });
+
+  assert.ok(
+    fs.existsSync(resolveJobFile(workspace, enqueued.id)),
+    "saveState must not delete the per-job file of a job enqueued by another process"
+  );
+});
+
+// Guard against over-correcting B1: a job the caller intentionally removes via
+// updateState (e.g. SessionEnd cleanup dropping its own terminal jobs) must still
+// have its artifacts cleaned up.
+test("updateState still deletes the artifacts of a job the caller intentionally removed", () => {
+  const workspace = makeTempDir();
+  const doomed = {
+    id: "job-doomed",
+    status: "completed",
+    phase: "done",
+    pid: null,
+    logFile: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+  writeJobFile(workspace, doomed.id, doomed);
+  saveState(workspace, { version: 1, config: { stopReviewGate: false }, jobs: [doomed] });
+
+  updateState(workspace, (state) => {
+    state.jobs = state.jobs.filter((job) => job.id !== doomed.id);
+  });
+
+  assert.equal(
+    fs.existsSync(resolveJobFile(workspace, doomed.id)),
+    false,
+    "a job the caller dropped from its own snapshot must have its per-job file deleted"
+  );
+});
+
+// A write lock leaked by a crashed holder must be cleaned up with the job's other
+// artifacts when the job is dropped — otherwise it lingers under the jobs dir.
+test("saveState removes the write lock of a job the caller dropped", () => {
+  const workspace = makeTempDir();
+  const doomed = {
+    id: "job-wlock-pruned",
+    status: "completed",
+    phase: "done",
+    pid: null,
+    logFile: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+  writeJobFile(workspace, doomed.id, doomed);
+  saveState(workspace, { version: 1, config: { stopReviewGate: false }, jobs: [doomed] });
+  fs.writeFileSync(
+    resolveJobWriteLockFile(workspace, doomed.id),
+    `${JSON.stringify({ pid: process.pid })}\n`,
+    "utf8"
+  );
+
+  updateState(workspace, (state) => {
+    state.jobs = state.jobs.filter((job) => job.id !== doomed.id);
+  });
+
+  assert.equal(
+    fs.existsSync(resolveJobWriteLockFile(workspace, doomed.id)),
+    false,
+    "a dropped job's write lock must be cleaned up with its other artifacts"
+  );
 });

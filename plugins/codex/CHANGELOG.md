@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.20
+
+Close three cross-process state races in the background-job store (flat `state.json`
+index + per-job files). Found by a Codex deep-audit, cross-checked against source.
+
+- `state.mjs` (B1): `saveState` computed its deletion set from a FRESH disk read of
+  the index but its retention set from the caller's (possibly stale) snapshot, so a
+  job another process enqueued after the caller loaded got its per-job file (the
+  watchdog's source of truth) plus `.log`/`.done`/`.lock` deleted. It now deletes only
+  jobs the caller knew about and dropped — explicit removals threaded from
+  `updateState`, plus jobs pruned out of the caller's own snapshot. `updateState`
+  diffs the job ids before/after the mutation; `session-lifecycle-hook.mjs` (a direct
+  `saveState` caller) passes its dropped jobs explicitly.
+- `state.mjs` (B3): a non-terminal (progress) patch in `applyJobPatchIfActive` could
+  re-persist `{...stored, ...patch}` after another process won the terminal claim and
+  wrote the terminal record, restoring a stale `running` status (progress patches
+  carry no status) and losing the terminal transition. `applyJobPatchIfActive` now
+  runs its read-check-write under a per-job write mutex (`<id>.wlock`, O_EXCL, taken
+  by progress AND terminal writers), closing the common-case interleaving. The acquire
+  treats an empty/unparseable lock as a live holder mid-acquire (never steals it),
+  reclaims a crashed holder's lock at most once via an atomic rename (so a racing
+  reclaimer cannot displace a freshly-created lock), and is fail-open (never wedges a
+  job). A leaked `.wlock` is cleaned up with the job's other artifacts in `saveState`.
+  The earlier `existsSync(.lock)` gate is removed — it was still check-then-write and,
+  lacking stale-lock reclamation, would have let a crashed finalizer's orphan lock
+  permanently block progress writes and queued promotions. NOTE: a pure-fs file mutex
+  cannot be made fully race-free without OS advisory locks; the irreducible residual
+  (two concurrent reclaimers of a leaked lock in a one-syscall window) degrades to the
+  same fail-open last-writer-wins the design already tolerates. Eliminating it needs
+  the directory-per-job state-store migration (roadmap).
+- `tracked-jobs.mjs` (B2): `runTrackedJob` promoted queued->running with an
+  unconditional write, reviving — and running the runner for — a job cancelled while
+  still queued (or already terminal when the worker read it). Promotion is now gated
+  through `applyJobPatchIfActive` on the on-disk record still being `queued` (the
+  unconditional write is reserved for foreground jobs, which have no pre-written
+  status); if not still queued, the worker aborts without running. The promotion also
+  passes a merged `indexPatch` so `background`/`request` survive even if the flat
+  index lost the job's row, keeping `hasActiveBackgroundJobs` correct.
+
 ## 1.0.19
 
 Stop a Codex worker from dying silently. A notification whose shape changed across a
