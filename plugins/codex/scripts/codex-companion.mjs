@@ -1125,24 +1125,6 @@ async function handleCancel(argv) {
   const threadId = existing.threadId ?? job.threadId ?? null;
   const turnId = existing.turnId ?? job.turnId ?? null;
 
-  const interrupt = await interruptAppServerTurn(cwd, { threadId, turnId });
-  if (interrupt.attempted) {
-    appendLogLine(
-      job.logFile,
-      interrupt.interrupted
-        ? `Requested Codex turn interrupt for ${turnId} on ${threadId}.`
-        : `Codex turn interrupt failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
-    );
-  }
-
-  // Only signal a pid we can still see alive. Terminating blindly risks hitting
-  // a recycled pid once the original worker has exited; the dead-PID reconcile
-  // already flips crashed "running" jobs to a terminal state independently.
-  if (Number.isInteger(job.pid) && job.pid > 0 && isProcessAlive(job.pid)) {
-    terminateProcessTree(job.pid);
-  }
-  appendLogLine(job.logFile, "Cancelled by user.");
-
   const completedAt = nowIso();
   const cancelPatch = {
     status: "cancelled",
@@ -1153,10 +1135,12 @@ async function handleCancel(argv) {
     errorMessage: "Cancelled by user."
   };
 
-  // Route the durable write through the CAS so a job that finalized itself
-  // (the worker completed/failed during the interrupt await above — a real
-  // cross-process TOCTOU) is not clobbered back to "cancelled". First terminal
-  // writer wins, consistent with the runner, watchdog, and dead-PID reconcile.
+  // C1: claim the terminal transition FIRST, then signal — only the CAS winner may
+  // signal/kill. A loser (the worker finalized the job itself during/just before
+  // this) must NOT touch the process: its pid may already be recycled to an unrelated
+  // process. Routing the write through the CAS also means a job that finalized itself
+  // is not clobbered back to "cancelled" (first terminal writer wins, consistent with
+  // the runner, watchdog, and dead-PID reconcile). Mirrors shared cancelJob.
   const result = applyJobPatchIfActive(workspaceRoot, job.id, () => cancelPatch);
 
   // Defensive fallback: the per-job file was pruned mid-flight (stored===null),
@@ -1180,7 +1164,31 @@ async function handleCancel(argv) {
     ? "cancelled"
     : result.stored?.status ?? indexedTerminalStatus(workspaceRoot, job.id) ?? "cancelled";
 
+  let interrupt = { attempted: false, interrupted: false };
   if (finalizedAsCancelled) {
+    appendLogLine(job.logFile, "Cancelled by user.");
+
+    // We own the terminal transition — now reap. Best-effort interrupt the Codex turn,
+    // then signal the worker using the PER-JOB pid the CAS just read
+    // (result.stored.pid) — authoritative over the index snapshot's job.pid, which can
+    // be stale or absent. Only signal a pid still alive (never a recycled one).
+    interrupt = await interruptAppServerTurn(cwd, { threadId, turnId });
+    if (interrupt.attempted) {
+      appendLogLine(
+        job.logFile,
+        interrupt.interrupted
+          ? `Requested Codex turn interrupt for ${turnId} on ${threadId}.`
+          : `Codex turn interrupt failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
+      );
+    }
+
+    // Per-job pid is authoritative; fall back to the index snapshot's pid only when
+    // the per-job record carries none (mirrors shared cancelJob's `…?.pid ?? job.pid`).
+    const killPid = result.stored?.pid ?? existing.pid ?? job.pid ?? null;
+    if (Number.isInteger(killPid) && killPid > 0 && isProcessAlive(killPid)) {
+      terminateProcessTree(killPid);
+    }
+
     // Terminal signal so a monitor waiting on <jobId>.done wakes after a user
     // cancellation (the watchdog also exits on terminal state, so it cannot
     // backfill this signal). Skipped when the CAS lost to an existing terminal

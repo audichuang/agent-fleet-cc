@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.25
+
+Fix cancel ordering + pid source (C1). `/codex:cancel` interrupted the turn and killed
+the worker BEFORE the terminal CAS, and signalled `job.pid` from the index snapshot
+rather than the authoritative per-job pid. Two hazards: a cancel that LOST the CAS (the
+worker finalized itself moments earlier) had already killed a pid that may have been
+recycled to an unrelated process; and a stale/absent index pid meant the real worker
+(recorded only in the per-job file) was never signalled.
+
+- `codex-companion.mjs` `handleCancel`: claim the terminal transition FIRST, then —
+  only when this cancel won the CAS — interrupt the turn and signal the worker, using
+  the per-job pid the CAS read (`result.stored.pid`, authoritative over the index
+  snapshot). A CAS loser never signals. Mirrors the shared `cancelJob` (CAS-first,
+  re-read pid, winner-only signal). This also removes the interrupt-await-before-CAS
+  TOCTOU window.
+
 ## 1.0.24
 
 Finish wiring the expected-worktree gate (C4). `task`/`review`/`task-worker` asserted
