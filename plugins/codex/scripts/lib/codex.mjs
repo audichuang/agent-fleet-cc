@@ -609,19 +609,27 @@ function applyTurnNotification(state, message) {
       }
       break;
     }
-    case "turn/completed":
+    case "turn/completed": {
       if ((message.params.threadId ?? null) !== state.threadId) {
         state.activeSubagentTurns.delete(message.params.threadId);
         scheduleInferredCompletion(state);
         break;
       }
+      // A2: schema-guard the terminal notification. A turn/completed for the root
+      // thread means the turn ended; if its shape changed so we cannot read `turn`,
+      // still CONVERGE (completeTurn synthesizes a completed turn from null) rather
+      // than letting an unguarded `params.turn.status` deref throw — which the
+      // dispatch guard would now swallow, leaving the turn to hang to the hard cap.
+      const completedTurn = message.params.turn ?? null;
+      const completedStatus = completedTurn?.status ?? null;
       emitProgress(
         state.onProgress,
-        `Turn ${message.params.turn.status === "completed" ? "completed" : message.params.turn.status}.`,
+        `Turn ${completedStatus && completedStatus !== "completed" ? completedStatus : "completed"}.`,
         "finalizing"
       );
-      completeTurn(state, message.params.turn);
+      completeTurn(state, completedTurn);
       break;
+    }
     default:
       break;
   }
@@ -884,6 +892,27 @@ async function resumeThread(client, threadId, cwd, options = {}) {
 
 function buildResultStatus(turnState) {
   return turnState.finalTurn?.status === "completed" ? 0 : 1;
+}
+
+// Resolve the turn's final message text. `lastAgentMessage` is the answer source —
+// it is accumulated from agentMessage item notifications REGARDLESS of phase, so a
+// reshaped final_answer phase does not lose it. A3: when it is empty (the turn FAILED
+// before producing an agent message), fall back to the completed turn's
+// `error.message` so the result surfaces *why* instead of an empty string.
+//
+// NOTE: turn/completed carries an EMPTY item list in the live app-server
+// (items_view: NotLoaded — ../codex bespoke_event_handling.rs), so turn.items is NOT
+// a usable backfill for the answer text; the agentMessage notification is the only
+// source, and lastAgentMessage already captures it independent of phase.
+export function resolveFinalMessage(turnState) {
+  if (turnState?.lastAgentMessage) {
+    return turnState.lastAgentMessage;
+  }
+  const turnError = turnState?.finalTurn?.error;
+  if (turnError && typeof turnError.message === "string" && turnError.message.trim()) {
+    return turnError.message;
+  }
+  return turnState?.lastAgentMessage ?? "";
 }
 
 const BUILTIN_PROVIDER_LABELS = new Map([
@@ -1241,7 +1270,7 @@ export async function runAppServerTurn(cwd, options = {}) {
       status: buildResultStatus(turnState),
       threadId,
       turnId: turnState.turnId,
-      finalMessage: turnState.lastAgentMessage,
+      finalMessage: resolveFinalMessage(turnState),
       reasoningSummary: turnState.reasoningSummary,
       turn: turnState.finalTurn,
       error: turnState.error,

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.22
+
+Finish the turn-lifecycle hardening (theme A) in `captureTurn` (`codex.mjs`).
+
+- A2 (terminal-notification schema guard): the `turn/completed` handler dereferenced
+  `message.params.turn.status` unguarded. After the v1.0.21 shared dispatch wrapped
+  every notification in skip-and-log, a reshaped `turn/completed` missing its `turn`
+  object no longer crashed — it was SWALLOWED, so the turn never converged and hung
+  to the hard cap. A `turn/completed` for the root thread now converges the turn even
+  when `turn` is absent (`completeTurn` synthesizes a completed turn from null).
+- A3 (final-message fallback for failures): the task result's `finalMessage` came
+  only from the live-accumulated `lastAgentMessage`. New `resolveFinalMessage` keeps
+  that as the answer source (it is captured from agentMessage notifications
+  independent of phase, so a reshaped `final_answer` phase does not lose it) and, when
+  it is empty because the turn FAILED before producing a message, falls back to
+  `Turn.error.message` so the result surfaces why instead of an empty string. (Note:
+  `turn/completed` carries an empty item list in the live app-server —
+  `items_view: NotLoaded` — so `turn.items` is not a usable backfill; the agentMessage
+  notification is the only answer source.)
+
 ## 1.0.21
 
 Harden the turn lifecycle in `captureTurn` (`codex.mjs`) against two failure modes

@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { captureTurn, extractTurnIdFromStartResponse } from "../../plugins/codex/scripts/lib/codex.mjs";
+import {
+  captureTurn,
+  extractTurnIdFromStartResponse,
+  resolveFinalMessage
+} from "../../plugins/codex/scripts/lib/codex.mjs";
 
 function makeFakeClient() {
   return {
@@ -127,4 +131,41 @@ test("captureTurn tracks the turn when the ACK carries only a top-level turnId",
   });
   const state = await promise;
   assert.equal(state.completed, true);
+});
+
+// --- A2: a terminal turn/completed must converge the turn even if its shape changed ---
+
+test("captureTurn converges when turn/completed omits the turn object", { timeout: 4000 }, async () => {
+  const client = makeFakeClient();
+  const promise = captureTurn(client, "thread1", async () => ({ turn: { id: "turn1", status: "inProgress" } }), {
+    idleTimeoutMs: 0
+  });
+  await tick();
+
+  // A reshaped turn/completed for the root thread with NO `turn` object. The old
+  // code dereferenced params.turn.status, which threw and was swallowed by the
+  // dispatch guard, leaving the turn to hang to the hard cap. It must still converge.
+  client.notificationHandler({ method: "turn/completed", params: { threadId: "thread1" } });
+
+  const state = await promise;
+  assert.equal(state.completed, true, "a turn/completed without a turn object must still converge the turn");
+});
+
+// --- A3: the final message must survive a missing/reshaped agentMessage notification ---
+
+test("resolveFinalMessage prefers lastAgentMessage, else surfaces a failed turn's error message", () => {
+  // The live-accumulated message (phase-independent) wins, even on a failed turn.
+  assert.equal(
+    resolveFinalMessage({ lastAgentMessage: "live", finalTurn: { status: "failed", error: { message: "boom" } } }),
+    "live"
+  );
+  // No agent message captured + the turn failed -> surface the error so the result
+  // is not an empty string.
+  assert.equal(
+    resolveFinalMessage({ lastAgentMessage: "", finalTurn: { status: "failed", error: { message: "boom" } } }),
+    "boom"
+  );
+  // Completed turn with no captured message and no error -> prior empty-string behavior.
+  assert.equal(resolveFinalMessage({ lastAgentMessage: "", finalTurn: { status: "completed" } }), "");
+  assert.equal(resolveFinalMessage({ lastAgentMessage: "", finalTurn: null }), "");
 });
