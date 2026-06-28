@@ -16,6 +16,7 @@
     "test:codex:smoke": "node --test tests/codex/worktree-guard-foreign-broker.smoke.mjs",
     "test:fleet": "node --test \"tests/fleet/*.test.mjs\"",
     "sync-shared": "node scripts/sync-shared.mjs",
+    "use-local": "node .claude/skills/local-install-test/scripts/use-local-version.mjs",
     "prebuild:codex": "mkdir -p plugins/codex/.generated/app-server-types && codex app-server generate-ts --out plugins/codex/.generated/app-server-types",
     "build:codex": "tsc -p tsconfig.app-server.json"
   },
