@@ -29,6 +29,40 @@ function runTask(cwd, extraArgs, env = {}) {
   });
 }
 
+// C4: the expected-worktree gate must ASSERT (not merely drop the cross-workspace
+// fallback) on the read/query/cancel commands too — otherwise a host that passes the
+// triplet believes it is guarded while these commands still operate on the CURRENT
+// cwd's workspace in the WRONG worktree. A mismatched triplet must fail with a
+// worktree-mismatch BEFORE any job lookup, not exit 0 / "no job found".
+function runCmd(cmd, cwd, args, env = {}) {
+  return spawnSync(process.execPath, [COMPANION, cmd, "--cwd", cwd, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")), ...env }
+  });
+}
+// branch matches (makeRepo uses "feat") so the TOPLEVEL check is what fails.
+const MISMATCH = (base) => ["--expected-worktree", "/definitely/not/here", "--expected-branch", "feat", "--expected-base", base];
+
+for (const [cmd, extra] of [
+  ["status", []],
+  ["wait", ["--timeout-ms", "0", "some-job-id"]],
+  ["result", ["some-job-id"]],
+  ["cancel", ["some-job-id"]],
+  ["attach", ["some-job-id"]],
+  ["logs", []]
+]) {
+  test(`${cmd}: mismatched expected-worktree asserts and exits non-zero before any job lookup`, () => {
+    const { dir, base } = makeRepo();
+    const r = runCmd(cmd, dir, [...MISMATCH(base), ...extra]);
+    assert.notEqual(r.status, 0, `${cmd} must reject a worktree mismatch; got exit ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(
+      r.stderr + r.stdout,
+      /worktree mismatch|WorktreeMismatch/i,
+      `${cmd} must fail with a worktree-mismatch, not "no job" / exit 0\nstdout: ${r.stdout}\nstderr: ${r.stderr}`
+    );
+  });
+}
+
 test("task: mismatched expected-worktree exits non-zero before engine", () => {
   const { dir, base } = makeRepo();
   const r = runTask(dir, ["--expected-worktree", "/definitely/not/here", "--expected-branch", "feat", "--expected-base", base]);

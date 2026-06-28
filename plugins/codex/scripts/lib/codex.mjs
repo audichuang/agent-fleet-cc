@@ -827,8 +827,10 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
       // hung silently until the hard cap. Reap any turn Codex started (A5), then fail
       // fast with a clear protocol error.
       await interruptCapturedOrphan();
-      const ackError = new Error(
-        "Codex turn/start did not return a turn id (response.turn.id / response.turnId absent); cannot track the turn."
+      const ackError = /** @type {Error & { code?: string }} */ (
+        new Error(
+          "Codex turn/start did not return a turn id (response.turn.id / response.turnId absent); cannot track the turn."
+        )
       );
       ackError.code = "ETURNACK";
       state.error = state.error ?? ackError;

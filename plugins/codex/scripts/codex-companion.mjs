@@ -1004,6 +1004,10 @@ async function handleStatus(argv) {
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
+  // C4: assert the worktree BEFORE any job lookup — passing the triplet must GUARD
+  // (not merely disable the cross-workspace fallback), else the host believes it is
+  // guarded while we operate on the current cwd's workspace in the wrong worktree.
+  assertWorktreeAlignment({ cwd, expected });
   const reference = positionals[0] ?? "";
   if (reference) {
     const snapshot = options.wait
@@ -1033,6 +1037,7 @@ async function handleWait(argv) {
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
+  assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query (see handleStatus)
   const reference = positionals[0] ?? "";
   if (!reference) {
     throw new Error("`wait` requires a job id.");
@@ -1058,6 +1063,7 @@ function handleResult(argv) {
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
+  assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query (see handleStatus)
   const reference = positionals[0] ?? "";
   const { workspaceRoot, job } = resolveResultJob(cwd, reference, { allowCrossWorkspace: !expected });
   const storedJob = readStoredJob(workspaceRoot, job.id);
@@ -1112,6 +1118,7 @@ async function handleCancel(argv) {
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
+  assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query — never cancel a job in the wrong worktree
   const reference = positionals[0] ?? "";
   const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env, allowCrossWorkspace: !expected });
   const existing = readStoredJob(workspaceRoot, job.id) ?? {};
@@ -1281,6 +1288,7 @@ export async function handleAttach(argv, deps = {}) {
   });
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
+  assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query (see handleStatus)
   const reference = positionals.join(" ").trim() || null;
 
   // Resolve the job: an explicit reference (local, then cross-workspace via
@@ -1343,9 +1351,13 @@ export async function handleAttach(argv, deps = {}) {
 
 export async function handleLogs(argv, deps = {}) {
   const { positionals, options } = parseCommandInput(argv, {
-    valueOptions: ["cwd", "poll-interval-ms"],
+    valueOptions: ["cwd", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json", "follow"]
   });
+  // C4: logs previously ignored the triplet entirely (flags not even parsed) and the
+  // no-id fallback below read the current cwd's latest job log unguarded. Assert here
+  // so both the fallback AND the handleAttach delegation are gated.
+  assertWorktreeAlignment({ cwd: resolveCommandCwd(options), expected: parseExpectedTriplet(options) });
   // With no explicit id and no live job, fall back to the most recent job's
   // persisted log instead of erroring (attach semantics require a live job).
   if (!positionals[0]) {

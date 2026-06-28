@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.24
+
+Finish wiring the expected-worktree gate (C4). `task`/`review`/`task-worker` asserted
+the `--expected-worktree`/`--expected-branch`/`--expected-base` triplet, but the
+query/cancel commands only used it to disable the cross-workspace fallback without
+ASSERTING — so a host that passed the triplet believed it was guarded while these
+commands still operated on the current cwd's workspace in the WRONG worktree (e.g.
+cancelling the right job id in the wrong worktree).
+
+- `codex-companion.mjs`: `status`, `wait`, `result`, `cancel`, `attach` now call
+  `assertWorktreeAlignment` immediately after parsing the triplet — assert-before-query,
+  so a mismatch fails before any job lookup. `logs` previously ignored the triplet
+  flags entirely (not even parsed) and its no-id fallback read the current cwd's latest
+  job log unguarded; it now parses + asserts the triplet, gating both the fallback and
+  the `handleAttach` delegation. The gate stays a no-op when no triplet is passed, so
+  ordinary (non-handed-off) invocations are unaffected.
+
 ## 1.0.23
 
 Close the last theme-A gap (A5): a turn/start ACK that fails or times out no longer
