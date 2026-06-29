@@ -28,7 +28,6 @@ import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import { truncateToByteBudget } from "./lib/strings.mjs";
 import {
   applyJobPatchIfActive,
-  claimTerminalTransition,
   generateJobId,
   getConfig,
   listJobs,
@@ -1191,23 +1190,11 @@ async function handleCancel(argv) {
   // the runner, watchdog, and dead-PID reconcile). Mirrors shared cancelJob.
   const result = applyJobPatchIfActive(workspaceRoot, job.id, () => cancelPatch);
 
-  // Defensive fallback: the per-job file was pruned mid-flight (stored===null),
-  // so there is no terminal record to clobber — recreate the cancelled record,
-  // but ONLY if no other actor already finalized the job in the shared index.
-  // Without this guard cancel could resurrect a job to "cancelled" that the
-  // index already records as completed/failed (matches the runner/failure
-  // recreate guards — first terminal writer wins).
-  const recreatedCancelled =
-    !result.applied &&
-    result.stored === null &&
-    !indexedTerminalStatus(workspaceRoot, job.id) &&
-    claimTerminalTransition(workspaceRoot, job.id, "cancelled", completedAt);
-  if (recreatedCancelled) {
-    writeJobFile(workspaceRoot, job.id, { ...existing, ...job, ...cancelPatch });
-    upsertJob(workspaceRoot, { id: job.id, ...cancelPatch });
-  }
-
-  const finalizedAsCancelled = result.applied || recreatedCancelled;
+  // A vanished per-job file (stored===null) is NOT recreated: the shared finalizeJob
+  // refuses to resurrect a removed job, and an active job's record is never pruned
+  // (pruneJobs keeps all active), so a missing record means external deletion that
+  // stays gone. cancel simply loses in that case (first terminal writer wins).
+  const finalizedAsCancelled = result.applied;
   const finalStatus = finalizedAsCancelled
     ? "cancelled"
     : result.stored?.status ?? indexedTerminalStatus(workspaceRoot, job.id) ?? "cancelled";

@@ -80,21 +80,21 @@ test("cancel signals the per-job pid even when the index pid is absent", async (
   }
 });
 
-// C1: claim-then-signal. When the CAS loses (the job already finalized itself), cancel
-// must NOT signal — the index's pid may have been recycled to an unrelated process.
-// The old code killed the index pid BEFORE the CAS, so it would terminate a live,
-// possibly-unrelated process for a job that already completed.
-test("cancel does not signal the pid when it loses the terminal CAS", async () => {
+// C1 / R1 (lock-as-authority): when a concurrent finalizer has already won the O_EXCL
+// terminal.lock (job.json not yet rewritten), cancel's resolver overlays the lock and
+// sees the job as terminal — so it DECLINES (no active job to cancel) instead of
+// attempting and losing the CAS. The safety property is unchanged and is what matters:
+// cancel must NOT signal the (possibly recycled) pid, nor clobber the record.
+test("cancel declines a job whose terminal.lock already won and never signals its pid", async () => {
   const workspace = makeTempDir();
   const jobId = "job-cancel-loser-no-kill";
   const logFile = resolveJobLogFile(workspace, jobId);
   fs.writeFileSync(logFile, "", "utf8");
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
   try {
-    // Single source of truth = the per-job file. The job is still "running" (so cancel
-    // RESOLVES it and its active-gate passes), but a concurrent finalizer has ALREADY
-    // won the O_EXCL terminal.lock and not yet rewritten the record. cancel must lose
-    // the terminal CAS here — and a loser must NOT signal the (possibly recycled) pid.
+    // Single source of truth = the per-job file. The record is still "running", but a
+    // concurrent finalizer has ALREADY won the terminal.lock. The R1 overlay reports the
+    // job as terminal, so cancel finds no active job to cancel.
     const running = {
       id: jobId,
       status: "running",
@@ -105,25 +105,23 @@ test("cancel does not signal the pid when it loses the terminal CAS", async () =
       updatedAt: "2026-01-01T00:00:05.000Z"
     };
     writeJobFile(workspace, jobId, running);
-    // The winning finalizer's claim: a live owner + fresh stamp so it is never
-    // reclaimed as stale, forcing cancel's claimTerminalTransition to EEXIST (lose).
     fs.writeFileSync(
       resolveJobLockFile(workspace, jobId),
       JSON.stringify({ status: "completed", pid: process.pid, stamp: new Date().toISOString() })
     );
 
     const result = run("node", [SCRIPT, "cancel", jobId, "--cwd", workspace, "--json"], { cwd: workspace });
-    assert.equal(result.status, 0, `cancel exited non-zero: ${result.stderr}`);
+    assert.notEqual(result.status, 0, "cancel must decline a job whose terminal.lock already won");
     assert.notEqual(
       readJobFile(resolveJobFile(workspace, jobId)).status,
       "cancelled",
-      "a cancel that lost the terminal CAS must not clobber the record to cancelled"
+      "declining must not clobber the record to cancelled"
     );
     await sleep(250);
     assert.equal(
       isAlive(child.pid),
       true,
-      "a cancel that lost the terminal CAS must not signal the (possibly recycled) pid"
+      "declining must not signal the (possibly recycled) pid"
     );
   } finally {
     try {
@@ -172,16 +170,16 @@ test("cancel writes a cancelled .done signal so a waiting monitor wakes", () => 
   }
 });
 
-test("cancel does not clobber a job that reached a terminal state during the cancel handler", () => {
+test("cancel does not clobber a job whose terminal.lock + .done already won", () => {
   const workspace = makeTempDir();
   const jobId = "job-cancel-race";
   const logFile = resolveJobLogFile(workspace, jobId);
   fs.writeFileSync(logFile, "", "utf8");
 
-  // TOCTOU at the single source of truth: cancel resolves the job while its per-job
-  // record is still "running" (active-gate passes), but a concurrent finalizer has
-  // already won the O_EXCL terminal.lock AND written its completed .done. cancel must
-  // LOSE the terminal CAS and NOT stomp the record/signal back to "cancelled" — first
+  // TOCTOU at the single source of truth: the per-job record is still "running", but a
+  // concurrent finalizer has already won the O_EXCL terminal.lock AND written its
+  // completed .done. The R1 overlay reports the job as terminal, so cancel declines it
+  // (lock-as-authority) and must NOT stomp the record/signal back to "cancelled" — first
   // terminal writer wins (pid:null so dead-PID reconcile leaves the running record alone).
   const running = {
     id: jobId,
@@ -201,12 +199,12 @@ test("cancel does not clobber a job that reached a terminal state during the can
   );
 
   const result = run("node", [SCRIPT, "cancel", jobId, "--cwd", workspace, "--json"], { cwd: workspace });
-  assert.equal(result.status, 0, `cancel exited non-zero: ${result.stderr}`);
+  assert.notEqual(result.status, 0, "cancel must decline a job whose terminal.lock already won");
 
   assert.notEqual(
     readJobFile(resolveJobFile(workspace, jobId)).status,
     "cancelled",
-    "a cancel that lost the terminal CAS must not clobber the record to cancelled"
+    "declining must not clobber the record to cancelled"
   );
   assert.equal(
     JSON.parse(fs.readFileSync(resolveJobDoneFile(workspace, jobId), "utf8")).status,
