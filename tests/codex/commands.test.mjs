@@ -32,8 +32,11 @@ test("review command uses AskUserQuestion and background Bash while staying revi
   assert.match(source, /Treat untracked files or directories as reviewable work/i);
   assert.match(source, /Recommend waiting only when the review is clearly tiny, roughly 1-2 files total/i);
   assert.match(source, /In every other case, including unclear size, recommend background/i);
-  assert.match(source, /The companion script parses `--wait` and `--background`/i);
-  assert.match(source, /Claude Code's `Bash\(..., run_in_background: true\)` is what actually detaches the run/i);
+  // The doc must be honest that the shell-backgrounded review is session-scoped, NOT the
+  // durable watchdog-backed `/codex:task --background` job (E: run_in_background ≠ durable).
+  assert.match(source, /runs the review in the FOREGROUND/i);
+  assert.match(source, /session-scoped and best-effort/i);
+  assert.match(source, /\/codex:task --background/);
   assert.match(source, /When in doubt, run the review/i);
   assert.match(source, /\(Recommended\)/);
   assert.match(source, /does not support staged-only review, unstaged-only review, or extra focus text/i);
@@ -60,8 +63,10 @@ test("adversarial review command uses AskUserQuestion and background Bash while 
   assert.match(source, /Treat untracked files or directories as reviewable work/i);
   assert.match(source, /Recommend waiting only when the scoped review is clearly tiny, roughly 1-2 files total/i);
   assert.match(source, /In every other case, including unclear size, recommend background/i);
-  assert.match(source, /The companion script parses `--wait` and `--background`/i);
-  assert.match(source, /Claude Code's `Bash\(..., run_in_background: true\)` is what actually detaches the run/i);
+  // Same honesty caveat as /codex:review (E: shell-background is session-scoped, not durable).
+  assert.match(source, /runs the review in the FOREGROUND/i);
+  assert.match(source, /session-scoped and best-effort/i);
+  assert.match(source, /\/codex:task --background/);
   assert.match(source, /When in doubt, run the review/i);
   assert.match(source, /\(Recommended\)/);
   assert.match(source, /uses the same review target selection as `\/codex:review`/i);

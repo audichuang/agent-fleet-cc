@@ -35,7 +35,7 @@ Argument handling:
 - Preserve the user's arguments exactly.
 - Do not strip `--wait` or `--background` yourself.
 - Do not add extra review instructions or rewrite the user's intent.
-- The companion script parses `--wait` and `--background`, but Claude Code's `Bash(..., run_in_background: true)` is what actually detaches the run.
+- The companion runs the review in the FOREGROUND; `Bash(..., run_in_background: true)` only backgrounds it within THIS session. This is session-scoped and best-effort — it is NOT the durable, watchdog-backed tracked job that `/codex:task --background` provides (a detached worker that survives the session). If the session ends, a background review ends with it.
 - `/codex:review` is native-review only. It does not support staged-only review, unstaged-only review, or extra focus text.
 - If the user needs custom review instructions or more adversarial framing, they should use `/codex:adversarial-review`.
 
@@ -58,4 +58,4 @@ Bash({
 })
 ```
 - Do not call `BashOutput` or wait for completion in this turn.
-- After launching the command, tell the user: "Codex review started in the background. Check `/codex:status` for progress."
+- After launching the command, tell the user: "Codex review started in the background (this session). Check `/codex:status` for progress."

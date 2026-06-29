@@ -67,7 +67,8 @@ Bash({
   run_in_background: true
 })
 ```
-- Tell the user: "Sent to Codex in the background. Use `/codex:status` to check progress and `/codex:result` to see the response."
+- Note: `run_in_background: true` backgrounds this within THIS session only — it is best-effort, NOT the durable, watchdog-backed tracked job that `/codex:task --background` provides (a detached worker surviving the session). If the session ends, the handoff ends. For a handoff that must outlive the session, run `/codex:task --background` instead.
+- Tell the user: "Sent to Codex in the background (this session). Use `/codex:status` to check progress and `/codex:result` to see the response."
 
 ## Operating rules
 

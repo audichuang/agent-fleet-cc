@@ -41,7 +41,7 @@ Rules:
 - Implement each step fully. Do not skip steps or leave TODOs.
 - After completing each logical group of changes, verify the code compiles/runs if applicable.
 - If a step is ambiguous, make a reasonable choice and note what you assumed.
-- Commit after each major step with a clear commit message describing what was done.
+- Do NOT commit to `main`. If you commit, branch from `main` FIRST (feature branch) and follow the repo's commit conventions in `AGENTS.md`/`CLAUDE.md` (branch-not-main, and the required commit trailer if any). You may commit after each major step with a clear message ON THAT BRANCH; otherwise leave the changes uncommitted for the human to review.
 
 ---
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.30
+
+Theme E — process / docs honesty (bounded items; the foreign-broker fake-Codex e2e
+remains a follow-up, and `resolveSandboxMode` was already documented + tested).
+
+- **Background-durability docs corrected** (`commands/review.md`, `adversarial-review.md`,
+  `handoff.md`): these flows run the companion in the FOREGROUND and rely on
+  `Bash(run_in_background: true)`, which backgrounds only within the current session. The
+  docs implied that was a durable background job. They now state plainly that it is
+  session-scoped and best-effort — NOT the detached worker + liveness watchdog that
+  `/codex:task --background` provides (that one survives the session). No behaviour change.
+- **execute-plan no longer tells Codex to commit to `main`** (`commands/execute-plan.md`):
+  the embedded prompt said "commit after each major step", violating the repo's
+  branch-from-main / commit-trailer rules. It now instructs: never commit to `main`; if
+  committing, branch first and follow `AGENTS.md`/`CLAUDE.md` conventions; otherwise leave
+  the work uncommitted for review.
+
+Repo tooling (not plugin-scoped): added `scripts/bump-version.mjs` + `npm run bump-version`
+/ `npm run check-version` — a multi-plugin version bump that writes a plugin's version to
+BOTH its `plugin.json` and the `marketplace.json` entry in lockstep, plus a `--check` gate
+(the lockstep that `tests/fleet-structure.test.mjs` enforces). `test:structure` now also
+runs the tool's unit tests. This release's own bump was produced by the tool.
+
 ## 1.0.29
 
 Theme D hardening — diagnosability, signal handling, env hygiene, and notification

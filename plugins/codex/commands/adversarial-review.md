@@ -38,7 +38,7 @@ Argument handling:
 - Preserve the user's arguments exactly.
 - Do not strip `--wait` or `--background` yourself.
 - Do not weaken the adversarial framing or rewrite the user's focus text.
-- The companion script parses `--wait` and `--background`, but Claude Code's `Bash(..., run_in_background: true)` is what actually detaches the run.
+- The companion runs the review in the FOREGROUND; `Bash(..., run_in_background: true)` only backgrounds it within THIS session. This is session-scoped and best-effort — it is NOT the durable, watchdog-backed tracked job that `/codex:task --background` provides (a detached worker that survives the session). If the session ends, a background review ends with it.
 - `/codex:adversarial-review` uses the same review target selection as `/codex:review`.
 - It supports working-tree review, branch review, and `--base <ref>`.
 - It does not support `--scope staged` or `--scope unstaged`.
@@ -63,4 +63,4 @@ Bash({
 })
 ```
 - Do not call `BashOutput` or wait for completion in this turn.
-- After launching the command, tell the user: "Codex adversarial review started in the background. Check `/codex:status` for progress."
+- After launching the command, tell the user: "Codex adversarial review started in the background (this session). Check `/codex:status` for progress."
