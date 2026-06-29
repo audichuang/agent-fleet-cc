@@ -37,11 +37,13 @@ import {
   resolveJobFile,
   resolveJobFileInStateDir,
   resolveJobLogFile,
+  resolveStateDir,
   setConfig,
   upsertJob,
   writeCompletionSignalFile,
   writeJobFile
 } from "./lib/state.mjs";
+import { readCurrentTurnIdentity } from "./lib/codex-progress.mjs";
 import {
   buildSingleJobSnapshot,
   buildStatusSnapshot,
@@ -1167,8 +1169,9 @@ async function handleCancel(argv) {
   const reference = positionals[0] ?? "";
   const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env, allowCrossWorkspace: !expected });
   const existing = readStoredJob(workspaceRoot, job.id) ?? {};
-  const threadId = existing.threadId ?? job.threadId ?? null;
-  const turnId = existing.turnId ?? job.turnId ?? null;
+  // Turn identity now lives in events.ndjson (Option A: progress -> events), not the
+  // per-job record, so recover the current ids from there for the turn interrupt.
+  const { threadId, turnId } = readCurrentTurnIdentity(resolveStateDir(workspaceRoot), job.id);
 
   const completedAt = nowIso();
   const cancelPatch = {

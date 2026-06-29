@@ -3,8 +3,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { applyJobPatchIfActive, resolveJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
+import { resolveJobFile, resolveStateDir } from "../../plugins/codex/scripts/lib/state.mjs";
 import { runTrackedJob, DEFAULT_JOB_TIMEOUT_MS } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { appendProgressEvent } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
 
 test("the default background-job hard cap is one hour", () => {
   // A single task call can legitimately run many TDD cycles (npm/vitest/tsc),
@@ -37,8 +38,8 @@ test("runTrackedJob interrupts the hung turn when the hard timeout fires", async
     runTrackedJob(
       { id: jobId, workspaceRoot: workspace },
       async () => {
-        // Simulate progress recording the active thread/turn, then hang.
-        applyJobPatchIfActive(workspace, jobId, { threadId: "th-T", turnId: "tn-T" });
+        // Simulate progress recording the active thread/turn (Option A: events), then hang.
+        appendProgressEvent(resolveStateDir(workspace), jobId, { threadId: "th-T", turnId: "tn-T" });
         await new Promise(() => {});
       },
       {
@@ -75,9 +76,9 @@ test("runTrackedJob does not interrupt on timeout when only one of threadId/turn
     runTrackedJob(
       { id: jobId, workspaceRoot: workspace },
       async () => {
-        // Only a threadId is recorded; interruptAppServerTurn needs both ids, so
-        // the timeout path must not pretend it can interrupt.
-        applyJobPatchIfActive(workspace, jobId, { threadId: "th-only" });
+        // Only a threadId is recorded (Option A: events); interruptAppServerTurn needs
+        // BOTH ids, so the timeout path must not pretend it can interrupt.
+        appendProgressEvent(resolveStateDir(workspace), jobId, { threadId: "th-only" });
         await new Promise(() => {});
       },
       {
@@ -136,10 +137,10 @@ test("runTrackedJob interrupts + terminates on an ETURNIDLE rejection (idle watc
     runTrackedJob(
       { id: jobId, workspaceRoot: workspace },
       async () => {
-        // Progress records the active thread/turn, then the captureTurn idle
-        // watchdog rejects with an ETURNIDLE-coded error (turn wedged, not hung
-        // worker). This is NOT the 15-min hard cap — timeoutMs is huge below.
-        applyJobPatchIfActive(workspace, jobId, { threadId: "th-IDLE", turnId: "tn-IDLE" });
+        // Progress records the active thread/turn (Option A: events), then the
+        // captureTurn idle watchdog rejects with an ETURNIDLE-coded error (turn wedged,
+        // not hung worker). This is NOT the 15-min hard cap — timeoutMs is huge below.
+        appendProgressEvent(resolveStateDir(workspace), jobId, { threadId: "th-IDLE", turnId: "tn-IDLE" });
         const error = new Error("Codex turn stalled: no app-server activity for 5000ms");
         error.code = "ETURNIDLE";
         error.threadId = "th-IDLE";

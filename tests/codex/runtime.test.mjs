@@ -9,6 +9,7 @@ import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import { loadBrokerSession, saveBrokerSession } from "../../plugins/codex/scripts/lib/broker-lifecycle.mjs";
 import { resolveStateDir } from "../../plugins/codex/scripts/lib/state.mjs";
+import { readCurrentTurnIdentity } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PLUGIN_ROOT = path.join(ROOT, "plugins", "codex");
@@ -1653,11 +1654,15 @@ test("cancel sends turn interrupt to the shared app-server before killing a brok
   assert.ok(jobId);
 
   const stateDir = resolveStateDir(repo);
+  // Option A: the worker emits the active thread/turn into events.ndjson (not the
+  // record), so wait until the per-job record is running AND the turn identity is
+  // recoverable from the event log — exactly what cancel will read to interrupt.
   const runningJob = await waitFor(() => {
     const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
     const job = state.jobs.find((candidate) => candidate.id === jobId);
-    if (job?.status === "running" && job.threadId && job.turnId) {
-      return job;
+    const { threadId, turnId } = readCurrentTurnIdentity(stateDir, jobId);
+    if (job?.status === "running" && threadId && turnId) {
+      return { ...job, threadId, turnId };
     }
     return null;
   }, { timeoutMs: 15000 });

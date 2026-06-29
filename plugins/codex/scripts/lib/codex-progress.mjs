@@ -11,8 +11,17 @@
 // timeout interrupt paths previously read off job.json.
 
 import { jobDir, readJob, readTerminalLock } from "./shared/core/state-store.mjs";
-import { readEvents } from "./shared/core/events.mjs";
+import { appendEvent, readEvents } from "./shared/core/events.mjs";
 import { TERMINAL_STATUSES } from "./shared/core/job.mjs";
+
+// Append a live progress update as an `engine-event` into the per-job events.ndjson
+// instead of writing it into job.json (Option A). job.json then has only two writers
+// (markRunning + finalizeJob), so a progress update can never clobber a terminal
+// record (B3 structurally impossible). `fields` carries only the changed subset of
+// { phase, threadId, turnId } (the emitter dedups), which the readers below fold back.
+export function appendProgressEvent(stateDir, jobId, fields) {
+  appendEvent(jobDir(stateDir, jobId), "engine-event", fields);
+}
 
 // Recover the current { threadId, turnId } for a job by folding its event log.
 //

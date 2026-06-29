@@ -6,11 +6,13 @@ import { makeTempDir } from "./helpers.mjs";
 import {
   resolveJobFile,
   resolveJobLogFile,
+  resolveStateDir,
   resolveStateFile,
   saveState,
   writeJobFile
 } from "../../plugins/codex/scripts/lib/state.mjs";
 import { createJobProgressUpdater, indexedTerminalStatus } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { readCurrentTurnIdentity } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
 
 test("indexedTerminalStatus returns the index status only for terminal jobs", () => {
   const workspace = makeTempDir();
@@ -45,18 +47,23 @@ function seedJob(workspace, overrides) {
   return job;
 }
 
-test("createJobProgressUpdater writes a phase patch while the job is active", () => {
+test("createJobProgressUpdater appends progress to events, never job.json (Option A)", () => {
   const workspace = makeTempDir();
   const job = seedJob(workspace, { id: "task-prog-active" });
 
   const update = createJobProgressUpdater(workspace, job.id);
-  update({ message: "", phase: "investigating" });
+  update({ message: "", phase: "investigating", threadId: "th-1", turnId: "t-1" });
 
+  // Option A: progress goes to the append-only events.ndjson, so job.json is left
+  // untouched (only markRunning + finalizeJob write it) — a progress update can never
+  // clobber a terminal record.
   const persisted = JSON.parse(fs.readFileSync(resolveJobFile(workspace, job.id), "utf8"));
-  assert.equal(persisted.phase, "investigating");
+  assert.equal(persisted.phase, "starting", "progress must NOT write phase into job.json");
 
-  const indexed = JSON.parse(fs.readFileSync(resolveStateFile(workspace), "utf8"));
-  assert.equal(indexed.jobs[0].phase, "investigating");
+  // The current turn identity is recoverable from the event log.
+  const { threadId, turnId } = readCurrentTurnIdentity(resolveStateDir(workspace), job.id);
+  assert.equal(threadId, "th-1");
+  assert.equal(turnId, "t-1");
 });
 
 test("createJobProgressUpdater drops late progress events after the job reached a terminal state", () => {

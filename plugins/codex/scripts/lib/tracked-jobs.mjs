@@ -10,10 +10,12 @@ import {
   readJobFile,
   resolveJobFile,
   resolveJobLogFile,
+  resolveStateDir,
   upsertJob,
   writeCompletionSignalFile,
   writeJobFile
 } from "./state.mjs";
+import { appendProgressEvent, readCurrentTurnIdentity } from "./codex-progress.mjs";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
@@ -130,30 +132,31 @@ export function createJobRecord(base, options = {}) {
 }
 
 export function createJobProgressUpdater(workspaceRoot, jobId) {
+  const stateDir = resolveStateDir(workspaceRoot);
   let lastPhase = null;
   let lastThreadId = null;
   let lastTurnId = null;
 
   return (event) => {
     const normalized = normalizeProgressEvent(event);
-    const patch = { id: jobId };
+    const fields = {};
     let changed = false;
 
     if (normalized.phase && normalized.phase !== lastPhase) {
       lastPhase = normalized.phase;
-      patch.phase = normalized.phase;
+      fields.phase = normalized.phase;
       changed = true;
     }
 
     if (normalized.threadId && normalized.threadId !== lastThreadId) {
       lastThreadId = normalized.threadId;
-      patch.threadId = normalized.threadId;
+      fields.threadId = normalized.threadId;
       changed = true;
     }
 
     if (normalized.turnId && normalized.turnId !== lastTurnId) {
       lastTurnId = normalized.turnId;
-      patch.turnId = normalized.turnId;
+      fields.turnId = normalized.turnId;
       changed = true;
     }
 
@@ -161,12 +164,12 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
       return;
     }
 
-    // Suppress progress updates once the job has already reached a terminal
-    // state. Without this, a runner that keeps producing events after the
-    // layer-2 hard timeout rejected Promise.race would race the failure
-    // write (`phase: failed`) back into `phase: investigating`, flicker
-    // `updatedAt`, and pollute the persisted record with stale fields.
-    applyJobPatchIfActive(workspaceRoot, jobId, patch);
+    // Option A: progress goes to the append-only events.ndjson, NEVER job.json, so a
+    // progress update can never resurrect a terminal record (B3 structurally gone).
+    // The old post-terminal suppression is unnecessary: an event sets no status, and
+    // no actor interrupts/acts on a job it reads as terminal, so a late progress event
+    // after finalize is inert (readers fold turn identity but ignore terminal jobs).
+    appendProgressEvent(stateDir, jobId, fields);
   };
 }
 
@@ -232,12 +235,14 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
     }
     fired = true;
 
-    // Capture turn identity from the per-job file (the progress updater writes
-    // threadId/turnId there once the turn starts) BEFORE finalizing, so we can
-    // reap the orphaned turn even though the finalize patch sets pid:null.
+    // Capture turn identity from events.ndjson (Option A: the progress updater appends
+    // threadId/turnId as engine-events once the turn starts) BEFORE finalizing, so we
+    // can reap the orphaned turn even though the finalize patch sets pid:null.
     const stored = readStoredJob();
-    const threadId = stored?.threadId ?? null;
-    const turnId = stored?.turnId ?? null;
+    const { threadId, turnId } = (options.readTurnIdentity ?? readCurrentTurnIdentity)(
+      resolveStateDir(job.workspaceRoot),
+      job.id
+    );
 
     // A terminating signal (host kill / Ctrl-C / shell timeout reaping the tree) is not
     // an uncaught error — record it as such so the failure reason is not misleading.
@@ -553,11 +558,12 @@ export async function runTrackedJob(job, runner, options = {}) {
     if (timedOut || idleTimedOut) {
       const interrupt = options.interruptOnTimeout ?? defaultInterruptOnTimeout;
       try {
-        const stored = readJobFile(resolveJobFile(job.workspaceRoot, job.id));
-        // interruptAppServerTurn no-ops unless BOTH ids are present; gate on AND
-        // so a half-populated record does not trigger a guaranteed-useless RPC.
-        const threadId = stored?.threadId ?? error?.threadId ?? null;
-        const turnId = stored?.turnId ?? error?.turnId ?? null;
+        // Turn identity now lives in events.ndjson (Option A); fall back to the ids
+        // carried on the idle error. interruptAppServerTurn no-ops unless BOTH ids are
+        // present; gate on AND so a half-populated identity does not trigger a useless RPC.
+        const current = readCurrentTurnIdentity(resolveStateDir(job.workspaceRoot), job.id);
+        const threadId = current.threadId ?? error?.threadId ?? null;
+        const turnId = current.turnId ?? error?.turnId ?? null;
         if (threadId && turnId) {
           await interrupt(job.cwd ?? job.workspaceRoot, { threadId, turnId });
         }

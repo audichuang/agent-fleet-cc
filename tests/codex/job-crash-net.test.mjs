@@ -6,11 +6,13 @@ import { makeTempDir } from "./helpers.mjs"; // hermetic env + fs isolation
 import {
   resolveJobFile,
   resolveJobDoneFile,
+  resolveStateDir,
   writeJobFile,
   applyJobPatchIfActive,
   writeCompletionSignalFile
 } from "../../plugins/codex/scripts/lib/state.mjs";
 import { installJobCrashNet, runTrackedJob } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { appendProgressEvent } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
 
 // A worker process runs exactly one tracked job. While it is in flight, ANY
 // uncaught throw / unhandled rejection (e.g. a synchronous throw from a transport
@@ -117,9 +119,10 @@ test("installJobCrashNet does not overwrite an already-terminal job nor stomp it
 test("installJobCrashNet best-effort interrupts the orphaned turn when threadId/turnId are known", async () => {
   const workspace = makeTempDir();
   const jobId = "job-crash-interrupt";
-  // A running record carrying turn identity, as the progress updater writes it
-  // onto the per-job file once turn/started arrives.
-  const running = writeRunningJob(workspace, jobId, { threadId: "th-1", turnId: "tn-1" });
+  // Option A: the progress updater appends turn identity to events.ndjson once
+  // turn/started arrives; the crash-net recovers it from there before finalizing.
+  const running = writeRunningJob(workspace, jobId);
+  appendProgressEvent(resolveStateDir(workspace), jobId, { threadId: "th-1", turnId: "tn-1" });
 
   const interrupts = [];
   const proc = makeFakeProc();
