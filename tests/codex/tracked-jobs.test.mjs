@@ -59,6 +59,8 @@ test("createJobProgressUpdater appends progress to events, never job.json (Optio
   // clobber a terminal record.
   const persisted = JSON.parse(fs.readFileSync(resolveJobFile(workspace, job.id), "utf8"));
   assert.equal(persisted.phase, "starting", "progress must NOT write phase into job.json");
+  assert.equal(persisted.threadId, undefined, "progress must NOT write threadId into job.json");
+  assert.equal(persisted.turnId, undefined, "progress must NOT write turnId into job.json");
 
   // The current turn identity is recoverable from the event log.
   const { threadId, turnId } = readCurrentTurnIdentity(resolveStateDir(workspace), job.id);

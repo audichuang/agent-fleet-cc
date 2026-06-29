@@ -33,14 +33,28 @@ export function appendProgressEvent(stateDir, jobId, fields) {
 // event (externally-finalized jobs have none), which is exactly the contract the
 // interrupt readers need: they must recover identity even for a job a separate
 // process finalized.
-export function readCurrentTurnIdentity(stateDir, jobId) {
+// Fold the event log once into the current live progress: the latest non-null
+// threadId, turnId, and phase, each tracked INDEPENDENTLY (the emitter dedups them
+// separately, so a given engine-event may carry only one). Used by the display
+// surfaces (status/result) which previously read these off job.json — under Option A
+// they live in events, so a live job's record keeps its initial phase:"starting" and
+// no threadId.
+export function readProgressSnapshot(stateDir, jobId) {
   let threadId = null;
   let turnId = null;
+  let phase = null;
   for (const event of readEvents(jobDir(stateDir, jobId))) {
     if (event.type !== "engine-event") continue;
     if (event.threadId) threadId = event.threadId;
     if (event.turnId) turnId = event.turnId;
+    if (event.phase) phase = event.phase;
   }
+  return { threadId, turnId, phase };
+}
+
+// The interrupt readers (watchdog/cancel/crash-net/timeout) need only the identity.
+export function readCurrentTurnIdentity(stateDir, jobId) {
+  const { threadId, turnId } = readProgressSnapshot(stateDir, jobId);
   return { threadId, turnId };
 }
 

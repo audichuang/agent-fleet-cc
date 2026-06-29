@@ -392,10 +392,11 @@ function readWriteLockOwnerPid(lockFile) {
 const WRITE_LOCK_BUDGET_MS = 1000;
 
 // Cross-process per-job write mutex. Holds an O_EXCL <id>.wlock for the duration of
-// `fn` (a single per-job-file read-check-write). progress AND terminal transitions
-// both run through applyJobPatchIfActive under this lock, so a progress write can no
-// longer land between a terminal claim and its record write and re-persist a stale
-// active status over the terminal record (B3).
+// `fn` (a single per-job-file read-check-write). Since Option A (progress -> events),
+// progress no longer touches job.json, so B3 is already structurally gone; this lock
+// now only serializes the remaining applyJobPatchIfActive writers (queued->running
+// promotion and terminal transitions). It is removed in 1c-ii-b once terminals route
+// through the shared finalizeJob O_EXCL terminal.lock.
 //
 // A lock left by a crashed holder (parseable, dead owner pid) is reclaimed AT MOST
 // ONCE per call by moving it aside with an atomic rename — never a bare unlink: only
@@ -806,10 +807,11 @@ export function resolveJobLockFile(cwd, jobId) {
   return path.join(ensureJobDir(cwd, jobId), "terminal.lock");
 }
 
-// Short-lived per-job write mutex (see withJobWriteLock). Distinct from the
-// one-shot terminal .lock: this is held only for the duration of a single
-// read-check-write in applyJobPatchIfActive, by progress AND terminal writers
-// alike, so the two cannot interleave (B3).
+// Short-lived per-job write mutex (see withJobWriteLock). Distinct from the one-shot
+// terminal .lock: held only for the duration of a single read-check-write in
+// applyJobPatchIfActive, now by the promotion + terminal writers (progress moved to
+// events.ndjson under Option A). Removed in 1c-ii-b when terminals route through
+// finalizeJob's terminal.lock.
 export function resolveJobWriteLockFile(cwd, jobId) {
   return path.join(ensureJobDir(cwd, jobId), "write.lock");
 }
