@@ -42,7 +42,7 @@ import {
   writeCompletionSignalFile,
   writeJobFile
 } from "./lib/state.mjs";
-import { readCurrentTurnIdentity } from "./lib/codex-progress.mjs";
+import { readCurrentTurnIdentity, resolveAuthoritativeStatus } from "./lib/codex-progress.mjs";
 import {
   buildSingleJobSnapshot,
   buildStatusSnapshot,
@@ -1341,12 +1341,14 @@ export async function handleAttach(argv, deps = {}) {
   let jobId;
   let logFile;
   let statusFile;
+  let statusStateDir;
   if (reference) {
     const snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
     workspaceRoot = snapshot.workspaceRoot;
     jobId = snapshot.job.id;
     // For a cross-workspace hit, read from the job's PHYSICAL state dir;
     // re-deriving from workspaceRoot can resolve to a different (missing) path.
+    statusStateDir = snapshot.stateDir ?? resolveStateDir(workspaceRoot);
     statusFile = snapshot.stateDir
       ? resolveJobFileInStateDir(snapshot.stateDir, jobId)
       : resolveJobFile(workspaceRoot, jobId);
@@ -1364,6 +1366,7 @@ export async function handleAttach(argv, deps = {}) {
     }
     jobId = active.id;
     logFile = active.logFile ?? resolveJobLogFile(workspaceRoot, jobId);
+    statusStateDir = resolveStateDir(workspaceRoot);
     statusFile = resolveJobFile(workspaceRoot, jobId);
   }
 
@@ -1373,7 +1376,11 @@ export async function handleAttach(argv, deps = {}) {
     deps.readStatus ??
     (() => {
       try {
-        return readJobFile(statusFile)?.status ?? null;
+        // R1: read the AUTHORITATIVE status (terminal.lock over a stale-running
+        // job.json), not raw job.json.status. A markJobRunning-vs-finalizeJob race
+        // can leave job.json "running" after a finalize won the lock; reading raw
+        // status would tail a finished job until maxPolls (~65 min).
+        return resolveAuthoritativeStatus(statusStateDir, jobId) ?? null;
       } catch {
         return null;
       }

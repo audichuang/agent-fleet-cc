@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.33
+
+Close the Phase 1A read-side gaps a 4-lens adversarial review found: the
+lock-as-authority overlay was wired into `listJobs` but not the readers that read
+`job.json` directly, so the markJobRunning-vs-finalizeJob window (the `.wlock`
+removal opened) could over-wait/over-tail a finished job. TDD; 8 regression tests;
+hermetic suite + real-engine smoke + completed happy-path all green.
+
+- **R1 (major)** — `/codex:attach` and `/codex:logs --follow` (`handleAttach`'s
+  `readStatus`) read raw `job.json.status`; now read through
+  `resolveAuthoritativeStatus` (terminal.lock over a stale job.json).
+- **R2 (minor)** — the cross-workspace lookup (`findJobByIdAcrossWorkspaces`) now
+  overlays the terminal.lock (mirrors `listJobs`), so `/codex:wait <foreign-id>`
+  no longer polls to timeout on a finished job.
+- **R3 (shared)** — `writeJsonAtomic`/`writeJob` gain `ensureDir:false`; the
+  reconcile lock-repair (shared + codex) writes with it + try/catch, so a dir a
+  concurrent prune deleted fails cleanly instead of being resurrected (TOCTOU).
+- **R4 (shared)** — new `sweepOrphanLockDirs` (called by `pruneJobs` + codex
+  `saveState`) reaps a lock-only zombie dir left by a prune that crashed between
+  the `job.json` and `terminal.lock` unlinks; in-flight dirs (no lock) untouched.
+
+Shared changes re-vendored into cc + codex.
+
 ## 1.0.32
 
 Phase 1A of the shared state-store migration (no behaviour change — every consumer + e2e

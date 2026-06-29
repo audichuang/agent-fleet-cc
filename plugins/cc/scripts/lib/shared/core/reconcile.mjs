@@ -96,6 +96,9 @@ export function reconcileDeadPids(stateDir, deps = {}) {
   // _hooks.beforeFreshRead(jobId) — 測試縫,在 lock-repair 分支 re-read JSON 之前
   // 注入競態(winner 完成寫入 / prune 刪 json),驗守衛能攔下這兩種情況。
   const beforeFreshRead = deps._hooks?.beforeFreshRead ?? (() => {});
+  // _hooks.afterFreshRead(jobId) — 測試縫,在 fresh-read 通過守衛「之後」、writeJob
+  // 「之前」注入 prune(刪整個 dir),驗 ensureDir:false 的寫入不會重建被 prune 的 dir(R3)。
+  const afterFreshRead = deps._hooks?.afterFreshRead ?? (() => {});
   const reconciled = [];
   for (const job of listJobs(stateDir)) {
     if (TERMINAL_STATUSES.has(job.status)) continue;
@@ -121,11 +124,22 @@ export function reconcileDeadPids(stateDir, deps = {}) {
       const fresh = readJob(stateDir, job.id);
       if (!fresh) continue; // half-prune race:json 已刪,勿復活
       if (TERMINAL_STATUSES.has(fresh.status)) continue; // winner 已補完,勿覆寫
-      writeJob(stateDir, {
-        ...fresh,
-        status: lock.status ?? "failed",
-        error: fresh.error ?? "finalizer died mid-transition (repaired from lock)",
-      });
+      afterFreshRead(job.id); // 測試縫:在守衛後、寫入前注入 prune(R3)
+      // R3:ensureDir:false — 若 prune 在 fresh-read 與寫入之間刪了 dir,寫入
+      // ENOENT 失敗而非重建目錄使死 job 復生。寫入失敗即放棄修復(下次 reconcile 再試)。
+      try {
+        writeJob(
+          stateDir,
+          {
+            ...fresh,
+            status: lock.status ?? "failed",
+            error: fresh.error ?? "finalizer died mid-transition (repaired from lock)",
+          },
+          { ensureDir: false },
+        );
+      } catch {
+        continue; // dir pruned mid-repair — do not resurrect
+      }
       reconciled.push(job.id);
       continue;
     }

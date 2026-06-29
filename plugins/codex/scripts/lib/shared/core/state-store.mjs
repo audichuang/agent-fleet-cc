@@ -25,8 +25,11 @@ export function lockFilePath(stateDir, jobId) {
   return path.join(jobDir(stateDir, jobId), "terminal.lock");
 }
 
-export function writeJsonAtomic(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+// ensureDir:false skips the recursive mkdir, so a write whose parent dir was
+// deleted (a concurrent prune) fails with ENOENT instead of RESURRECTING the dir.
+// Used by the reconcile lock-repair, the one writer that can race a prune (R3).
+export function writeJsonAtomic(file, value, { ensureDir = true } = {}) {
+  if (ensureDir) fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.tmp-${crypto.randomBytes(4).toString("hex")}`;
   // 0600/0700:job 目錄含 prompt/result/log — 一律 owner-only。
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
@@ -42,11 +45,15 @@ export function createJob(stateDir, record, prompt) {
   return record;
 }
 
-export function writeJob(stateDir, job) {
-  writeJsonAtomic(jobFilePath(stateDir, job.id), {
-    ...job,
-    updatedAt: new Date().toISOString(),
-  });
+export function writeJob(stateDir, job, options = {}) {
+  writeJsonAtomic(
+    jobFilePath(stateDir, job.id),
+    {
+      ...job,
+      updatedAt: new Date().toISOString(),
+    },
+    options,
+  );
 }
 
 export function readJob(stateDir, jobId) {
@@ -179,7 +186,36 @@ export function markJobRunning(stateDir, jobId, patch = {}, hooks = {}) {
 // _hooks 是測試縫:onUnlink(filePath) 在每次 unlinkSync 之前呼叫,
 // 讓測試能觀察並斷言 unlink 順序(json 先於 lock)是 load-bearing 不變量。
 // 生產路徑不傳 _hooks,行為與原始實作完全相同。
+// R4: reap "zombie" job dirs left by a prune that crashed between unlinking
+// job.json and rmSync(dir) — such a dir holds a terminal.lock (a complete claim)
+// but no job.json, so listJobs/readJob skip it and no recovery path ever reaps it.
+// A dir with a terminal.lock and NO job.json can only be prune debris: createJob
+// writes job.json before any work begins, and finalizeJob refuses to claim the
+// lock unless job.json already exists — so the in-flight "prompt.txt but no
+// job.json" window never carries a lock and is left untouched.
+export function sweepOrphanLockDirs(stateDir) {
+  let names;
+  try {
+    names = fs.readdirSync(jobsRoot(stateDir));
+  } catch {
+    return; // no jobs root yet — nothing to sweep
+  }
+  for (const name of names) {
+    try {
+      if (
+        !fs.existsSync(jobFilePath(stateDir, name)) &&
+        fs.existsSync(lockFilePath(stateDir, name))
+      ) {
+        fs.rmSync(jobDir(stateDir, name), { recursive: true, force: true });
+      }
+    } catch {
+      // best effort — a racing writer may recreate; the next sweep catches it.
+    }
+  }
+}
+
 export function pruneJobs(stateDir, { max = 50 } = {}, _hooks = {}) {
+  sweepOrphanLockDirs(stateDir);
   const jobs = listJobs(stateDir);
   const activeCount = jobs.filter((j) => ACTIVE_STATUSES.has(j.status)).length;
   const terminal = jobs

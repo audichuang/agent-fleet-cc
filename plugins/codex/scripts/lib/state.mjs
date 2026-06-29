@@ -12,6 +12,7 @@ import {
   readJob,
   readTerminalLock,
   writeJob,
+  sweepOrphanLockDirs,
 } from "./shared/core/state-store.mjs";
 import { isClaimOrphaned } from "./shared/core/reconcile.mjs";
 
@@ -197,6 +198,10 @@ export function saveState(cwd, state, { removedJobs = [] } = {}) {
   // rebuilt on every write. Eliminating the lost update would need a
   // workspace-level lock (deliberately out of scope here).
   atomicWriteFileSync(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`);
+  // R4: reap any lock-only zombie dir left by a delete above (or a prior saveState)
+  // that crashed between the job.json unlink and the dir rmSync. Targeted deletes
+  // never rescan the jobs root, so without this such a dir leaks forever.
+  sweepOrphanLockDirs(resolveStateDir(cwd));
   return nextState;
 }
 
@@ -586,7 +591,11 @@ export function findJobByIdAcrossWorkspaces(cwd, jobId, options = {}) {
         continue;
       }
       if (job && job.id === jobId) {
-        return { job, workspaceStateDir };
+        // R2: overlay the authoritative terminal.lock (mirror listJobs) so a
+        // cross-workspace reader never sees a stale-"running" record that a
+        // finalize already superseded — else /codex:wait <foreign-id> polls
+        // until timeout on a job that actually finished.
+        return { job: overlayTerminalLock(workspaceStateDir, job), workspaceStateDir };
       }
     }
   }
