@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { isProcessAlive } from "./process.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
+import { listJobs as sharedListJobs } from "./shared/core/state-store.mjs";
 
 const STATE_VERSION = 1;
 const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
@@ -663,7 +664,14 @@ function reconcileDeadPidJobs(cwd, jobs) {
 }
 
 export function listJobs(cwd) {
-  return reconcileDeadPidJobs(cwd, loadState(cwd).jobs);
+  // Directory-per-job is the source of truth: scan jobs/<id>/job.json (shared
+  // listJobs skips empty dirs / unreadable records) instead of the legacy
+  // state.json index. Shared listJobs sorts by createdAt; codex consumers expect
+  // newest-by-updatedAt (sortJobsNewestFirst semantics), so re-sort here (must-fix).
+  const jobs = sharedListJobs(resolveStateDir(cwd)).sort((a, b) =>
+    String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")),
+  );
+  return reconcileDeadPidJobs(cwd, jobs);
 }
 
 // True when the workspace has at least one still-active background job. Used to

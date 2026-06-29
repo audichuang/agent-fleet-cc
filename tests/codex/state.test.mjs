@@ -447,33 +447,28 @@ test("listJobs leaves running jobs alone when the tracked pid is alive", () => {
   assert.equal(job.pid, process.pid);
 });
 
-test("listJobs reconciliation TOCTOU guard: skips when persisted state already moved past active", () => {
+test("listJobs reconciliation: a terminal per-job record is never downgraded, even carrying a dead pid", () => {
   const workspace = makeTempDir();
   const deadPid = 2147483644;
 
-  // Seed the state.json index with status:"running" but write the per-job file
-  // as status:"completed". This simulates a race where the job completed
-  // legitimately between the listJobs read and the reconcile write.
+  // Single source of truth = the per-job file. A record that already reached a
+  // terminal status must never be reconciled to "failed", even if it still carries
+  // a (now-dead) pid: the dead-PID reconciler only considers ACTIVE (queued/running)
+  // records, so the status gate must come before the pid check.
   const completedJob = {
     id: "task-race-completed",
     status: "completed",
     phase: "done",
-    pid: null,
+    pid: deadPid,
     logFile: resolveJobLogFile(workspace, "task-race-completed"),
     createdAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:01:00.000Z"
   };
   writeJobFile(workspace, completedJob.id, completedJob);
-  saveState(workspace, {
-    version: 1,
-    config: { stopReviewGate: false },
-    jobs: [{ ...completedJob, status: "running", pid: deadPid }]
-  });
 
   const [job] = listJobs(workspace);
-  // Reconciler must NOT downgrade the persisted "completed" record.
-  assert.equal(job.status, "running"); // state.json index still shows running (reconcile saw dead PID but skipped)
+  assert.equal(job.status, "completed"); // not downgraded
   const persisted = JSON.parse(fs.readFileSync(resolveJobFile(workspace, completedJob.id), "utf8"));
   assert.equal(persisted.status, "completed"); // per-job file preserved
   assert.equal(persisted.autoReconciled, undefined);
@@ -503,32 +498,38 @@ test("listJobs reconciles dead-PID queued jobs so a crashed background launcher 
   assert.equal(reconciled.reconciledDeadPid, deadPid);
 });
 
-test("listJobs reconciliation PID-identity guard: skips when persisted pid no longer matches", () => {
+test("reconcile PID-identity defense: a terminal write is rejected when the per-job pid drifts", () => {
+  // The dead-PID reconciler passes an extraGuard `stored.pid === <observed dead pid>`
+  // to applyJobPatchIfActive so a job RE-SPAWNED with a new pid between the listJobs
+  // scan and the reconcile write is never wrongly failed (a cross-process race;
+  // under single-source dir-scan the scan and write read the same file, so this guard
+  // is exercised at the mechanism level here). When the stored pid no longer matches
+  // the observed-dead pid, the guard fails and NO terminal write lands.
   const workspace = makeTempDir();
-  const deadPidObservedByIndex = 2147483643;
-  const differentPidInFile = 55555;
+  const observedDeadPid = 2147483643;
+  const respawnedPid = process.pid; // the per-job was relaunched with a live, different pid
 
   const job = {
     id: "task-pid-drift",
     status: "running",
     phase: "investigating",
-    pid: differentPidInFile,
+    pid: respawnedPid,
     logFile: resolveJobLogFile(workspace, "task-pid-drift"),
     createdAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z"
   };
   writeJobFile(workspace, job.id, job);
-  saveState(workspace, {
-    version: 1,
-    config: { stopReviewGate: false },
-    jobs: [{ ...job, pid: deadPidObservedByIndex }]
-  });
 
-  listJobs(workspace);
+  const result = applyJobPatchIfActive(
+    workspace,
+    job.id,
+    () => ({ status: "failed", autoReconciled: true }),
+    (stored) => stored.pid === observedDeadPid // pid drifted -> guard fails
+  );
 
+  assert.equal(result.applied, false);
   const persisted = JSON.parse(fs.readFileSync(resolveJobFile(workspace, job.id), "utf8"));
-  // Per-job file pid disagrees with the dead-pid candidate, so reconcile skipped.
   assert.equal(persisted.status, "running");
   assert.equal(persisted.autoReconciled, undefined);
 });

@@ -382,44 +382,50 @@ test("task-resume-candidate returns the latest rescue thread from the current se
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
+  const resumeJobs = [
+    {
+      id: "task-current",
+      status: "completed",
+      title: "Codex Task",
+      jobClass: "task",
+      sessionId: "sess-current",
+      threadId: "thr_current",
+      summary: "Investigate the flaky test",
+      updatedAt: "2026-03-24T20:00:00.000Z"
+    },
+    {
+      id: "task-other-session",
+      status: "completed",
+      title: "Codex Task",
+      jobClass: "task",
+      sessionId: "sess-other",
+      threadId: "thr_other",
+      summary: "Old rescue run",
+      updatedAt: "2026-03-24T20:05:00.000Z"
+    },
+    {
+      id: "review-current",
+      status: "completed",
+      title: "Codex Review",
+      jobClass: "review",
+      sessionId: "sess-current",
+      threadId: "thr_review",
+      summary: "Review main...HEAD",
+      updatedAt: "2026-03-24T20:10:00.000Z"
+    }
+  ];
+  for (const job of resumeJobs) {
+    fs.mkdirSync(path.join(jobsDir, job.id), { recursive: true });
+    fs.writeFileSync(path.join(jobsDir, job.id, "job.json"), JSON.stringify(job, null, 2), "utf8");
+  }
+
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
     `${JSON.stringify(
       {
         version: 1,
         config: { stopReviewGate: false },
-        jobs: [
-          {
-            id: "task-current",
-            status: "completed",
-            title: "Codex Task",
-            jobClass: "task",
-            sessionId: "sess-current",
-            threadId: "thr_current",
-            summary: "Investigate the flaky test",
-            updatedAt: "2026-03-24T20:00:00.000Z"
-          },
-          {
-            id: "task-other-session",
-            status: "completed",
-            title: "Codex Task",
-            jobClass: "task",
-            sessionId: "sess-other",
-            threadId: "thr_other",
-            summary: "Old rescue run",
-            updatedAt: "2026-03-24T20:05:00.000Z"
-          },
-          {
-            id: "review-current",
-            status: "completed",
-            title: "Codex Review",
-            jobClass: "review",
-            sessionId: "sess-current",
-            threadId: "thr_review",
-            summary: "Review main...HEAD",
-            updatedAt: "2026-03-24T20:10:00.000Z"
-          }
-        ]
+        jobs: resumeJobs
       },
       null,
       2
@@ -998,20 +1004,37 @@ test("status shows phases, hints, and the latest finished job", () => {
 
   fs.mkdirSync(path.join(jobsDir, "review-done"), { recursive: true });
   const finishedJobFile = path.join(jobsDir, "review-done", "job.json");
-  fs.writeFileSync(
-    finishedJobFile,
-    JSON.stringify(
-      {
-        id: "review-done",
-        status: "completed",
-        title: "Codex Review",
-        rendered: "# Codex Review\n\nReviewed uncommitted changes.\nNo material issues found.\n"
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+
+  const liveJob = {
+    id: "review-live",
+    kind: "review",
+    kindLabel: "review",
+    status: "running",
+    title: "Codex Review",
+    jobClass: "review",
+    phase: "reviewing",
+    threadId: "thr_1",
+    summary: "Review working tree diff",
+    logFile,
+    createdAt: "2026-03-18T15:30:00.000Z",
+    updatedAt: "2026-03-18T15:30:03.000Z"
+  };
+  const doneJob = {
+    id: "review-done",
+    status: "completed",
+    title: "Codex Review",
+    jobClass: "review",
+    threadId: "thr_done",
+    summary: "Review main...HEAD",
+    rendered: "# Codex Review\n\nReviewed uncommitted changes.\nNo material issues found.\n",
+    createdAt: "2026-03-18T15:10:00.000Z",
+    startedAt: "2026-03-18T15:10:05.000Z",
+    completedAt: "2026-03-18T15:11:10.000Z",
+    updatedAt: "2026-03-18T15:11:10.000Z"
+  };
+
+  fs.writeFileSync(path.join(jobsDir, "review-live", "job.json"), JSON.stringify(liveJob, null, 2), "utf8");
+  fs.writeFileSync(finishedJobFile, JSON.stringify(doneJob, null, 2), "utf8");
 
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
@@ -1019,34 +1042,7 @@ test("status shows phases, hints, and the latest finished job", () => {
       {
         version: 1,
         config: { stopReviewGate: false },
-        jobs: [
-          {
-            id: "review-live",
-            kind: "review",
-            kindLabel: "review",
-            status: "running",
-            title: "Codex Review",
-            jobClass: "review",
-            phase: "reviewing",
-            threadId: "thr_1",
-            summary: "Review working tree diff",
-            logFile,
-            createdAt: "2026-03-18T15:30:00.000Z",
-            updatedAt: "2026-03-18T15:30:03.000Z"
-          },
-          {
-            id: "review-done",
-            status: "completed",
-            title: "Codex Review",
-            jobClass: "review",
-            threadId: "thr_done",
-            summary: "Review main...HEAD",
-            createdAt: "2026-03-18T15:10:00.000Z",
-            startedAt: "2026-03-18T15:10:05.000Z",
-            completedAt: "2026-03-18T15:11:10.000Z",
-            updatedAt: "2026-03-18T15:11:10.000Z"
-          }
-        ]
+        jobs: [liveJob, doneJob]
       },
       null,
       2
@@ -1090,44 +1086,49 @@ test("status without a job id only shows jobs from the current Claude session", 
   fs.writeFileSync(currentLog, "[2026-03-18T15:30:00.000Z] Reviewer started: current changes\n", "utf8");
   fs.writeFileSync(otherLog, "[2026-03-18T15:31:00.000Z] Reviewer started: old changes\n", "utf8");
 
+  const sessionJobs = [
+    {
+      id: "review-current",
+      kind: "review",
+      kindLabel: "review",
+      status: "running",
+      title: "Codex Review",
+      jobClass: "review",
+      phase: "reviewing",
+      sessionId: "sess-current",
+      threadId: "thr_current",
+      summary: "Current session review",
+      logFile: currentLog,
+      createdAt: "2026-03-18T15:30:00.000Z",
+      updatedAt: "2026-03-18T15:30:00.000Z"
+    },
+    {
+      id: "review-other",
+      kind: "review",
+      kindLabel: "review",
+      status: "completed",
+      title: "Codex Review",
+      jobClass: "review",
+      sessionId: "sess-other",
+      threadId: "thr_other",
+      summary: "Previous session review",
+      createdAt: "2026-03-18T15:20:00.000Z",
+      startedAt: "2026-03-18T15:20:05.000Z",
+      completedAt: "2026-03-18T15:21:00.000Z",
+      updatedAt: "2026-03-18T15:21:00.000Z"
+    }
+  ];
+  for (const job of sessionJobs) {
+    fs.writeFileSync(path.join(jobsDir, job.id, "job.json"), JSON.stringify(job, null, 2), "utf8");
+  }
+
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
     `${JSON.stringify(
       {
         version: 1,
         config: { stopReviewGate: false },
-        jobs: [
-          {
-            id: "review-current",
-            kind: "review",
-            kindLabel: "review",
-            status: "running",
-            title: "Codex Review",
-            jobClass: "review",
-            phase: "reviewing",
-            sessionId: "sess-current",
-            threadId: "thr_current",
-            summary: "Current session review",
-            logFile: currentLog,
-            createdAt: "2026-03-18T15:30:00.000Z",
-            updatedAt: "2026-03-18T15:30:00.000Z"
-          },
-          {
-            id: "review-other",
-            kind: "review",
-            kindLabel: "review",
-            status: "completed",
-            title: "Codex Review",
-            jobClass: "review",
-            sessionId: "sess-other",
-            threadId: "thr_other",
-            summary: "Previous session review",
-            createdAt: "2026-03-18T15:20:00.000Z",
-            startedAt: "2026-03-18T15:20:05.000Z",
-            completedAt: "2026-03-18T15:21:00.000Z",
-            updatedAt: "2026-03-18T15:21:00.000Z"
-          }
-        ]
+        jobs: sessionJobs
       },
       null,
       2
@@ -1160,40 +1161,46 @@ test("status preserves adversarial review kind labels", () => {
   const logFile = path.join(jobsDir, "review-adv-live", "log");
   fs.writeFileSync(logFile, "[2026-03-18T15:30:00.000Z] Reviewer started: adversarial review\n", "utf8");
 
+  const advJobs = [
+    {
+      id: "review-adv-live",
+      kind: "adversarial-review",
+      status: "running",
+      title: "Codex Adversarial Review",
+      jobClass: "review",
+      phase: "reviewing",
+      threadId: "thr_adv_live",
+      summary: "Adversarial review current changes",
+      logFile,
+      createdAt: "2026-03-18T15:30:00.000Z",
+      updatedAt: "2026-03-18T15:30:00.000Z"
+    },
+    {
+      id: "review-adv",
+      kind: "adversarial-review",
+      status: "completed",
+      title: "Codex Adversarial Review",
+      jobClass: "review",
+      threadId: "thr_adv_done",
+      summary: "Adversarial review working tree diff",
+      createdAt: "2026-03-18T15:10:00.000Z",
+      startedAt: "2026-03-18T15:10:05.000Z",
+      completedAt: "2026-03-18T15:11:10.000Z",
+      updatedAt: "2026-03-18T15:11:10.000Z"
+    }
+  ];
+  for (const job of advJobs) {
+    fs.mkdirSync(path.join(jobsDir, job.id), { recursive: true });
+    fs.writeFileSync(path.join(jobsDir, job.id, "job.json"), JSON.stringify(job, null, 2), "utf8");
+  }
+
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
     `${JSON.stringify(
       {
         version: 1,
         config: { stopReviewGate: false },
-        jobs: [
-          {
-            id: "review-adv-live",
-            kind: "adversarial-review",
-            status: "running",
-            title: "Codex Adversarial Review",
-            jobClass: "review",
-            phase: "reviewing",
-            threadId: "thr_adv_live",
-            summary: "Adversarial review current changes",
-            logFile,
-            createdAt: "2026-03-18T15:30:00.000Z",
-            updatedAt: "2026-03-18T15:30:00.000Z"
-          },
-          {
-            id: "review-adv",
-            kind: "adversarial-review",
-            status: "completed",
-            title: "Codex Adversarial Review",
-            jobClass: "review",
-            threadId: "thr_adv_done",
-            summary: "Adversarial review working tree diff",
-            createdAt: "2026-03-18T15:10:00.000Z",
-            startedAt: "2026-03-18T15:10:05.000Z",
-            completedAt: "2026-03-18T15:11:10.000Z",
-            updatedAt: "2026-03-18T15:11:10.000Z"
-          }
-        ]
+        jobs: advJobs
       },
       null,
       2
@@ -1343,47 +1350,44 @@ test("result without a job id prefers the latest finished job from the current C
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
+  const currentJob = {
+    id: "review-current",
+    status: "completed",
+    title: "Codex Review",
+    jobClass: "review",
+    sessionId: "sess-current",
+    threadId: "thr_current",
+    summary: "Current session review",
+    result: {
+      codex: {
+        stdout: "Current session output."
+      }
+    },
+    createdAt: "2026-03-18T15:10:00.000Z",
+    updatedAt: "2026-03-18T15:11:00.000Z"
+  };
+  const otherJob = {
+    id: "review-other",
+    status: "completed",
+    title: "Codex Review",
+    jobClass: "review",
+    sessionId: "sess-other",
+    threadId: "thr_other",
+    summary: "Old session review",
+    result: {
+      codex: {
+        stdout: "Old session output."
+      }
+    },
+    createdAt: "2026-03-18T15:20:00.000Z",
+    updatedAt: "2026-03-18T15:21:00.000Z"
+  };
+
   fs.mkdirSync(path.join(jobsDir, "review-current"), { recursive: true });
-  fs.writeFileSync(
-    path.join(jobsDir, "review-current", "job.json"),
-    JSON.stringify(
-      {
-        id: "review-current",
-        status: "completed",
-        title: "Codex Review",
-        threadId: "thr_current",
-        result: {
-          codex: {
-            stdout: "Current session output."
-          }
-        }
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+  fs.writeFileSync(path.join(jobsDir, "review-current", "job.json"), JSON.stringify(currentJob, null, 2), "utf8");
 
   fs.mkdirSync(path.join(jobsDir, "review-other"), { recursive: true });
-  fs.writeFileSync(
-    path.join(jobsDir, "review-other", "job.json"),
-    JSON.stringify(
-      {
-        id: "review-other",
-        status: "completed",
-        title: "Codex Review",
-        threadId: "thr_other",
-        result: {
-          codex: {
-            stdout: "Old session output."
-          }
-        }
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+  fs.writeFileSync(path.join(jobsDir, "review-other", "job.json"), JSON.stringify(otherJob, null, 2), "utf8");
 
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
@@ -1391,30 +1395,7 @@ test("result without a job id prefers the latest finished job from the current C
       {
         version: 1,
         config: { stopReviewGate: false },
-        jobs: [
-          {
-            id: "review-current",
-            status: "completed",
-            title: "Codex Review",
-            jobClass: "review",
-            sessionId: "sess-current",
-            threadId: "thr_current",
-            summary: "Current session review",
-            createdAt: "2026-03-18T15:10:00.000Z",
-            updatedAt: "2026-03-18T15:11:00.000Z"
-          },
-          {
-            id: "review-other",
-            status: "completed",
-            title: "Codex Review",
-            jobClass: "review",
-            sessionId: "sess-other",
-            threadId: "thr_other",
-            summary: "Old session review",
-            createdAt: "2026-03-18T15:20:00.000Z",
-            updatedAt: "2026-03-18T15:21:00.000Z"
-          }
-        ]
+        jobs: [currentJob, otherJob]
       },
       null,
       2
@@ -1492,40 +1473,26 @@ test("cancel stops an active background job and marks it cancelled", async (t) =
   const logFile = path.join(jobsDir, "task-live", "log");
   const jobFile = path.join(jobsDir, "task-live", "job.json");
   fs.writeFileSync(logFile, "[2026-03-18T15:30:00.000Z] Starting Codex Task.\n", "utf8");
-  fs.writeFileSync(
-    jobFile,
-    JSON.stringify(
-      {
-        id: "task-live",
-        status: "running",
-        title: "Codex Task",
-        logFile
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+  const liveJob = {
+    id: "task-live",
+    status: "running",
+    title: "Codex Task",
+    jobClass: "task",
+    summary: "Investigate flaky test",
+    pid: sleeper.pid,
+    logFile,
+    createdAt: "2026-03-18T15:30:00.000Z",
+    startedAt: "2026-03-18T15:30:01.000Z",
+    updatedAt: "2026-03-18T15:30:02.000Z"
+  };
+  fs.writeFileSync(jobFile, JSON.stringify(liveJob, null, 2), "utf8");
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
     `${JSON.stringify(
       {
         version: 1,
         config: { stopReviewGate: false },
-        jobs: [
-          {
-            id: "task-live",
-            status: "running",
-            title: "Codex Task",
-            jobClass: "task",
-            summary: "Investigate flaky test",
-            pid: sleeper.pid,
-            logFile,
-            createdAt: "2026-03-18T15:30:00.000Z",
-            startedAt: "2026-03-18T15:30:01.000Z",
-            updatedAt: "2026-03-18T15:30:02.000Z"
-          }
-        ]
+        jobs: [liveJob]
       },
       null,
       2
@@ -1624,24 +1591,24 @@ test("cancel with a job id can still target an active job from another Claude se
   fs.mkdirSync(path.join(jobsDir, "task-other"), { recursive: true });
   const logFile = path.join(jobsDir, "task-other", "log");
   fs.writeFileSync(logFile, "", "utf8");
+  const otherJob = {
+    id: "task-other",
+    status: "running",
+    title: "Codex Task",
+    jobClass: "task",
+    sessionId: "sess-other",
+    summary: "Other session run",
+    updatedAt: "2026-03-24T20:05:00.000Z",
+    logFile
+  };
+  fs.writeFileSync(path.join(jobsDir, "task-other", "job.json"), JSON.stringify(otherJob, null, 2), "utf8");
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
     `${JSON.stringify(
       {
         version: 1,
         config: { stopReviewGate: false },
-        jobs: [
-          {
-            id: "task-other",
-            status: "running",
-            title: "Codex Task",
-            jobClass: "task",
-            sessionId: "sess-other",
-            summary: "Other session run",
-            updatedAt: "2026-03-24T20:05:00.000Z",
-            logFile
-          }
-        ]
+        jobs: [otherJob]
       },
       null,
       2
@@ -1924,6 +1891,18 @@ test("stop hook logs running tasks to stderr without blocking when the review ga
   const runningLog = path.join(jobsDir, "task-live", "log");
   fs.writeFileSync(runningLog, "running\n", "utf8");
 
+  const liveJob = {
+    id: "task-live",
+    status: "running",
+    title: "Codex Task",
+    jobClass: "task",
+    sessionId: "sess-current",
+    logFile: runningLog,
+    createdAt: "2026-03-18T15:32:00.000Z",
+    updatedAt: "2026-03-18T15:33:00.000Z"
+  };
+  fs.writeFileSync(path.join(jobsDir, "task-live", "job.json"), JSON.stringify(liveJob, null, 2), "utf8");
+
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
     `${JSON.stringify(
@@ -1932,18 +1911,7 @@ test("stop hook logs running tasks to stderr without blocking when the review ga
         config: {
           stopReviewGate: false
         },
-        jobs: [
-          {
-            id: "task-live",
-            status: "running",
-            title: "Codex Task",
-            jobClass: "task",
-            sessionId: "sess-current",
-            logFile: runningLog,
-            createdAt: "2026-03-18T15:32:00.000Z",
-            updatedAt: "2026-03-18T15:33:00.000Z"
-          }
-        ]
+        jobs: [liveJob]
       },
       null,
       2
