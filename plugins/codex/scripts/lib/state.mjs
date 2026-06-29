@@ -82,6 +82,21 @@ export function ensureStateDir(cwd) {
   fs.mkdirSync(resolveJobsDir(cwd), { recursive: true });
 }
 
+// Directory-per-job layout (Phase 1A / 1a): every job owns a directory
+// jobs/<id>/ holding job.json, log, done.json, terminal.lock, write.lock — the
+// shared directory-per-job store's shape (shared/lib/core/state-store.mjs). The
+// path helpers below resolve into this dir and ensure it exists (mirroring the
+// pre-migration helpers that ensured jobs/).
+function jobDirPath(cwd, jobId) {
+  return path.join(resolveJobsDir(cwd), jobId);
+}
+
+function ensureJobDir(cwd, jobId) {
+  const dir = jobDirPath(cwd, jobId);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 export function loadState(cwd) {
   const stateFile = resolveStateFile(cwd);
   if (!fs.existsSync(stateFile)) {
@@ -121,12 +136,6 @@ function pruneJobs(jobs) {
   return [...active, ...terminal.slice(0, terminalBudget)];
 }
 
-function removeFileIfExists(filePath) {
-  if (filePath && fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
-}
-
 export function saveState(cwd, state, { removedJobs = [] } = {}) {
   ensureStateDir(cwd);
   const callerJobs = state.jobs ?? [];
@@ -154,11 +163,22 @@ export function saveState(cwd, state, { removedJobs = [] } = {}) {
       continue;
     }
     deletedIds.add(job.id);
-    removeJobFile(resolveJobFile(cwd, job.id));
-    removeFileIfExists(job.logFile);
-    removeFileIfExists(resolveJobDoneFile(cwd, job.id));
-    removeFileIfExists(resolveJobLockFile(cwd, job.id));
-    removeFileIfExists(resolveJobWriteLockFile(cwd, job.id));
+    // Directory-per-job deletion. Preserve the shared store's load-bearing unlink
+    // ORDER (job.json before terminal.lock): a concurrent finalize claims the lock
+    // then re-reads job.json to detect a prune, so job.json MUST disappear first or
+    // a stale finalizer could resurrect a pruned job (see shared pruneJobs). Use
+    // pure jobDirPath joins (NOT the resolve* helpers, which mkdir) so we never
+    // recreate the dir we are deleting; rmSync sweeps any leftovers (prompt.txt,
+    // events.ndjson) and the now-empty dir.
+    const dir = jobDirPath(cwd, job.id);
+    for (const name of ["job.json", "log", "done.json", "terminal.lock", "write.lock"]) {
+      try {
+        fs.unlinkSync(path.join(dir, name));
+      } catch {
+        // already gone — best effort
+      }
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 
   // Atomic write so a concurrent reader never sees a torn index. NOTE: this does
@@ -680,20 +700,12 @@ export function readJobFile(jobFile) {
   return JSON.parse(fs.readFileSync(jobFile, "utf8"));
 }
 
-function removeJobFile(jobFile) {
-  if (fs.existsSync(jobFile)) {
-    fs.unlinkSync(jobFile);
-  }
-}
-
 export function resolveJobLogFile(cwd, jobId) {
-  ensureStateDir(cwd);
-  return path.join(resolveJobsDir(cwd), `${jobId}.log`);
+  return path.join(ensureJobDir(cwd, jobId), "log");
 }
 
 export function resolveJobFile(cwd, jobId) {
-  ensureStateDir(cwd);
-  return path.join(resolveJobsDir(cwd), `${jobId}.json`);
+  return path.join(ensureJobDir(cwd, jobId), "job.json");
 }
 
 // Resolve a per-job file from an ALREADY-KNOWN physical state dir, without
@@ -701,7 +713,7 @@ export function resolveJobFile(cwd, jobId) {
 // workspaces (its physical dir may not match the slug-hash a re-derivation
 // from job.workspaceRoot under the current CLAUDE_PLUGIN_DATA would produce).
 export function resolveJobFileInStateDir(stateDir, jobId) {
-  return path.join(stateDir, JOBS_DIR_NAME, `${jobId}.json`);
+  return path.join(stateDir, JOBS_DIR_NAME, jobId, "job.json");
 }
 
 // All plausible state-root directories whose per-workspace subdirs may hold jobs:
@@ -761,7 +773,7 @@ export function findJobByIdAcrossWorkspaces(cwd, jobId, options = {}) {
         continue;
       }
       const workspaceStateDir = path.join(stateRoot, entry.name);
-      const jobFile = path.join(workspaceStateDir, JOBS_DIR_NAME, `${jobId}.json`);
+      const jobFile = path.join(workspaceStateDir, JOBS_DIR_NAME, jobId, "job.json");
       let job = null;
       try {
         job = readJobFile(jobFile); // throws ENOENT when absent, or on malformed JSON
@@ -777,15 +789,13 @@ export function findJobByIdAcrossWorkspaces(cwd, jobId, options = {}) {
 }
 
 export function resolveJobDoneFile(cwd, jobId) {
-  ensureStateDir(cwd);
-  return path.join(resolveJobsDir(cwd), `${jobId}.done`);
+  return path.join(ensureJobDir(cwd, jobId), "done.json");
 }
 
 // One-shot terminal-claim marker for a job (see claimTerminalTransition). Its
 // atomic O_EXCL creation is the cross-process "first terminal writer wins" gate.
 export function resolveJobLockFile(cwd, jobId) {
-  ensureStateDir(cwd);
-  return path.join(resolveJobsDir(cwd), `${jobId}.lock`);
+  return path.join(ensureJobDir(cwd, jobId), "terminal.lock");
 }
 
 // Short-lived per-job write mutex (see withJobWriteLock). Distinct from the
@@ -793,8 +803,7 @@ export function resolveJobLockFile(cwd, jobId) {
 // read-check-write in applyJobPatchIfActive, by progress AND terminal writers
 // alike, so the two cannot interleave (B3).
 export function resolveJobWriteLockFile(cwd, jobId) {
-  ensureStateDir(cwd);
-  return path.join(resolveJobsDir(cwd), `${jobId}.wlock`);
+  return path.join(ensureJobDir(cwd, jobId), "write.lock");
 }
 
 /**

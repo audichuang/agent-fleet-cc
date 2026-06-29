@@ -983,7 +983,8 @@ test("status shows phases, hints, and the latest finished job", () => {
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const logFile = path.join(jobsDir, "review-live.log");
+  fs.mkdirSync(path.join(jobsDir, "review-live"), { recursive: true });
+  const logFile = path.join(jobsDir, "review-live", "log");
   fs.writeFileSync(
     logFile,
     [
@@ -995,7 +996,8 @@ test("status shows phases, hints, and the latest finished job", () => {
     "utf8"
   );
 
-  const finishedJobFile = path.join(jobsDir, "review-done.json");
+  fs.mkdirSync(path.join(jobsDir, "review-done"), { recursive: true });
+  const finishedJobFile = path.join(jobsDir, "review-done", "job.json");
   fs.writeFileSync(
     finishedJobFile,
     JSON.stringify(
@@ -1081,8 +1083,10 @@ test("status without a job id only shows jobs from the current Claude session", 
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const currentLog = path.join(jobsDir, "review-current.log");
-  const otherLog = path.join(jobsDir, "review-other.log");
+  fs.mkdirSync(path.join(jobsDir, "review-current"), { recursive: true });
+  fs.mkdirSync(path.join(jobsDir, "review-other"), { recursive: true });
+  const currentLog = path.join(jobsDir, "review-current", "log");
+  const otherLog = path.join(jobsDir, "review-other", "log");
   fs.writeFileSync(currentLog, "[2026-03-18T15:30:00.000Z] Reviewer started: current changes\n", "utf8");
   fs.writeFileSync(otherLog, "[2026-03-18T15:31:00.000Z] Reviewer started: old changes\n", "utf8");
 
@@ -1152,7 +1156,8 @@ test("status preserves adversarial review kind labels", () => {
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const logFile = path.join(jobsDir, "review-adv.log");
+  fs.mkdirSync(path.join(jobsDir, "review-adv-live"), { recursive: true });
+  const logFile = path.join(jobsDir, "review-adv-live", "log");
   fs.writeFileSync(logFile, "[2026-03-18T15:30:00.000Z] Reviewer started: adversarial review\n", "utf8");
 
   fs.writeFileSync(
@@ -1213,10 +1218,11 @@ test("status --wait times out cleanly when a job is still active", () => {
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const logFile = path.join(jobsDir, "task-live.log");
+  fs.mkdirSync(path.join(jobsDir, "task-live"), { recursive: true });
+  const logFile = path.join(jobsDir, "task-live", "log");
   fs.writeFileSync(logFile, "[2026-03-18T15:30:00.000Z] Starting Codex Task.\n", "utf8");
   fs.writeFileSync(
-    path.join(jobsDir, "task-live.json"),
+    path.join(jobsDir, "task-live", "job.json"),
     JSON.stringify(
       {
         id: "task-live",
@@ -1273,8 +1279,9 @@ test("result returns the stored output for the latest finished job by default", 
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
+  fs.mkdirSync(path.join(jobsDir, "review-finished"), { recursive: true });
   fs.writeFileSync(
-    path.join(jobsDir, "review-finished.json"),
+    path.join(jobsDir, "review-finished", "job.json"),
     JSON.stringify(
       {
         id: "review-finished",
@@ -1336,8 +1343,9 @@ test("result without a job id prefers the latest finished job from the current C
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
+  fs.mkdirSync(path.join(jobsDir, "review-current"), { recursive: true });
   fs.writeFileSync(
-    path.join(jobsDir, "review-current.json"),
+    path.join(jobsDir, "review-current", "job.json"),
     JSON.stringify(
       {
         id: "review-current",
@@ -1356,8 +1364,9 @@ test("result without a job id prefers the latest finished job from the current C
     "utf8"
   );
 
+  fs.mkdirSync(path.join(jobsDir, "review-other"), { recursive: true });
   fs.writeFileSync(
-    path.join(jobsDir, "review-other.json"),
+    path.join(jobsDir, "review-other", "job.json"),
     JSON.stringify(
       {
         id: "review-other",
@@ -1479,8 +1488,9 @@ test("cancel stops an active background job and marks it cancelled", async (t) =
     }
   });
 
-  const logFile = path.join(jobsDir, "task-live.log");
-  const jobFile = path.join(jobsDir, "task-live.json");
+  fs.mkdirSync(path.join(jobsDir, "task-live"), { recursive: true });
+  const logFile = path.join(jobsDir, "task-live", "log");
+  const jobFile = path.join(jobsDir, "task-live", "job.json");
   fs.writeFileSync(logFile, "[2026-03-18T15:30:00.000Z] Starting Codex Task.\n", "utf8");
   fs.writeFileSync(
     jobFile,
@@ -1555,7 +1565,8 @@ test("cancel without a job id ignores active jobs from other Claude sessions", (
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const logFile = path.join(jobsDir, "task-other.log");
+  fs.mkdirSync(path.join(jobsDir, "task-other"), { recursive: true });
+  const logFile = path.join(jobsDir, "task-other", "log");
   fs.writeFileSync(logFile, "", "utf8");
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
@@ -1610,7 +1621,8 @@ test("cancel with a job id can still target an active job from another Claude se
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const logFile = path.join(jobsDir, "task-other.log");
+  fs.mkdirSync(path.join(jobsDir, "task-other"), { recursive: true });
+  const logFile = path.join(jobsDir, "task-other", "log");
   fs.writeFileSync(logFile, "", "utf8");
   fs.writeFileSync(
     path.join(stateDir, "state.json"),
@@ -1727,12 +1739,15 @@ test("session end fully cleans up jobs for the ending session", async (t) => {
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const completedLog = path.join(jobsDir, "completed.log");
-  const runningLog = path.join(jobsDir, "running.log");
-  const otherSessionLog = path.join(jobsDir, "other.log");
-  const completedJobFile = path.join(jobsDir, "review-completed.json");
-  const runningJobFile = path.join(jobsDir, "review-running.json");
-  const otherJobFile = path.join(jobsDir, "review-other.json");
+  fs.mkdirSync(path.join(jobsDir, "review-completed"), { recursive: true });
+  fs.mkdirSync(path.join(jobsDir, "review-running"), { recursive: true });
+  fs.mkdirSync(path.join(jobsDir, "review-other"), { recursive: true });
+  const completedLog = path.join(jobsDir, "review-completed", "log");
+  const runningLog = path.join(jobsDir, "review-running", "log");
+  const otherSessionLog = path.join(jobsDir, "review-other", "log");
+  const completedJobFile = path.join(jobsDir, "review-completed", "job.json");
+  const runningJobFile = path.join(jobsDir, "review-running", "job.json");
+  const otherJobFile = path.join(jobsDir, "review-other", "job.json");
   fs.writeFileSync(completedLog, "completed\n", "utf8");
   fs.writeFileSync(runningLog, "running\n", "utf8");
   fs.writeFileSync(otherSessionLog, "other\n", "utf8");
@@ -1905,7 +1920,8 @@ test("stop hook logs running tasks to stderr without blocking when the review ga
   const jobsDir = path.join(stateDir, "jobs");
   fs.mkdirSync(jobsDir, { recursive: true });
 
-  const runningLog = path.join(jobsDir, "task-running.log");
+  fs.mkdirSync(path.join(jobsDir, "task-live"), { recursive: true });
+  const runningLog = path.join(jobsDir, "task-live", "log");
   fs.writeFileSync(runningLog, "running\n", "utf8");
 
   fs.writeFileSync(

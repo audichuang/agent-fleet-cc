@@ -96,8 +96,9 @@ test("handleAttach observes the terminal status of a cross-workspace job via its
   const stateRoot = path.join(process.env.CLAUDE_PLUGIN_DATA, "state");
   const physicalDir = path.join(stateRoot, "projF-1234567890abcdef"); // name != re-derived slug-hash
   const jobsDir = path.join(physicalDir, "jobs");
-  fs.mkdirSync(jobsDir, { recursive: true });
-  const logFile = path.join(physicalDir, "task-xross.log");
+  const jobDir = path.join(jobsDir, "task-xross");
+  fs.mkdirSync(jobDir, { recursive: true });
+  const logFile = path.join(jobDir, "log");
   fs.writeFileSync(logFile, "[12:00:00] cross-workspace log line\n");
   const job = {
     id: "task-xross",
@@ -109,7 +110,7 @@ test("handleAttach observes the terminal status of a cross-workspace job via its
     updatedAt: "2026-01-01T00:00:00.000Z",
     completedAt: "2026-01-01T00:01:00.000Z"
   };
-  fs.writeFileSync(path.join(jobsDir, "task-xross.json"), JSON.stringify(job));
+  fs.writeFileSync(path.join(jobDir, "job.json"), JSON.stringify(job));
 
   const out = [];
   const status = await handleAttach(["task-xross", "--cwd", makeTempDir()], {

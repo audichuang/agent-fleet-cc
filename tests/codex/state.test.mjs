@@ -13,6 +13,7 @@ import {
   resolveJobFile,
   resolveJobLockFile,
   resolveJobLogFile,
+  resolveJobsDir,
   resolveStateDir,
   resolveStateFile,
   resolveJobWriteLockFile,
@@ -276,11 +277,9 @@ test("saveState prunes dropped job artifacts when indexed jobs exceed the cap", 
     jobs
   });
 
-  const prunedJobFile = resolveJobFile(workspace, "job-0");
-  const prunedLogFile = resolveJobLogFile(workspace, "job-0");
   const retainedJobFile = resolveJobFile(workspace, "job-50");
   const retainedLogFile = resolveJobLogFile(workspace, "job-50");
-  const jobsDir = path.dirname(prunedJobFile);
+  const jobsDir = resolveJobsDir(workspace);
 
   assert.equal(fs.existsSync(retainedJobFile), true);
   assert.equal(fs.existsSync(retainedLogFile), true);
@@ -291,11 +290,10 @@ test("saveState prunes dropped job artifacts when indexed jobs exceed the cap", 
     savedState.jobs.map((job) => job.id),
     Array.from({ length: 50 }, (_, index) => `job-${50 - index}`)
   );
+  // Directory-per-job layout: jobs/ holds one directory per retained job.
   assert.deepEqual(
     fs.readdirSync(jobsDir).sort(),
-    Array.from({ length: 50 }, (_, index) => `job-${index + 1}`)
-      .flatMap((jobId) => [`${jobId}.json`, `${jobId}.log`])
-      .sort()
+    Array.from({ length: 50 }, (_, index) => `job-${index + 1}`).sort()
   );
 });
 

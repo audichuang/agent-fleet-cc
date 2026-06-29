@@ -1355,12 +1355,15 @@ export async function handleAttach(argv, deps = {}) {
     const snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
     workspaceRoot = snapshot.workspaceRoot;
     jobId = snapshot.job.id;
-    logFile = snapshot.job.logFile ?? resolveJobLogFile(workspaceRoot, jobId);
-    // For a cross-workspace hit, read status from the job's PHYSICAL state dir;
+    // For a cross-workspace hit, read from the job's PHYSICAL state dir;
     // re-deriving from workspaceRoot can resolve to a different (missing) path.
     statusFile = snapshot.stateDir
       ? resolveJobFileInStateDir(snapshot.stateDir, jobId)
       : resolveJobFile(workspaceRoot, jobId);
+    // Derive the log from the SAME per-job dir as the resolved job.json (a pure
+    // join, no mkdir) so a record missing logFile never re-derives a wrong dir
+    // under the current workspace root (directory-per-job: log sits beside job.json).
+    logFile = snapshot.job.logFile ?? path.join(path.dirname(statusFile), "log");
   } else {
     workspaceRoot = resolveCommandWorkspace(options);
     const active = sortJobsNewestFirst(listJobs(workspaceRoot)).find(
