@@ -3,17 +3,27 @@ import path from "node:path";
 
 import { isProbablyText } from "./fs.mjs";
 import { formatCommandFailure, runCommand, runCommandChecked } from "./process.mjs";
+import { sanitizeGitEnv } from "./worktree-guard.mjs";
 
 const MAX_UNTRACKED_BYTES = 24 * 1024;
 const DEFAULT_INLINE_DIFF_MAX_FILES = 2;
 const DEFAULT_INLINE_DIFF_MAX_BYTES = 256 * 1024;
 
+// Every git invocation in the plugin targets an explicit `cwd`, so it must discover the
+// repo FROM that cwd — never from an inherited GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR. A
+// foreign GIT_* (e.g. leaked from the dispatching shell) would otherwise re-point
+// workspace/state/resume resolution at the wrong repo, regardless of the worktree guard's
+// ordering. Sanitizing the env here, at the single git chokepoint, closes that class.
+function gitEnv(options) {
+  return sanitizeGitEnv(options.env ?? process.env);
+}
+
 function git(cwd, args, options = {}) {
-  return runCommand("git", args, { cwd, ...options });
+  return runCommand("git", args, { cwd, ...options, env: gitEnv(options) });
 }
 
 function gitChecked(cwd, args, options = {}) {
-  return runCommandChecked("git", args, { cwd, ...options });
+  return runCommandChecked("git", args, { cwd, ...options, env: gitEnv(options) });
 }
 
 function listUniqueFiles(...groups) {

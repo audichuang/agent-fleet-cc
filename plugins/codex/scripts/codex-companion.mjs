@@ -58,6 +58,7 @@ import {
   createProgressReporter,
   indexedTerminalStatus,
   nowIso,
+  resolveJobTimeoutMs,
   runTrackedJob,
   SESSION_ID_ENV
 } from "./lib/tracked-jobs.mjs";
@@ -750,19 +751,22 @@ function spawnDetachedTaskWorker(cwd, jobId, logFile = null, deps = {}) {
     }
   }
 
-  const child = spawnImpl(process.execPath, [scriptPath, "task-worker", "--cwd", cwd, "--job-id", jobId], {
-    cwd,
-    env: process.env,
-    detached: true,
-    stdio: ["ignore", "ignore", stderrTarget],
-    windowsHide: true
-  });
-
-  if (logFd !== null) {
-    try {
-      closeLog(logFd); // the child inherited the fd; the parent no longer needs its copy
-    } catch {
-      // already closed / never opened
+  let child;
+  try {
+    child = spawnImpl(process.execPath, [scriptPath, "task-worker", "--cwd", cwd, "--job-id", jobId], {
+      cwd,
+      env: process.env,
+      detached: true,
+      stdio: ["ignore", "ignore", stderrTarget],
+      windowsHide: true
+    });
+  } finally {
+    if (logFd !== null) {
+      try {
+        closeLog(logFd); // the child inherited the fd; the parent no longer needs its copy
+      } catch {
+        // already closed / never opened
+      }
     }
   }
 
@@ -770,15 +774,49 @@ function spawnDetachedTaskWorker(cwd, jobId, logFile = null, deps = {}) {
   return child;
 }
 
-function spawnWatchdog(cwd, jobId) {
+function spawnWatchdog(cwd, jobId, logFile = null, deps = {}) {
+  const spawnImpl = deps.spawnImpl ?? spawn;
+  const openLog = deps.openLog ?? ((p) => fs.openSync(p, "a"));
+  const closeLog = deps.closeLog ?? ((fd) => fs.closeSync(fd));
   const scriptPath = path.join(ROOT_DIR, "scripts", "codex-watchdog.mjs");
-  const child = spawn(process.execPath, [scriptPath, "--cwd", cwd, "--job", jobId], {
-    cwd,
-    env: process.env,
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true
-  });
+
+  // Route the detached watchdog's stderr into the job log, mirroring the worker: the
+  // watchdog is the sole actor that recovers a hung/dead background turn, so a crash
+  // stack or diagnostic from it is exactly the forensics we want preserved rather than
+  // sent to /dev/null by stdio:"ignore". Best effort: fall back to "ignore".
+  let stderrTarget = "ignore";
+  let logFd = null;
+  if (logFile) {
+    try {
+      logFd = openLog(logFile);
+      stderrTarget = logFd;
+    } catch {
+      stderrTarget = "ignore";
+      logFd = null;
+    }
+  }
+
+  let child;
+  try {
+    child = spawnImpl(process.execPath, [scriptPath, "--cwd", cwd, "--job", jobId], {
+      cwd,
+      env: process.env,
+      detached: true,
+      stdio: ["ignore", "ignore", stderrTarget],
+      windowsHide: true
+    });
+  } finally {
+    // Close the parent's copy of the inherited fd even if the spawn threw, so a failed
+    // launch never leaks the log fd.
+    if (logFd !== null) {
+      try {
+        closeLog(logFd);
+      } catch {
+        // already closed / never opened
+      }
+    }
+  }
+
   child.unref();
   return child;
 }
@@ -790,6 +828,11 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
   appendLogLine(logFile, "Queued for background execution.");
 
   const child = spawnWorker(cwd, job.id, logFile);
+  // D: stamp a deadline at enqueue so the watchdog can reap a job whose worker dies/wedges
+  // BEFORE it ever promotes queued->running (a queued record had no timeoutAt, so
+  // missedOwnDeadline never tripped and a reachable broker kept it HEALTHY forever).
+  // runTrackedJob resets timeoutAt fresh on promotion, so this only bounds the queued phase.
+  const timeoutMs = resolveJobTimeoutMs();
   const queuedRecord = {
     ...job,
     status: "queued",
@@ -797,6 +840,8 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
     pid: child.pid ?? null,
     logFile,
     request,
+    timeoutAt: new Date(Date.now() + timeoutMs).toISOString(),
+    timeoutMs,
     // Background jobs are designed to outlive the dispatching session/turn (e.g. a
     // subagent-dispatched --background rescue). SessionEnd cleanup must not reap them.
     background: true
@@ -809,7 +854,7 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
   // one polls /codex:status. Best effort: a watchdog spawn failure must never
   // block the actual task launch.
   try {
-    launchWatchdog(cwd, job.id);
+    launchWatchdog(cwd, job.id, logFile);
   } catch {
     appendLogLine(logFile, "Warning: liveness watchdog failed to start.");
   }
@@ -1456,4 +1501,4 @@ if (invokedDirectly) {
   });
 }
 
-export { enqueueBackgroundTask, spawnDetachedTaskWorker };
+export { enqueueBackgroundTask, spawnDetachedTaskWorker, spawnWatchdog };

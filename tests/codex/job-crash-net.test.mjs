@@ -165,17 +165,67 @@ test("installJobCrashNet does not attempt an interrupt when the turn never start
   assert.deepEqual(proc.exits, [1]);
 });
 
-test("the disposer removes both listeners so the net never outlives the run", () => {
+// D: a foreground run lives inside the companion process itself; if the host sends
+// SIGTERM/SIGINT (Ctrl-C, a shell timeout, the OS reaping the tree) the process dies
+// with the per-job record stuck "running" and no .done — a waiter hangs and /codex:status
+// shows a phantom active job. The crash net must finalize on a terminating signal too,
+// with a signal-specific reason (not the "uncaught error" wording).
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  test(`installJobCrashNet finalizes the job + writes .done + exits nonzero on ${signal} (foreground)`, async () => {
+    const workspace = makeTempDir();
+    const jobId = `job-${signal}`;
+    const running = writeRunningJob(workspace, jobId);
+
+    const proc = makeFakeProc();
+    installJobCrashNet({ id: jobId, workspaceRoot: workspace }, running, { proc, handleSignals: true });
+
+    assert.equal((proc.handlers[signal] ?? []).length, 1, `${signal} handler installed`);
+
+    await proc.fire(signal);
+
+    const stored = JSON.parse(fs.readFileSync(resolveJobFile(workspace, jobId), "utf8"));
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.terminatedBySignal, signal, "records which signal terminated it");
+    assert.match(stored.errorMessage, new RegExp(signal), "reason names the signal");
+    assert.doesNotMatch(stored.errorMessage, /uncaught/i, "a signal is not an uncaught error");
+
+    const done = JSON.parse(fs.readFileSync(resolveJobDoneFile(workspace, jobId), "utf8"));
+    assert.equal(done.status, "failed");
+
+    assert.deepEqual(proc.exits, [1], "exits nonzero so the death is unambiguous");
+  });
+}
+
+// A background worker must NOT register signal handlers: that suppresses Node's default
+// SIGTERM termination, and the watchdog reaps a hung worker with SIGTERM only (no SIGKILL
+// escalation), so a wedged worker that caught SIGTERM would be unreapable. Background
+// finalization is the watchdog's job, not the worker's.
+test("installJobCrashNet does NOT install signal handlers without handleSignals (background worker)", () => {
+  const workspace = makeTempDir();
+  const jobId = "job-bg-nosignals";
+  const running = writeRunningJob(workspace, jobId);
+
+  const proc = makeFakeProc();
+  installJobCrashNet({ id: jobId, workspaceRoot: workspace }, running, { proc });
+
+  assert.equal((proc.handlers.uncaughtException ?? []).length, 1, "throw nets still installed");
+  assert.equal((proc.handlers.SIGTERM ?? []).length, 0, "no SIGTERM handler in the default (background) mode");
+  assert.equal((proc.handlers.SIGINT ?? []).length, 0, "no SIGINT handler in the default (background) mode");
+});
+
+test("the disposer removes ALL listeners (throws + signals) so the net never outlives the run", () => {
   const workspace = makeTempDir();
   const jobId = "job-crash-4";
   const running = writeRunningJob(workspace, jobId);
 
   const proc = makeFakeProc();
-  const dispose = installJobCrashNet({ id: jobId, workspaceRoot: workspace }, running, { proc });
+  const dispose = installJobCrashNet({ id: jobId, workspaceRoot: workspace }, running, { proc, handleSignals: true });
   dispose();
 
   assert.equal((proc.handlers.uncaughtException ?? []).length, 0);
   assert.equal((proc.handlers.unhandledRejection ?? []).length, 0);
+  assert.equal((proc.handlers.SIGTERM ?? []).length, 0, "SIGTERM listener removed");
+  assert.equal((proc.handlers.SIGINT ?? []).length, 0, "SIGINT listener removed");
 });
 
 test("runTrackedJob installs the crash net during the run and disposes it afterwards", async () => {

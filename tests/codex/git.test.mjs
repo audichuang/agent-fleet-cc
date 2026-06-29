@@ -3,8 +3,29 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { collectReviewContext, resolveReviewTarget } from "../../plugins/codex/scripts/lib/git.mjs";
+import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "../../plugins/codex/scripts/lib/git.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
+
+// D: a foreign GIT_DIR inherited in process.env would re-point EVERY git call (workspace /
+// state / resume resolution) at the wrong repo, regardless of the worktree guard's ordering.
+// git.mjs must run git with a GIT_*-sanitized env so it always discovers the repo from cwd.
+test("ensureGitRepository ignores a foreign GIT_DIR (git env is sanitized at the call layer)", () => {
+  const cwd = makeTempDir();
+  initGitRepo(cwd);
+  fs.writeFileSync(path.join(cwd, "f.txt"), "x\n");
+  run("git", ["add", "f.txt"], { cwd });
+  run("git", ["commit", "-m", "init"], { cwd });
+
+  const saved = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(makeTempDir(), "foreign-nonexistent.git");
+  try {
+    const root = ensureGitRepository(cwd);
+    assert.equal(fs.realpathSync(root), fs.realpathSync(cwd), "git must resolve cwd's repo, not the foreign GIT_DIR");
+  } finally {
+    if (saved === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = saved;
+  }
+});
 
 test("resolveReviewTarget prefers working tree when repo is dirty", () => {
   const cwd = makeTempDir();

@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.0.29
+
+Theme D hardening — diagnosability, signal handling, env hygiene, and notification
+visibility (four bounded fixes; the larger god-file split / shared-runtime migration
+remain roadmap).
+
+- **Foreground SIGTERM/SIGINT finalizer** (`tracked-jobs.mjs`): a foreground run lives
+  inside the companion process itself, with no detached watchdog. The crash net only
+  caught uncaught throws, so a host kill / Ctrl-C / shell timeout left the per-job record
+  stuck "running" with no `.done` (a waiter hangs, `/codex:status` shows a phantom job).
+  `installJobCrashNet` now also finalizes on SIGTERM/SIGINT (recorded as
+  `terminatedBySignal`, not a misleading "uncaught error"), writing `.done` before exit.
+- **No global env mutation** (`worktree-guard.mjs`): `sanitizeGitEnv` defaulted to
+  `process.env` and deleted `GIT_*` IN PLACE, silently stripping them from the whole
+  companion process. It now returns a sanitized COPY used only for the git probes; the
+  deliberate broker-endpoint isolation in expected mode is preserved.
+- **Watchdog stderr captured** (`codex-companion.mjs`): the detached liveness watchdog —
+  the sole actor that recovers a hung/dead background turn — was spawned `stdio:"ignore"`,
+  sending any crash stack to /dev/null. Its stderr now routes into the job log, mirroring
+  the worker.
+- **Cost/safety notifications surfaced** (`codex.mjs`): six notifications this client does
+  NOT opt out of (only the high-frequency token deltas are) were dropped in the dispatch
+  `default` arm and thus invisible — `model/rerouted` (a safety signal), `guardianWarning`,
+  `thread/tokenUsage/updated`, `turn/plan/updated`, `turn/diff/updated` (logged compactly,
+  never the raw diff), and the account-level `account/rateLimits/updated`. Each now emits a
+  defensively-built progress line. Shapes grounded in the app-server-protocol v2 types.
+- **Queued-job deadline** (`codex-companion.mjs`): `timeoutAt` was only stamped when a job
+  promoted queued→running, so a job whose worker died/wedged before starting stayed
+  "queued" with no deadline — `missedOwnDeadline` never tripped and a reachable broker kept
+  it HEALTHY forever. The queued record now carries a `timeoutAt` (reset fresh on
+  promotion, so it only bounds the queued phase).
+
 ## 1.0.28
 
 Heal a stranded terminal signal (C5). A background job's terminal side-effects — the

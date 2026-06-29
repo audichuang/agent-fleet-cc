@@ -29,13 +29,52 @@ test("assertWorktreeAlignment enforces L2(b)", () => {
   }
 });
 
-test("sanitizeGitEnv strips git-control env", () => {
+test("sanitizeGitEnv returns a git-control-free COPY and does not mutate its input", () => {
   const env = { GIT_DIR: "/x", GIT_WORK_TREE: "/y", GIT_COMMON_DIR: "/z", KEEP: "1" };
-  sanitizeGitEnv(env);
-  assert.equal(env.GIT_DIR, undefined);
-  assert.equal(env.GIT_WORK_TREE, undefined);
-  assert.equal(env.GIT_COMMON_DIR, undefined);
-  assert.equal(env.KEEP, "1");
+  const cleaned = sanitizeGitEnv(env);
+  assert.equal(cleaned.GIT_DIR, undefined);
+  assert.equal(cleaned.GIT_WORK_TREE, undefined);
+  assert.equal(cleaned.GIT_COMMON_DIR, undefined);
+  assert.equal(cleaned.KEEP, "1");
+  // D: the input (process.env by default) must NOT be mutated — the old in-place delete
+  // silently stripped GIT_* from the whole companion process.
+  assert.equal(env.GIT_DIR, "/x", "sanitizeGitEnv must not mutate its input");
+  assert.equal(env.GIT_WORK_TREE, "/y");
+  assert.equal(env.GIT_COMMON_DIR, "/z");
+});
+
+test("assertWorktreeAlignment isolates git env in expected mode: probes AND the process env go GIT_*-free", () => {
+  // D: the git probes must run GIT_*-free (a foreign GIT_DIR must not redirect them) AND
+  // the deliberate isolation must strip GIT_* from the process env so EVERY other git
+  // caller (workspace/state/resume resolution reads process.env) is protected too. The
+  // sanitizeGitEnv HELPER is pure (tested above); the global strip here is intentional,
+  // paired with the broker-endpoint drop. Non-git keys survive.
+  const ok = ALIGN_VECTORS.find((v) => v.pass);
+  const env = {
+    GIT_DIR: "/foreign/.git",
+    GIT_WORK_TREE: "/foreign",
+    KEEP: "1",
+    [BROKER_ENDPOINT_ENV]: "unix:/foreign/broker.sock"
+  };
+  const probeEnvs = [];
+  const runGit = (cwd, args, probeEnv) => {
+    probeEnvs.push(probeEnv);
+    const hit = ok.git[args.join(" ")];
+    return hit ? { status: hit.status, stdout: hit.stdout } : { status: 1, stdout: "" };
+  };
+
+  assertWorktreeAlignment({ cwd: ok.cwd, expected: ok.expected, env, runGit });
+
+  assert.ok(probeEnvs.length > 0, "git probes ran");
+  for (const probeEnv of probeEnvs) {
+    assert.equal(probeEnv.GIT_DIR, undefined, "git probe env has GIT_DIR stripped");
+    assert.equal(probeEnv.GIT_WORK_TREE, undefined, "git probe env has GIT_WORK_TREE stripped");
+  }
+  // Deliberate global isolation: the process env's GIT_* is gone (protects other git callers).
+  assert.equal(env.GIT_DIR, undefined, "GIT_DIR stripped from the process env (protects other git callers)");
+  assert.equal(env.GIT_WORK_TREE, undefined, "GIT_WORK_TREE stripped from the process env");
+  assert.equal(env.KEEP, "1", "non-git keys survive");
+  assert.equal(env[BROKER_ENDPOINT_ENV], undefined, "expected mode also drops the foreign broker endpoint");
 });
 
 test("expected mode drops foreign broker endpoint", () => {

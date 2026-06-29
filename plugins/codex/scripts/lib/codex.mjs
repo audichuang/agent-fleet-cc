@@ -218,6 +218,17 @@ function emitProgress(onProgress, message, phase = null, extra = {}) {
   onProgress({ message, phase, ...extra });
 }
 
+// Cap free-form notification text (plan explanation, warning/deprecation detail) so a
+// verbose server message cannot flood the job log / progress line. Returns null for
+// empty/non-string input so callers can fall back cleanly.
+const MAX_NOTIFICATION_TEXT = 200;
+function boundedNotificationText(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  return value.length > MAX_NOTIFICATION_TEXT ? `${value.slice(0, MAX_NOTIFICATION_TEXT)}…` : value;
+}
+
 function emitLogEvent(onProgress, options = {}) {
   if (!onProgress) {
     return;
@@ -630,6 +641,94 @@ function applyTurnNotification(state, message) {
       completeTurn(state, completedTurn);
       break;
     }
+    // D: cost- and safety-relevant notifications this client does NOT opt out of (only
+    // the high-frequency token deltas are). Surface each as a compact progress line so
+    // the user is not blind to a model reroute, a guardian warning, token spend, the
+    // plan, the working diff, or rate limits. Every field is read defensively — a
+    // malformed notification must never throw out of this dispatch (see the `error` arm).
+    case "model/rerouted": {
+      const p = message.params ?? {};
+      emitProgress(
+        state.onProgress,
+        `Model rerouted: ${p.fromModel ?? "?"} → ${p.toModel ?? "?"}${p.reason ? ` (${p.reason})` : ""}.`,
+        null
+      );
+      break;
+    }
+    case "guardianWarning": {
+      emitProgress(state.onProgress, `Guardian warning: ${boundedNotificationText(message.params?.message) ?? "(no detail)"}`, null);
+      break;
+    }
+    case "thread/tokenUsage/updated": {
+      const total = message.params?.tokenUsage?.total ?? {};
+      emitProgress(
+        state.onProgress,
+        `Token usage: ${total.totalTokens ?? "?"} total (in ${total.inputTokens ?? "?"}, out ${total.outputTokens ?? "?"}).`,
+        null
+      );
+      break;
+    }
+    case "turn/plan/updated": {
+      const plan = Array.isArray(message.params?.plan) ? message.params.plan : [];
+      const done = plan.filter((step) => step?.status === "completed").length;
+      const explanation = boundedNotificationText(message.params?.explanation);
+      emitProgress(
+        state.onProgress,
+        `Plan updated: ${done}/${plan.length} steps completed${explanation ? `. ${explanation}` : "."}`,
+        null
+      );
+      break;
+    }
+    case "turn/diff/updated": {
+      const diff = typeof message.params?.diff === "string" ? message.params.diff : "";
+      // Never dump the raw diff into progress — just signal it changed and its size.
+      const lineCount = diff ? diff.split("\n").length : 0;
+      emitProgress(state.onProgress, `Working diff updated (${lineCount} lines).`, null);
+      break;
+    }
+    case "account/rateLimits/updated": {
+      const primary = message.params?.rateLimits?.primary ?? null;
+      emitProgress(
+        state.onProgress,
+        `Rate limits updated${primary?.usedPercent != null ? `: primary ${primary.usedPercent}% used` : ""}.`,
+        null
+      );
+      break;
+    }
+    case "warning": {
+      emitProgress(state.onProgress, `Warning: ${boundedNotificationText(message.params?.message) ?? "(no detail)"}`, null);
+      break;
+    }
+    case "configWarning": {
+      const summary = boundedNotificationText(message.params?.summary) ?? "(no detail)";
+      const path = message.params?.path;
+      emitProgress(state.onProgress, `Config warning: ${summary}${path ? ` (${path})` : ""}`, null);
+      break;
+    }
+    case "deprecationNotice": {
+      emitProgress(state.onProgress, `Deprecation notice: ${boundedNotificationText(message.params?.summary) ?? "(no detail)"}`, null);
+      break;
+    }
+    case "model/safetyBuffering/updated": {
+      const p = message.params ?? {};
+      const reasons = Array.isArray(p.reasons) ? p.reasons.join(", ") : "";
+      emitProgress(
+        state.onProgress,
+        `Model safety buffering: ${p.model ?? "?"}${p.showBufferingUi ? " (buffering)" : ""}${reasons ? ` — ${reasons}` : ""}.`,
+        null
+      );
+      break;
+    }
+    case "windows/worldWritableWarning": {
+      const p = message.params ?? {};
+      const count = Array.isArray(p.samplePaths) ? p.samplePaths.length + (Number(p.extraCount) || 0) : 0;
+      emitProgress(
+        state.onProgress,
+        `World-writable files warning: ${count} path(s)${p.failedScan ? " (scan incomplete)" : ""}.`,
+        null
+      );
+      break;
+    }
     default:
       break;
   }
@@ -734,7 +833,22 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
   // state.threadIds, so gating them by turn would misroute them to previousHandler.
   const dispatchNotification = (message) => {
     try {
-      if (message.method === "thread/started" || message.method === "thread/name/updated") {
+      // D: account-/config-level notifications carry no (or a nullable) threadId, so the
+      // belongsToTurn test would route them away — but they carry account-wide cost,
+      // limit, and safety/config info worth surfacing through the active capture. A
+      // `warning` WITH a threadId is thread-scoped, so let belongsToTurn route it (a
+      // foreign-thread warning then reaches previousHandler instead of this capture).
+      const threadlessAccountNotice =
+        message.method === "account/rateLimits/updated" ||
+        message.method === "configWarning" ||
+        message.method === "deprecationNotice" ||
+        message.method === "windows/worldWritableWarning" ||
+        (message.method === "warning" && (message.params?.threadId ?? null) === null);
+      if (
+        message.method === "thread/started" ||
+        message.method === "thread/name/updated" ||
+        threadlessAccountNotice
+      ) {
         applyTurnNotification(state, message);
         return;
       }

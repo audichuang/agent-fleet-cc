@@ -54,7 +54,7 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
-function resolveJobTimeoutMs(options) {
+export function resolveJobTimeoutMs(options = {}) {
   if (Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) {
     return options.timeoutMs;
   }
@@ -226,7 +226,7 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
     });
   let fired = false;
 
-  const onFatal = async (error) => {
+  const onFatal = async (error, { signal = null } = {}) => {
     if (fired) {
       return; // a single crash; ignore secondary errors triggered during teardown
     }
@@ -239,8 +239,12 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
     const threadId = stored?.threadId ?? null;
     const turnId = stored?.turnId ?? null;
 
+    // A terminating signal (host kill / Ctrl-C / shell timeout reaping the tree) is not
+    // an uncaught error — record it as such so the failure reason is not misleading.
     const detail = error instanceof Error ? error.stack ?? error.message : String(error);
-    const reason = `Worker process crashed with an uncaught error; auto-finalized as failed: ${detail}`;
+    const reason = signal
+      ? `Worker process received ${signal}; auto-finalized as failed.`
+      : `Worker process crashed with an uncaught error; auto-finalized as failed: ${detail}`;
     const completedAt = now();
     const failurePatch = {
       status: "failed",
@@ -248,7 +252,7 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
       errorMessage: reason,
       pid: null,
       completedAt,
-      crashed: true
+      ...(signal ? { terminatedBySignal: signal } : { crashed: true })
     };
 
     let wrote = false;
@@ -319,9 +323,29 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
   proc.on("uncaughtException", onFatal);
   proc.on("unhandledRejection", onFatal);
 
+  // Terminating signals: finalize before dying so a FOREGROUND run (which lives inside
+  // the companion process itself, with no detached watchdog) does not leave the per-job
+  // record stuck "running" with no .done when the host reaps it (Ctrl-C / shell timeout).
+  //
+  // FOREGROUND ONLY. Registering a SIGTERM handler suppresses Node's default termination;
+  // a background worker that did so would survive the watchdog's terminateProcessTree
+  // SIGTERM if its event loop were wedged — the watchdog does not escalate to SIGKILL —
+  // so a hung worker would become unreapable. A background job does not need this anyway:
+  // the watchdog finalizes it (writes failed + .done) before/around the kill.
+  const onSigterm = () => onFatal(new Error("SIGTERM"), { signal: "SIGTERM" });
+  const onSigint = () => onFatal(new Error("SIGINT"), { signal: "SIGINT" });
+  if (options.handleSignals) {
+    proc.on("SIGTERM", onSigterm);
+    proc.on("SIGINT", onSigint);
+  }
+
   return () => {
     proc.removeListener("uncaughtException", onFatal);
     proc.removeListener("unhandledRejection", onFatal);
+    if (options.handleSignals) {
+      proc.removeListener("SIGTERM", onSigterm);
+      proc.removeListener("SIGINT", onSigint);
+    }
   };
 }
 
@@ -393,7 +417,10 @@ export async function runTrackedJob(job, runner, options = {}) {
     logFile: options.logFile ?? job.logFile ?? null,
     proc: options.proc,
     exit: options.exit,
-    now: options.now
+    now: options.now,
+    // Foreground runs (no pre-written record → no detached watchdog) self-finalize on a
+    // terminating signal; background workers must NOT (see installJobCrashNet).
+    handleSignals: options.handleSignals ?? job.status == null
   });
 
   // Layer-2 watchdog: no matter what goes wrong inside runner (captureTurn
