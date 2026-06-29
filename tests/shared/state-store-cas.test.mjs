@@ -150,6 +150,69 @@ test("finalizeJob CAS EEXIST loser: lock present + non-terminal JSON returns fal
   assert.deepEqual(readTerminalLock(s, j.id), { status: "completed" }, "winner lock must survive");
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// finalizeJob guard (opt-in): a guard predicate is checked on the FRESH record
+// AFTER the O_EXCL claim (so it is atomic — once claimed, no concurrent
+// markJobRunning can promote, since markJobRunning pre-checks the lock). If the
+// guard rejects, finalizeJob releases its own claim and returns false. Used by
+// codex's dead-pid reconcile for PID-identity (don't finalize a job that
+// respawned with a different pid between the read and the write).
+// ────────────────────────────────────────────────────────────────────────────
+test("finalizeJob guard sees the fresh record and rejects a pid drift, releasing its lock", () => {
+  const s = tmp();
+  const j = mkJob(s);
+  writeJob(s, { ...readJob(s, j.id), status: "running", pid: 4242 });
+
+  // Guard demands the record still carries pid 4242. afterClaim rewrites it to a
+  // different live pid (a respawn) BEFORE finalize's fresh re-read — the guard must
+  // see the FRESH 7777, reject, and undo its own lock so a later finalize can win.
+  const result = finalizeJob(
+    s,
+    j.id,
+    { status: "failed" },
+    {
+      afterClaim() {
+        writeJob(s, { ...readJob(s, j.id), pid: 7777, status: "running" });
+      },
+      guard: (fresh) => fresh.pid === 4242,
+    },
+  );
+
+  assert.equal(result, false, "guard rejecting the fresh record must fail the finalize");
+  assert.equal(readJob(s, j.id).status, "running", "the job must not be finalized");
+  assert.equal(
+    fs.existsSync(lockFilePath(s, j.id)),
+    false,
+    "a guard-rejected finalize must release its own claim so a later finalize can win",
+  );
+});
+
+test("finalizeJob with a passing guard finalizes normally", () => {
+  const s = tmp();
+  const j = mkJob(s);
+  writeJob(s, { ...readJob(s, j.id), status: "running", pid: 4242 });
+  assert.equal(
+    finalizeJob(s, j.id, { status: "failed" }, { guard: (fresh) => fresh.pid === 4242 }),
+    true,
+  );
+  assert.equal(readJob(s, j.id).status, "failed");
+});
+
+// markJobRunning guard (opt-in): reject the promotion unless the current record
+// satisfies the predicate (codex uses status==="queued" so a non-queued record is
+// never re-promoted). Backward-compatible: no guard => any non-terminal promotes.
+test("markJobRunning guard rejects a non-queued record without promoting", () => {
+  const s = tmp();
+  const j = mkJob(s);
+  writeJob(s, { ...readJob(s, j.id), status: "running", pid: 1 }); // already running
+  assert.equal(
+    markJobRunning(s, j.id, { pid: 2 }, { guard: (job) => job.status === "queued" }),
+    null,
+    "a queued-only guard must reject an already-running record",
+  );
+  assert.equal(readJob(s, j.id).pid, 1, "the record must not be re-promoted");
+});
+
 test("legacy/garbage lock content yields { status: null } not a crash", () => {
   const s = tmp();
   const j = mkJob(s);
