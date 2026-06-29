@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.31
+
+Internal scaffolding (no behaviour change) — Phase 0 of the shared state-store migration
+(see `docs/superpowers/plans/2026-06-29-codex-shared-state-store-migration.md`). Adds `codex`
+to `scripts/sync-shared.mjs` targets and vendors `shared/lib/` into
+`plugins/codex/scripts/lib/shared/`. The vendored runtime is NOT imported yet — it sets up the
+later phases that move codex's persistence onto the shared directory-per-job store (the
+structural root-fix for the B/C cross-process races). The vendored `.mjs` is outside the
+`build:codex` tsconfig (mirroring cc), so it is not typechecked here.
+
 ## 1.0.30
 
 Theme E — process / docs honesty (bounded items; the foreign-broker fake-Codex e2e
