@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.32
+
+Phase 1A of the shared state-store migration (no behaviour change — every consumer + e2e
+preserved). codex's persistence moves onto the shared directory-per-job store
+(`shared/lib/core/state-store.mjs`), making the B/C cross-process races structurally
+impossible rather than mitigated, and shrinking `state.mjs`.
+
+- **1a** directory-per-job layout (`jobs/<id>/{job.json,log,done.json,terminal.lock}`);
+  `saveState` deletes in the load-bearing unlink order (job.json before terminal.lock).
+- **1c-i** `listJobs` scans the per-job directory (the per-job file is the single source of
+  truth; the `state.json` index is dead-for-reads, still written until 1e).
+- **1c-ii-a** live progress (phase/threadId/turnId) moves to append-only `events.ndjson`
+  (`engine-event`), so `job.json` is written only by `markJobRunning`/`finalizeJob` —
+  **B3 (a progress write clobbering a terminal record) is structurally eliminated**. The
+  four interrupt readers (watchdog/cancel/crash-net/timeout) and the status/result display
+  fold turn identity from the event log.
+- **1c-ii-b** terminal transitions route through the shared `finalizeJob`; the bespoke
+  fail-open per-job write mutex (`.wlock`) and codex's own terminal-claim + stale-reclaim
+  machinery are **deleted**. `listJobs` treats the `terminal.lock` as authoritative over a
+  stale-active `job.json` (lock-as-authority).
+- **Shared store hardening** (benefits cc too): `finalizeJob`/`markJobRunning` gain an
+  optional `guard` checked atomically on the fresh record after the claim;
+  `reconcileDeadPids` reclaims an orphaned `terminal.lock` based on the CLAIM owner's
+  liveness + a TTL (not the worker pid), so a separate finalizer (cancel/watchdog) that
+  crashed mid-transition — while the worker is still alive — is recovered, and a malformed
+  lock self-heals once stale. A live finalizer's fresh claim is never reclaimed.
+
+Validated by a 4-round cross-model Codex review (final: PROCEED).
+
 ## 1.0.31
 
 Internal scaffolding (no behaviour change) — Phase 0 of the shared state-store migration
