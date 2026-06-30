@@ -1195,9 +1195,15 @@ async function handleCancel(argv) {
   // (pruneJobs keeps all active), so a missing record means external deletion that
   // stays gone. cancel simply loses in that case (first terminal writer wins).
   const finalizedAsCancelled = result.applied;
+  // On CAS loss the job was finalized by someone else (worker/watchdog/another cancel).
+  // result.stored is the pre-claim snapshot — still "running"/"queued" — so reporting it
+  // would mis-state a finished job as active. Read the terminal.lock as authority first
+  // (R1), then fall back to the legacy index, then to "cancelled".
   const finalStatus = finalizedAsCancelled
     ? "cancelled"
-    : result.stored?.status ?? indexedTerminalStatus(workspaceRoot, job.id) ?? "cancelled";
+    : resolveAuthoritativeStatus(resolveStateDir(workspaceRoot), job.id) ??
+      indexedTerminalStatus(workspaceRoot, job.id) ??
+      "cancelled";
 
   let interrupt = { attempted: false, interrupted: false };
   if (finalizedAsCancelled) {

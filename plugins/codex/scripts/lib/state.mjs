@@ -366,7 +366,7 @@ export function applyJobPatchIfActive(cwd, jobId, patchOrBuilder, extraGuard = n
   return { applied: true, stored, patch: persisted };
 }
 
-function reconcileDeadPidJobs(cwd, jobs) {
+export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
   const stateDir = resolveStateDir(cwd);
   const nowMs = Date.now();
   const completedAt = nowIso();
@@ -391,9 +391,24 @@ function reconcileDeadPidJobs(cwd, jobs) {
     if (lock && isClaimOrphaned(stateDir, id, { isAlive: isProcessAlive, nowMs, workerPid: normalizeTrackedPid(job.pid) })) {
       const fresh = readJob(stateDir, id);
       if (!fresh || TERMINAL_STATUSES.has(fresh.status)) continue; // pruned, or already healed
+      // Test seam: inject a prune (dir removal) between the fresh-read guard and the
+      // write, to prove ensureDir:false does not resurrect a pruned job dir (R3).
+      deps._hooks?.afterFreshRead?.(id);
       const status = lock.status ?? "failed"; // malformed lock (status null) -> failed
       const reason = "Codex finalizer died mid-transition; recovered from the terminal lock.";
-      writeJob(stateDir, { ...fresh, status, phase: status, pid: null, errorMessage: reason });
+      // R3 (mirrors shared reconcileDeadPids): ensureDir:false so a write whose dir a
+      // concurrent prune removed between the fresh-read and here fails (ENOENT) instead
+      // of recreating the directory and resurrecting the dead job. Abort the repair on
+      // failure — the next reconcile retries if the dir is still present.
+      try {
+        writeJob(
+          stateDir,
+          { ...fresh, status, phase: status, pid: null, errorMessage: reason },
+          { ensureDir: false },
+        );
+      } catch {
+        continue; // dir pruned mid-repair — do not resurrect
+      }
       applied.set(id, { status, phase: status, pid: null, errorMessage: reason });
       writeCompletionSignalFile(cwd, id, { status, reason });
       continue;

@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.34
+
+A follow-up adversarial review (cross-model, read-only) of the 1.0.31→1.0.33 range
+found two defects the changeset itself introduced. Both fixed; the other two findings
+were pre-existing code outside this range and are deferred to the shared-runtime
+migration. Full suite + e2e green.
+
+- **R5 (blocker)** — codex's own duplicate orphan-lock repair
+  (`state.mjs` `reconcileDeadPidJobs`) wrote with the default `writeJob()`, missing the
+  R3 `ensureDir:false` hardening the shared `reconcileDeadPids` got: a concurrent prune
+  that deleted the job dir between the fresh-read and the write would be resurrected
+  (TOCTOU). Now mirrors the shared pattern (`ensureDir:false` + try/catch + abort).
+  New regression test (`tests/codex/reconcile-no-resurrect.test.mjs`), teeth-proven.
+- **R6 (reporting)** — `/codex:cancel` on a CAS loss reported `result.stored.status`,
+  the pre-claim snapshot (still `"running"`), mis-stating a finished job as active. Now
+  resolves the authoritative status (terminal.lock) first, then the legacy index. No
+  safety impact (a lost CAS never signalled the pid).
+
+Deferred (pre-existing, not in the 1.0.31→1.0.33 diff): the session-end cleanup hook
+still decides off raw `job.json.status` before the CAS, and the shared public
+`waitForJob`/`cancelJob` readers do not overlay the terminal.lock. Both land with the
+shared-runtime migration (which also deletes codex's duplicate reconcile).
+
 ## 1.0.33
 
 Close the Phase 1A read-side gaps a 4-lens adversarial review found: the
