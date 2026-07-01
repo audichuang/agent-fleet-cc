@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-07-02
+
+### Documentation
+- **Model guidance** in `SKILL.md`. Documents the `--model` option (accepted by every
+  verb but previously undocumented) and recommends omitting it to use agy's default
+  Gemini 3.5 Flash tier — fast and reliable in `--print` mode, including SVG / markup
+  generation. Warns against `Gemini 3.1 Pro (High)`, which stalls in headless print mode
+  (never returns off the backend wait, doesn't actually switch models) and can wedge the
+  session so later calls appear to hang too.
+
 ## [0.3.0] — 2026-07-02
 
 Migrated the job runtime onto the shared `shared/lib/` foundation (directory-per-job

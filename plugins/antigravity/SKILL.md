@@ -31,6 +31,17 @@ All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Cl
 | `wait`   | Waits for a background job to reach a terminal state. Returns exit code 10 when the wait times out. |
 | `logs`   | Shows or follows the persisted job log. This is stdout/job-log only; agy `--print` does not expose live tool events. |
 
+## Model
+
+Every verb accepts `--model <name>` (`agy models` lists the options). **Omit it** — agy's
+default (a Gemini 3.5 Flash tier) is the recommended choice: fast and reliable in `--print`
+mode, including SVG / markup generation (returns in seconds, clean output).
+
+**Avoid `Gemini 3.1 Pro (High)`.** In headless `--print` mode it stalls on a backend wait
+that never returns (minutes at 0% CPU, empty log), doesn't actually switch off the default,
+and one stalled call can wedge the session so later calls appear to hang too. If you must
+override the model, stay on a Gemini 3.5 Flash variant.
+
 ## Auth requirements
 
 agy 1.0.x is **OAuth-only** — there is no API-key path yet (tracked upstream as `antigravity-cli#78`).
