@@ -5,6 +5,12 @@ A Claude Code plugin marketplace: 4 plugins (`codex`, `antigravity`, `cc`,
 per plugin, the job runtime is shared in `shared/lib/`. Tests mirror each plugin under
 `tests/<name>/`.
 
+**These plugins ship to other people's machines** — this is a product, not a personal
+setup. When you learn something reusable (an engine quirk, a model to prefer/avoid, a
+gotcha), route it to a surface that travels with the plugin and gets reviewed: the
+plugin's `SKILL.md` / `README`, or this file. **Never** leave it only in private agent
+memory — that helps one session on one machine, and users never see it.
+
 ## IRONCLAD — do not touch siblings
 When working on one plugin, do **NOT** modify other plugins or their tests
 (`plugins/{codex,antigravity,cc}/`, `tests/{codex,antigravity,cc}/`).
