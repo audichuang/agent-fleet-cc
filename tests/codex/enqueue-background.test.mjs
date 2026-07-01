@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
 import { resolveJobDoneFile, resolveJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
+import { readStoredJobWithRetry } from "../../plugins/codex/scripts/lib/job-control.mjs";
 import { enqueueBackgroundTask, spawnDetachedTaskWorker, spawnWatchdog } from "../../plugins/codex/scripts/codex-companion.mjs";
 
 test("enqueueBackgroundTask exposes the signal file and launches the watchdog", () => {
@@ -156,6 +157,34 @@ test("spawnWatchdog falls back to ignore when there is no log file", () => {
     }
   });
   assert.deepEqual(stdioSeen[0], ["ignore", "ignore", "ignore"]);
+});
+
+// #7: enqueueBackgroundTask spawns the detached worker (:831) BEFORE it writes the job
+// file (:850), with no await between — the worker's first act (handleTaskWorker ->
+// readStoredJob) only succeeds because the parent's synchronous write normally wins the
+// race against the child's Node bootstrap. Under scheduler pressure the child can reach
+// the read first and, with a hard first-miss throw, the background job dies instantly.
+// readStoredJobWithRetry removes that timing bet: bounded-wait for the file instead.
+test("readStoredJobWithRetry waits out the spawn/write race instead of throwing on the first miss", async () => {
+  let calls = 0;
+  const job = await readStoredJobWithRetry("/ws", "task-x", {
+    readFn: () => (++calls < 3 ? null : { id: "task-x" }),
+    sleepFn: async () => {},
+    attempts: 10
+  });
+  assert.deepEqual(job, { id: "task-x" });
+  assert.equal(calls, 3, "kept reading until the parent's write landed");
+});
+
+test("readStoredJobWithRetry stays bounded and returns null when the job truly never appears", async () => {
+  let calls = 0;
+  const job = await readStoredJobWithRetry("/ws", "missing", {
+    readFn: () => { calls++; return null; },
+    sleepFn: async () => {},
+    attempts: 5
+  });
+  assert.equal(job, null);
+  assert.equal(calls, 5, "bounded to `attempts` reads — never spins forever");
 });
 
 test("spawnWatchdog closes the opened log fd even when the spawn throws (no fd leak)", () => {

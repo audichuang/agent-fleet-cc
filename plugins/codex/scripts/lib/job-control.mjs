@@ -256,6 +256,30 @@ export function readStoredJob(workspaceRoot, jobId) {
   return readJobFile(jobFile);
 }
 
+// A detached background worker is spawned BEFORE enqueueBackgroundTask finishes writing
+// the job file (spawnWorker then writeJobFile, no await between). Normally the parent's
+// synchronous write wins the race against the child's Node bootstrap, but under scheduler
+// pressure the child can reach the read first — a hard first-miss throw then kills the
+// background job instantly. Bounded-wait for the file instead of betting on the order.
+// ponytail: bounded retry (~2s), not a spawn/write barrier — the parent write is a few
+// synchronous lines after spawn, so this window swallows the race with no new shared state.
+export async function readStoredJobWithRetry(workspaceRoot, jobId, deps = {}) {
+  const readFn = deps.readFn ?? readStoredJob;
+  const sleepFn = deps.sleepFn ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const attempts = deps.attempts ?? 40;
+  const intervalMs = deps.intervalMs ?? 50;
+  for (let i = 0; i < attempts; i++) {
+    const job = readFn(workspaceRoot, jobId);
+    if (job) {
+      return job;
+    }
+    if (i < attempts - 1) {
+      await sleepFn(intervalMs);
+    }
+  }
+  return null;
+}
+
 function matchJobReference(jobs, reference, predicate = () => true) {
   const filtered = jobs.filter(predicate);
   if (!reference) {

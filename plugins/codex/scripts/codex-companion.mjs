@@ -47,6 +47,7 @@ import {
   buildSingleJobSnapshot,
   buildStatusSnapshot,
   readStoredJob,
+  readStoredJobWithRetry,
   resolveCancelableJob,
   resolveResultJob,
   sortJobsNewestFirst
@@ -107,7 +108,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
-      "  node scripts/codex-companion.mjs wait <job-id> [--json]",
+      "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
       "  node scripts/codex-companion.mjs logs [job-id]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
@@ -1004,7 +1005,9 @@ async function handleTaskWorker(argv) {
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
-  const storedJob = readStoredJob(workspaceRoot, options["job-id"]);
+  // The parent spawns this worker before it writes the job file (see enqueueBackgroundTask);
+  // bounded-wait for that write rather than hard-throwing if we win the bootstrap race.
+  const storedJob = await readStoredJobWithRetry(workspaceRoot, options["job-id"]);
   if (!storedJob) {
     throw new Error(`No stored job found for ${options["job-id"]}.`);
   }
@@ -1086,7 +1089,7 @@ async function handleWait(argv) {
   assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query (see handleStatus)
   const reference = positionals[0] ?? "";
   if (!reference) {
-    throw new Error("`wait` requires a job id.");
+    throw new Error("`wait` requires a job id. Run `/codex:status` to list active jobs, then pass one (e.g. `/codex:wait <job-id>`).");
   }
   if (positionals.length !== 1) {
     throw new Error("`wait` accepts exactly one job id.");

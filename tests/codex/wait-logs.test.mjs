@@ -49,7 +49,7 @@ function writeTerminalJob(workspace, jobId, status) {
 }
 function writeRunningJob(workspace, jobId) { return writeTerminalJob(workspace, jobId, "running"); }
 
-test("wait requires a job id", () => {
+test("wait requires a job id and guides the user to list jobs first", () => {
   const workspace = makeTempDir();
   const result = run("node", [SCRIPT, "wait", `--cwd ${workspace} --json`], { cwd: workspace });
 
@@ -57,6 +57,19 @@ test("wait requires a job id", () => {
   const envelope = JSON.parse(result.stdout);
   assert.equal(envelope.status, "error");
   assert.match(envelope.error, /wait.*requires a job id/i);
+  // The other query commands (attach/logs/cancel) work with no id; wait can't, so the
+  // error must at least point at how to find one instead of dead-ending.
+  assert.match(envelope.error, /status/i);
+});
+
+// #4: printUsage advertised only `wait <job-id> [--json]`, but handleWait parses
+// --timeout-ms / --poll-interval-ms and wait.md's argument-hint lists them — three
+// sources disagreed. Usage must match what the command actually accepts.
+test("usage lists wait's --timeout-ms / --poll-interval-ms flags (matches wait.md + handleWait)", () => {
+  const result = run("node", [SCRIPT, "help"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /wait <job-id>[^\n]*--timeout-ms/);
+  assert.match(result.stdout, /wait <job-id>[^\n]*--poll-interval-ms/);
 });
 
 test("wait accepts slash-command raw arguments and returns a single waited job snapshot", () => {
