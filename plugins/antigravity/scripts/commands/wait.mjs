@@ -140,7 +140,7 @@ function renderWaitOutput(job, reference, { timedOut }) {
   if (!job) {
     return `antigravity:wait — no job found for "${reference}".\n`;
   }
-  const rendered = renderSingleJobStatus({ job });
+  const rendered = renderSingleJobStatus(job);
   if (!timedOut) return rendered;
   return `${rendered.trimEnd()}\n\nantigravity:wait timed out before ${job.id} reached a terminal state.\n`;
 }

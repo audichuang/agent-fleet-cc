@@ -240,13 +240,6 @@ export function renderSingleJobStatus(snapshotOrJob, options = {}) {
   }
 
   lines.push("");
-  lines.push("## Health");
-  lines.push("");
-  lines.push(`- **Health:** ${job.healthStatus ?? "-"}`);
-  lines.push(`- **Diagnostic:** ${job.healthMessage ?? "-"}`);
-  lines.push(`- **Recommended Action:** ${job.recommendedAction ?? "-"}`);
-
-  lines.push("");
   lines.push("## Runtime");
   lines.push("");
   lines.push(`- **Elapsed:** ${job.elapsed ?? "-"}`);
@@ -258,11 +251,6 @@ export function renderSingleJobStatus(snapshotOrJob, options = {}) {
   lines.push(`- **Started:** ${job.startedAt ?? "-"}`);
   lines.push(`- **Updated:** ${job.updatedAt ?? "-"}`);
   lines.push(`- **Completed:** ${job.completedAt ?? "-"}`);
-  lines.push(`- **Last Heartbeat:** ${job.lastHeartbeatAt ?? "-"}`);
-  lines.push(`- **Last Progress:** ${job.lastProgressAt ?? "-"}`);
-  lines.push(`- **Last Model Output:** ${job.lastModelOutputAt ?? "-"}`);
-  lines.push(`- **Last Tool Call:** ${job.lastToolCallAt ?? "-"}`);
-  lines.push(`- **Last Diagnostic:** ${job.lastDiagnosticAt ?? "-"}`);
 
   if (job.errorMessage) {
     lines.push("");

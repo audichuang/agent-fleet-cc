@@ -108,6 +108,18 @@ describe('renderSingleJobStatus', () => {
     assert.match(out, /Status.*queued/);
   });
 
+  it('renders a projected job (wait/status shape) with a real Status and no dead Health section', () => {
+    // Regression: wait/status pass a projectJob() record directly (no {job} wrapper,
+    // no workspaceRoot). Before the fix wait passed `{ job }` → Status: undefined.
+    const projected = { id: 'jp', kind: 'task', status: 'completed', title: 'x', summary: 's' };
+    const out = renderSingleJobStatus(projected);
+    assert.match(out, /Status.*completed/);
+    assert.doesNotMatch(out, /Status.*undefined/);
+    assert.match(out, /Kind.*task/);
+    assert.doesNotMatch(out, /## Health/);
+    assert.doesNotMatch(out, /Last Heartbeat/);
+  });
+
   it('handles a wrapper { job } and includes error + progress + events', () => {
     const job = {
       id: 'job2',
