@@ -2,6 +2,7 @@
 // Pure adapter surface - no shared runtime, no real agy.
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
@@ -9,6 +10,7 @@ import {
   makeAntigravityAdapter,
   workspaceStateDir,
   resolveDataRoot,
+  resolveAgyBin,
   resolveAgyTimeouts,
   RECURSION_MARKER,
   DEFAULT_PRINT_TIMEOUT_MS,
@@ -25,6 +27,24 @@ test("validateProcessAdapter === [] (structural contract)", () => {
 test("RECURSION_MARKER is ANTIGRAVITY_ACTIVE (D-15)", () => {
   assert.equal(RECURSION_MARKER, "ANTIGRAVITY_ACTIVE");
   assert.equal(makeAntigravityAdapter().recursionMarker, "ANTIGRAVITY_ACTIVE");
+});
+
+test("resolveAgyBin: AGY_BIN wins, Windows env.Path fallback, bare default (coverage restored from deleted deep test)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agybin-"));
+  const binFile = path.join(dir, "agy");
+  fs.writeFileSync(binFile, "#!/bin/sh\n");
+  try {
+    // explicit AGY_BIN wins when it exists on disk
+    assert.equal(resolveAgyBin({ AGY_BIN: binFile, PATH: "" }), binFile);
+    // Windows-style env.Path is used when PATH is absent (adapter.mjs:47 branch)
+    assert.equal(resolveAgyBin({ Path: dir }), binFile);
+    // POSIX PATH still works
+    assert.equal(resolveAgyBin({ PATH: dir }), binFile);
+    // nothing resolvable → bare "agy" default
+    assert.equal(resolveAgyBin({ PATH: "", Path: "" }), "agy");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("buildInvocation: --print is LAST with prompt as its value, stdinPayload empty (D-1)", () => {
