@@ -25,8 +25,11 @@ export function lockFilePath(stateDir, jobId) {
   return path.join(jobDir(stateDir, jobId), "terminal.lock");
 }
 
-export function writeJsonAtomic(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+// ensureDir:false skips the recursive mkdir, so a write whose parent dir was
+// deleted (a concurrent prune) fails with ENOENT instead of RESURRECTING the dir.
+// Used by the reconcile lock-repair, the one writer that can race a prune (R3).
+export function writeJsonAtomic(file, value, { ensureDir = true } = {}) {
+  if (ensureDir) fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.tmp-${crypto.randomBytes(4).toString("hex")}`;
   // 0600/0700:job 目錄含 prompt/result/log — 一律 owner-only。
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
@@ -42,11 +45,15 @@ export function createJob(stateDir, record, prompt) {
   return record;
 }
 
-export function writeJob(stateDir, job) {
-  writeJsonAtomic(jobFilePath(stateDir, job.id), {
-    ...job,
-    updatedAt: new Date().toISOString(),
-  });
+export function writeJob(stateDir, job, options = {}) {
+  writeJsonAtomic(
+    jobFilePath(stateDir, job.id),
+    {
+      ...job,
+      updatedAt: new Date().toISOString(),
+    },
+    options,
+  );
 }
 
 export function readJob(stateDir, jobId) {
@@ -113,10 +120,15 @@ export function readTerminalLock(stateDir, jobId) {
   return { status: null };
 }
 
-// _hooks 是測試縫:afterClaim() 在 O_EXCL claim 成功後、fresh re-read 之前
-// 觸發,讓測試能構造「claim 成功後才發生的競態」(pid stamp 寫入、prune 刪 JSON)。
-// 生產路徑不傳 _hooks,行為與原始實作完全相同。
-export function finalizeJob(stateDir, jobId, patch, _hooks = {}) {
+// options.afterClaim 是測試縫:在 O_EXCL claim 成功後、fresh re-read 之前觸發,
+// 讓測試能構造「claim 成功後才發生的競態」(pid stamp 寫入、prune 刪 JSON)。
+// options.guard(fresh) 是選用的生產守衛:claim 成功並重讀 fresh 後、寫入前檢查;
+// 回傳 falsy 則釋放自己剛拿到的 lock 並回 false。因為 claim 已持有 terminal.lock,
+// 而 markJobRunning 會在 lock 存在時拒絕 promote,所以「對 fresh 檢查」對任何並發
+// 寫入都是原子的(claim 後沒有人能改 job.json)。codex 的 dead-pid reconcile 用它
+// 做 PID 身分檢查:job 在讀與寫之間以不同 pid 重生時不要誤標 failed。
+// 生產路徑不傳 options 時行為與原始實作完全相同。
+export function finalizeJob(stateDir, jobId, patch, options = {}) {
   if (!TERMINAL_STATUSES.has(patch.status)) {
     throw new Error(`finalizeJob requires a terminal status, got ${patch.status}`);
   }
@@ -126,11 +138,18 @@ export function finalizeJob(stateDir, jobId, patch, _hooks = {}) {
   if (!existing || TERMINAL_STATUSES.has(existing.status)) return false;
   if (!claimTerminalTransition(stateDir, jobId, patch.status)) return false;
   // afterClaim hook:測試縫——在 claim 與 fresh 讀之間注入競態(pid stamp 或 prune)。
-  _hooks.afterClaim?.();
+  options.afterClaim?.();
   // claim 後重讀:prune 若在中間刪了 JSON,undo 自己的 lock 並退出。
   // 安全性依賴 prune 的 unlink 順序(json 先於 lock,見 pruneJobs)。
   const fresh = readJob(stateDir, jobId);
   if (!fresh) {
+    try {
+      fs.unlinkSync(lockFilePath(stateDir, jobId));
+    } catch {}
+    return false;
+  }
+  // 選用守衛在 fresh 上檢查:不符就釋放自己的 claim 讓後續 finalize 仍能贏。
+  if (options.guard && !options.guard(fresh)) {
     try {
       fs.unlinkSync(lockFilePath(stateDir, jobId));
     } catch {}
@@ -143,12 +162,16 @@ export function finalizeJob(stateDir, jobId, patch, _hooks = {}) {
 }
 
 // queued → running,防著並發 canceller。回傳 running job;null 表示
-// job 不在/已終態/lock 已被 claim — 呼叫端絕不可在 null 時 spawn。
-// hooks.beforeRecheck 是測試縫。
+// job 不在/已終態/lock 已被 claim/守衛拒絕 — 呼叫端絕不可在 null 時 spawn。
+// hooks.beforeRecheck 是測試縫。hooks.guard(job) 是選用守衛:對讀到的紀錄檢查,
+// 不符就拒絕 promote(codex 傳 status==="queued",避免重複 promote 一個已 running
+// 的 job)。注意守衛縮窄、但不消滅「兩個 worker 同時讀到 queued」的窗;codex 一個
+// job 只 spawn 一個 worker,該窗不可達(真要原子化需另一把 promotion claim)。
 export function markJobRunning(stateDir, jobId, patch = {}, hooks = {}) {
   if (readTerminalLock(stateDir, jobId)) return null;
   const job = readJob(stateDir, jobId);
   if (!job || TERMINAL_STATUSES.has(job.status)) return null;
+  if (hooks.guard && !hooks.guard(job)) return null;
   writeJob(stateDir, { ...job, ...patch, status: "running" });
   hooks.beforeRecheck?.();
   if (readTerminalLock(stateDir, jobId)) return null;
@@ -163,7 +186,36 @@ export function markJobRunning(stateDir, jobId, patch = {}, hooks = {}) {
 // _hooks 是測試縫:onUnlink(filePath) 在每次 unlinkSync 之前呼叫,
 // 讓測試能觀察並斷言 unlink 順序(json 先於 lock)是 load-bearing 不變量。
 // 生產路徑不傳 _hooks,行為與原始實作完全相同。
+// R4: reap "zombie" job dirs left by a prune that crashed between unlinking
+// job.json and rmSync(dir) — such a dir holds a terminal.lock (a complete claim)
+// but no job.json, so listJobs/readJob skip it and no recovery path ever reaps it.
+// A dir with a terminal.lock and NO job.json can only be prune debris: createJob
+// writes job.json before any work begins, and finalizeJob refuses to claim the
+// lock unless job.json already exists — so the in-flight "prompt.txt but no
+// job.json" window never carries a lock and is left untouched.
+export function sweepOrphanLockDirs(stateDir) {
+  let names;
+  try {
+    names = fs.readdirSync(jobsRoot(stateDir));
+  } catch {
+    return; // no jobs root yet — nothing to sweep
+  }
+  for (const name of names) {
+    try {
+      if (
+        !fs.existsSync(jobFilePath(stateDir, name)) &&
+        fs.existsSync(lockFilePath(stateDir, name))
+      ) {
+        fs.rmSync(jobDir(stateDir, name), { recursive: true, force: true });
+      }
+    } catch {
+      // best effort — a racing writer may recreate; the next sweep catches it.
+    }
+  }
+}
+
 export function pruneJobs(stateDir, { max = 50 } = {}, _hooks = {}) {
+  sweepOrphanLockDirs(stateDir);
   const jobs = listJobs(stateDir);
   const activeCount = jobs.filter((j) => ACTIVE_STATUSES.has(j.status)).length;
   const terminal = jobs
