@@ -1,7 +1,8 @@
 import fs from "node:fs";
 
 import { getSessionRuntimeStatus } from "./codex.mjs";
-import { findJobByIdAcrossWorkspaces, getConfig, listJobs, readJobFile, resolveJobFile } from "./state.mjs";
+import { findJobByIdAcrossWorkspaces, getConfig, listJobs, readJobFile, resolveJobFile, resolveStateDir } from "./state.mjs";
+import { readProgressSnapshot } from "./codex-progress.mjs";
 import { SESSION_ID_ENV } from "./tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
 
@@ -228,9 +229,22 @@ export function enrichJob(job, options = {}) {
       timeoutRemainingMs == null ? null : formatRelativeAgo(timeoutRemainingMs)?.replace(/ ago$/, "")
   };
 
+  // Option A: live progress (phase/threadId/turnId) lives in events.ndjson, not the
+  // record, so overlay it for the display surfaces. Identity is folded for any job
+  // (a finished job's resume hint, an active job's interrupt id); the live phase only
+  // overrides for ACTIVE jobs — a terminal record keeps its final phase.
+  const snapshot = options.stateDir
+    ? readProgressSnapshot(options.stateDir, job.id)
+    : { threadId: null, turnId: null, phase: null };
+
   return {
     ...enriched,
-    phase: enriched.phase ?? inferLegacyJobPhase(enriched, enriched.progressPreview)
+    threadId: enriched.threadId ?? snapshot.threadId,
+    turnId: enriched.turnId ?? snapshot.turnId,
+    phase:
+      (isActive ? snapshot.phase : null) ??
+      enriched.phase ??
+      inferLegacyJobPhase(enriched, enriched.progressPreview)
   };
 }
 
@@ -270,17 +284,18 @@ export function buildStatusSnapshot(cwd, options = {}) {
   const jobs = sortJobsNewestFirst(filterJobsForCurrentSession(listJobs(workspaceRoot), options));
   const maxJobs = options.maxJobs ?? DEFAULT_MAX_STATUS_JOBS;
   const maxProgressLines = options.maxProgressLines ?? DEFAULT_MAX_PROGRESS_LINES;
+  const stateDir = resolveStateDir(workspaceRoot);
 
   const running = jobs
     .filter((job) => job.status === "queued" || job.status === "running")
-    .map((job) => enrichJob(job, { maxProgressLines }));
+    .map((job) => enrichJob(job, { maxProgressLines, stateDir }));
 
   const latestFinishedRaw = jobs.find((job) => job.status !== "queued" && job.status !== "running") ?? null;
-  const latestFinished = latestFinishedRaw ? enrichJob(latestFinishedRaw, { maxProgressLines }) : null;
+  const latestFinished = latestFinishedRaw ? enrichJob(latestFinishedRaw, { maxProgressLines, stateDir }) : null;
 
   const recent = (options.all ? jobs : jobs.slice(0, maxJobs))
     .filter((job) => job.status !== "queued" && job.status !== "running" && job.id !== latestFinished?.id)
-    .map((job) => enrichJob(job, { maxProgressLines }));
+    .map((job) => enrichJob(job, { maxProgressLines, stateDir }));
 
   return {
     workspaceRoot,
@@ -316,7 +331,10 @@ export function buildSingleJobSnapshot(cwd, reference, options = {}) {
           // from job.workspaceRoot under the current CLAUDE_PLUGIN_DATA can miss
           // (different host/root), so callers needing the per-job file must use this.
           stateDir: found.workspaceStateDir,
-          job: enrichJob(found.job, { maxProgressLines: options.maxProgressLines }),
+          job: enrichJob(found.job, {
+            maxProgressLines: options.maxProgressLines,
+            stateDir: found.workspaceStateDir
+          }),
           crossWorkspace: true
         };
       }
@@ -329,7 +347,10 @@ export function buildSingleJobSnapshot(cwd, reference, options = {}) {
 
   return {
     workspaceRoot,
-    job: enrichJob(selected, { maxProgressLines: options.maxProgressLines })
+    job: enrichJob(selected, {
+      maxProgressLines: options.maxProgressLines,
+      stateDir: resolveStateDir(workspaceRoot)
+    })
   };
 }
 
@@ -344,7 +365,13 @@ export function resolveResultJob(cwd, reference, options = {}) {
   );
 
   if (selected) {
-    return { workspaceRoot, job: selected };
+    // Option A: the resume-hint thread/turn id lives in events.ndjson, not the
+    // terminal record, so overlay it for the result surface.
+    const { threadId, turnId } = readProgressSnapshot(resolveStateDir(workspaceRoot), selected.id);
+    return {
+      workspaceRoot,
+      job: { ...selected, threadId: selected.threadId ?? threadId, turnId: selected.turnId ?? turnId }
+    };
   }
 
   const active = matchJobReference(jobs, reference, (job) => job.status === "queued" || job.status === "running");

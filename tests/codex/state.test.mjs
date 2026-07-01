@@ -7,15 +7,14 @@ import assert from "node:assert/strict";
 import { makeTempDir } from "./helpers.mjs";
 import {
   applyJobPatchIfActive,
-  claimTerminalTransition,
   listJobs,
   readJobFile,
   resolveJobFile,
   resolveJobLockFile,
   resolveJobLogFile,
+  resolveJobsDir,
   resolveStateDir,
   resolveStateFile,
-  resolveJobWriteLockFile,
   saveState,
   updateState,
   upsertJob,
@@ -24,122 +23,11 @@ import {
 
 const DEAD_PID = 2147483646; // above PID_MAX on Linux/macOS — never a live process
 
-test("claimTerminalTransition reclaims a stale lock whose owner died before finalizing", () => {
-  const workspace = makeTempDir();
-  const jobId = "job-stale-lock";
-  // Per-job record is still active (the previous claimer crashed before writing
-  // the terminal record), and the lock is owned by a dead pid.
-  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
-  fs.writeFileSync(resolveJobLockFile(workspace, jobId), `${JSON.stringify({ status: "failed", pid: DEAD_PID })}\n`, "utf8");
-
-  const won = claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z");
-
-  assert.equal(won, true, "a stale claim (dead owner + still-active job) must be reclaimable");
-  const lock = JSON.parse(fs.readFileSync(resolveJobLockFile(workspace, jobId), "utf8"));
-  assert.equal(lock.pid, process.pid, "the reclaimed lock is now owned by this process");
-});
-
-test("claimTerminalTransition does not reclaim a lock held by a live owner", () => {
-  const workspace = makeTempDir();
-  const jobId = "job-live-lock";
-  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
-  fs.writeFileSync(resolveJobLockFile(workspace, jobId), `${JSON.stringify({ status: "failed", pid: process.pid })}\n`, "utf8");
-
-  assert.equal(
-    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
-    false,
-    "a live owner's claim must not be stolen"
-  );
-});
-
-test("claimTerminalTransition does not reclaim when the job already finalized (terminal record keeps its lock)", () => {
-  const workspace = makeTempDir();
-  const jobId = "job-final-lock";
-  // Owner is dead, BUT the per-job record is already terminal — the previous
-  // claimer DID finalize; its lock must stand.
-  writeJobFile(workspace, jobId, { id: jobId, status: "completed", phase: "done", pid: null });
-  fs.writeFileSync(resolveJobLockFile(workspace, jobId), `${JSON.stringify({ status: "completed", pid: DEAD_PID })}\n`, "utf8");
-
-  assert.equal(
-    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
-    false,
-    "a finalized job's lock must not be reclaimed even if the owner is gone"
-  );
-});
-
-// C3: a terminal claim is held only for the microseconds between the O_EXCL CAS and
-// the terminal-record write. Two crash shapes used to wedge an active job forever:
-// (1) the claimer crashed between openSync('wx') and writeSync, leaving an EMPTY,
-// unparseable lock; (2) the claimer's pid was later RECYCLED by an unrelated live
-// process, so isProcessAlive reports it alive. Both made isStaleTerminalClaim return
-// false → the active job could never finalize. A lock-age TTL (gated on the job still
-// being active) reclaims both, while still refusing to steal a genuinely live holder.
-
-test("claimTerminalTransition reclaims a malformed lock left by a claimer that crashed mid-write (C3)", () => {
-  const workspace = makeTempDir();
-  const jobId = "job-malformed-lock";
-  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
-  const lockFile = resolveJobLockFile(workspace, jobId);
-  fs.writeFileSync(lockFile, "", "utf8"); // crashed between openSync('wx') and writeSync
-  const old = new Date(Date.now() - 120_000);
-  fs.utimesSync(lockFile, old, old); // aged well past the lock TTL
-
-  assert.equal(
-    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
-    true,
-    "a malformed lock older than the TTL on an active job must be reclaimable"
-  );
-});
-
-test("claimTerminalTransition does not reclaim a FRESH empty lock (a live holder mid-acquire)", () => {
-  const workspace = makeTempDir();
-  const jobId = "job-fresh-empty-lock";
-  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
-  // Empty but just created: a live holder between openSync('wx') and writeSync.
-  fs.writeFileSync(resolveJobLockFile(workspace, jobId), "", "utf8");
-
-  assert.equal(
-    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
-    false,
-    "a freshly-created empty lock is a live holder mid-acquire and must not be stolen"
-  );
-});
-
-test("claimTerminalTransition reclaims a lock whose pid was recycled (alive pid, stamp older than TTL) (C3)", () => {
-  const workspace = makeTempDir();
-  const jobId = "job-recycled-pid";
-  // Our own (alive) pid stands in for an unrelated process that recycled the dead
-  // claimer's pid; the ancient stamp proves the real claimer died long ago.
-  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
-  fs.writeFileSync(
-    resolveJobLockFile(workspace, jobId),
-    `${JSON.stringify({ status: "failed", stamp: "2020-01-01T00:00:00.000Z", pid: process.pid })}\n`,
-    "utf8"
-  );
-
-  assert.equal(
-    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
-    true,
-    "an alive-but-stale (recycled-pid) lock older than the TTL must be reclaimable"
-  );
-});
-
-test("claimTerminalTransition does not reclaim a live owner whose claim is still fresh", () => {
-  const workspace = makeTempDir();
-  const jobId = "job-live-fresh";
-  writeJobFile(workspace, jobId, { id: jobId, status: "running", phase: "running", pid: null });
-  fs.writeFileSync(
-    resolveJobLockFile(workspace, jobId),
-    `${JSON.stringify({ status: "failed", stamp: new Date().toISOString(), pid: process.pid })}\n`,
-    "utf8"
-  );
-
-  assert.equal(
-    claimTerminalTransition(workspace, jobId, "failed", "2026-01-01T00:00:00.000Z"),
-    false,
-    "a live owner with a fresh claim must not be stolen"
-  );
-});
+// The bespoke claim-time stale-lock reclaim (codex's deleted claimTerminalTransition)
+// is gone. Its end-to-end purpose — recover a job whose finalizer crashed between the
+// O_EXCL claim and the job.json write — now lives in the dead-pid reconcile's
+// lock-repair branch, covered by facade-finalize.test.mjs ("reconcile repairs an
+// orphan-lock job from the lock status (C3)").
 
 test("applyJobPatchIfActive wins the cross-process terminal CAS and records an O_EXCL claim", () => {
   const workspace = makeTempDir();
@@ -276,11 +164,9 @@ test("saveState prunes dropped job artifacts when indexed jobs exceed the cap", 
     jobs
   });
 
-  const prunedJobFile = resolveJobFile(workspace, "job-0");
-  const prunedLogFile = resolveJobLogFile(workspace, "job-0");
   const retainedJobFile = resolveJobFile(workspace, "job-50");
   const retainedLogFile = resolveJobLogFile(workspace, "job-50");
-  const jobsDir = path.dirname(prunedJobFile);
+  const jobsDir = resolveJobsDir(workspace);
 
   assert.equal(fs.existsSync(retainedJobFile), true);
   assert.equal(fs.existsSync(retainedLogFile), true);
@@ -291,11 +177,10 @@ test("saveState prunes dropped job artifacts when indexed jobs exceed the cap", 
     savedState.jobs.map((job) => job.id),
     Array.from({ length: 50 }, (_, index) => `job-${50 - index}`)
   );
+  // Directory-per-job layout: jobs/ holds one directory per retained job.
   assert.deepEqual(
     fs.readdirSync(jobsDir).sort(),
-    Array.from({ length: 50 }, (_, index) => `job-${index + 1}`)
-      .flatMap((jobId) => [`${jobId}.json`, `${jobId}.log`])
-      .sort()
+    Array.from({ length: 50 }, (_, index) => `job-${index + 1}`).sort()
   );
 });
 
@@ -449,33 +334,28 @@ test("listJobs leaves running jobs alone when the tracked pid is alive", () => {
   assert.equal(job.pid, process.pid);
 });
 
-test("listJobs reconciliation TOCTOU guard: skips when persisted state already moved past active", () => {
+test("listJobs reconciliation: a terminal per-job record is never downgraded, even carrying a dead pid", () => {
   const workspace = makeTempDir();
   const deadPid = 2147483644;
 
-  // Seed the state.json index with status:"running" but write the per-job file
-  // as status:"completed". This simulates a race where the job completed
-  // legitimately between the listJobs read and the reconcile write.
+  // Single source of truth = the per-job file. A record that already reached a
+  // terminal status must never be reconciled to "failed", even if it still carries
+  // a (now-dead) pid: the dead-PID reconciler only considers ACTIVE (queued/running)
+  // records, so the status gate must come before the pid check.
   const completedJob = {
     id: "task-race-completed",
     status: "completed",
     phase: "done",
-    pid: null,
+    pid: deadPid,
     logFile: resolveJobLogFile(workspace, "task-race-completed"),
     createdAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:01:00.000Z"
   };
   writeJobFile(workspace, completedJob.id, completedJob);
-  saveState(workspace, {
-    version: 1,
-    config: { stopReviewGate: false },
-    jobs: [{ ...completedJob, status: "running", pid: deadPid }]
-  });
 
   const [job] = listJobs(workspace);
-  // Reconciler must NOT downgrade the persisted "completed" record.
-  assert.equal(job.status, "running"); // state.json index still shows running (reconcile saw dead PID but skipped)
+  assert.equal(job.status, "completed"); // not downgraded
   const persisted = JSON.parse(fs.readFileSync(resolveJobFile(workspace, completedJob.id), "utf8"));
   assert.equal(persisted.status, "completed"); // per-job file preserved
   assert.equal(persisted.autoReconciled, undefined);
@@ -505,32 +385,38 @@ test("listJobs reconciles dead-PID queued jobs so a crashed background launcher 
   assert.equal(reconciled.reconciledDeadPid, deadPid);
 });
 
-test("listJobs reconciliation PID-identity guard: skips when persisted pid no longer matches", () => {
+test("reconcile PID-identity defense: a terminal write is rejected when the per-job pid drifts", () => {
+  // The dead-PID reconciler passes an extraGuard `stored.pid === <observed dead pid>`
+  // to applyJobPatchIfActive so a job RE-SPAWNED with a new pid between the listJobs
+  // scan and the reconcile write is never wrongly failed (a cross-process race;
+  // under single-source dir-scan the scan and write read the same file, so this guard
+  // is exercised at the mechanism level here). When the stored pid no longer matches
+  // the observed-dead pid, the guard fails and NO terminal write lands.
   const workspace = makeTempDir();
-  const deadPidObservedByIndex = 2147483643;
-  const differentPidInFile = 55555;
+  const observedDeadPid = 2147483643;
+  const respawnedPid = process.pid; // the per-job was relaunched with a live, different pid
 
   const job = {
     id: "task-pid-drift",
     status: "running",
     phase: "investigating",
-    pid: differentPidInFile,
+    pid: respawnedPid,
     logFile: resolveJobLogFile(workspace, "task-pid-drift"),
     createdAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z"
   };
   writeJobFile(workspace, job.id, job);
-  saveState(workspace, {
-    version: 1,
-    config: { stopReviewGate: false },
-    jobs: [{ ...job, pid: deadPidObservedByIndex }]
-  });
 
-  listJobs(workspace);
+  const result = applyJobPatchIfActive(
+    workspace,
+    job.id,
+    () => ({ status: "failed", autoReconciled: true }),
+    (stored) => stored.pid === observedDeadPid // pid drifted -> guard fails
+  );
 
+  assert.equal(result.applied, false);
   const persisted = JSON.parse(fs.readFileSync(resolveJobFile(workspace, job.id), "utf8"));
-  // Per-job file pid disagrees with the dead-pid candidate, so reconcile skipped.
   assert.equal(persisted.status, "running");
   assert.equal(persisted.autoReconciled, undefined);
 });
@@ -605,37 +491,5 @@ test("updateState still deletes the artifacts of a job the caller intentionally 
     fs.existsSync(resolveJobFile(workspace, doomed.id)),
     false,
     "a job the caller dropped from its own snapshot must have its per-job file deleted"
-  );
-});
-
-// A write lock leaked by a crashed holder must be cleaned up with the job's other
-// artifacts when the job is dropped — otherwise it lingers under the jobs dir.
-test("saveState removes the write lock of a job the caller dropped", () => {
-  const workspace = makeTempDir();
-  const doomed = {
-    id: "job-wlock-pruned",
-    status: "completed",
-    phase: "done",
-    pid: null,
-    logFile: null,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z"
-  };
-  writeJobFile(workspace, doomed.id, doomed);
-  saveState(workspace, { version: 1, config: { stopReviewGate: false }, jobs: [doomed] });
-  fs.writeFileSync(
-    resolveJobWriteLockFile(workspace, doomed.id),
-    `${JSON.stringify({ pid: process.pid })}\n`,
-    "utf8"
-  );
-
-  updateState(workspace, (state) => {
-    state.jobs = state.jobs.filter((job) => job.id !== doomed.id);
-  });
-
-  assert.equal(
-    fs.existsSync(resolveJobWriteLockFile(workspace, doomed.id)),
-    false,
-    "a dropped job's write lock must be cleaned up with its other artifacts"
   );
 });

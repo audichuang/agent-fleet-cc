@@ -17,8 +17,8 @@ import {
 test("resolveJobDoneFile points at <jobId>.done inside the jobs dir", () => {
   const workspace = makeTempDir();
   const doneFile = resolveJobDoneFile(workspace, "job-x");
-  assert.equal(path.dirname(doneFile), resolveJobsDir(workspace));
-  assert.equal(path.basename(doneFile), "job-x.done");
+  assert.equal(path.dirname(doneFile), path.join(resolveJobsDir(workspace), "job-x"));
+  assert.equal(path.basename(doneFile), "done.json");
 });
 
 test("writeCompletionSignalFile writes a terminal signal with status and reason", () => {

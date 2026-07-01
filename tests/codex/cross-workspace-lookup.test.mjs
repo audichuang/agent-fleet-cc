@@ -15,8 +15,9 @@ const STATE_ROOT = path.join(process.env.CLAUDE_PLUGIN_DATA, "state");
 
 function seedJobInWorkspaceDir(workspaceDirName, job) {
   const jobsDir = path.join(STATE_ROOT, workspaceDirName, "jobs");
-  fs.mkdirSync(jobsDir, { recursive: true });
-  fs.writeFileSync(path.join(jobsDir, `${job.id}.json`), JSON.stringify(job));
+  const jobDir = path.join(jobsDir, job.id);
+  fs.mkdirSync(jobDir, { recursive: true });
+  fs.writeFileSync(path.join(jobDir, "job.json"), JSON.stringify(job));
 }
 
 test("the test harness redirects HOME so collectCandidateStateRoots never reads the real ~/.claude", () => {

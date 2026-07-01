@@ -21,8 +21,10 @@ import {
   ensureTerminalSignal,
   readJobFile,
   resolveJobFile,
+  resolveStateDir,
   writeCompletionSignalFile
 } from "./lib/state.mjs";
+import { readCurrentTurnIdentity } from "./lib/codex-progress.mjs";
 import { appendLogLine, nowIso } from "./lib/tracked-jobs.mjs";
 import { createLivenessGate, resolveWatchdogConfig } from "./lib/liveness.mjs";
 
@@ -39,6 +41,9 @@ export function makeDefaultDeps() {
         return null;
       }
     },
+    // Turn identity now lives in events.ndjson (Option A: progress -> events), not the
+    // per-job record, so recover it from there for the hung-turn interrupt.
+    readTurnIdentity: (cwd, jobId) => readCurrentTurnIdentity(resolveStateDir(cwd), jobId),
     isProcessAlive,
     statLogMtimeMs: (logFile) => {
       try {
@@ -115,8 +120,9 @@ export async function gatherObservation(cwd, jobId, deps, config) {
     brokerOk,
     missedOwnDeadline,
     thresholds: { hangQuietMs: config.hangQuietMs },
-    threadId: job.threadId ?? null,
-    turnId: job.turnId ?? null,
+    ...(deps.readTurnIdentity
+      ? deps.readTurnIdentity(cwd, jobId)
+      : { threadId: job.threadId ?? null, turnId: job.turnId ?? null }),
     logFile: job.logFile ?? null
   };
 }

@@ -14,6 +14,9 @@ export function newJobId(prefix, now = Date.now()) {
 }
 
 // 統一 Job schema 工廠(spec §3)。核心欄位攤平;引擎特定參數整包進 request。
+/**
+ * @param {{ engine?: string, title?: string, cwd?: string, timeoutMs?: number | null, request?: Record<string, any>, now?: Date }} [options]
+ */
 export function createJobRecord({
   engine,
   title = "",

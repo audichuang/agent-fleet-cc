@@ -80,16 +80,33 @@ test("runTrackedJob still writes a failed signal on a normal (no-race) failure",
   assert.equal(JSON.parse(fs.readFileSync(resolveJobDoneFile(workspace, jobId), "utf8")).status, "failed");
 });
 
-test("runTrackedJob still records completion + signal if the per-job file was pruned mid-run", async () => {
+test("runTrackedJob records completion + signal for a long-running job past a prune of newer terminal jobs", async () => {
   const workspace = makeTempDir();
-  const jobId = "job-pruned-success";
+  const jobId = "job-long-running";
 
-  // Simulate the per-job file being pruned (e.g. >50 newer jobs appeared) while
-  // a silent long-running job was still alive, then the runner succeeds. The
-  // success path must recreate the terminal record + .done (mirror of the
-  // failure-path fallback) so a monitor does not hang.
+  // Under the shared store an ACTIVE job's record is never pruned: pruneJobs keeps
+  // ALL active jobs and only evicts the oldest terminal ones past the cap. So the
+  // bespoke "recreate the per-job file if it vanished mid-run" fallback is gone — the
+  // record is structurally guaranteed to survive. Exercise that: flood the store with
+  // 60 terminal jobs while this one runs, then succeed; the record is still there and
+  // the success path finalizes it normally (no recreate needed).
   const runner = async () => {
-    fs.rmSync(resolveJobFile(workspace, jobId), { force: true });
+    for (let i = 0; i < 60; i += 1) {
+      const id = `terminal-${i}`;
+      writeJobFile(workspace, id, {
+        id,
+        status: "completed",
+        phase: "done",
+        pid: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`
+      });
+      upsertJob(workspace, { id, status: "completed", phase: "done", pid: null });
+    }
+    assert.ok(
+      fs.existsSync(resolveJobFile(workspace, jobId)),
+      "an active job's per-job file must survive a prune of newer terminal jobs",
+    );
     return { exitStatus: 0, payload: { ok: 1 }, rendered: "done", summary: "done" };
   };
 

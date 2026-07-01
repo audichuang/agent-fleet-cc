@@ -28,7 +28,6 @@ import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import { truncateToByteBudget } from "./lib/strings.mjs";
 import {
   applyJobPatchIfActive,
-  claimTerminalTransition,
   generateJobId,
   getConfig,
   listJobs,
@@ -37,11 +36,13 @@ import {
   resolveJobFile,
   resolveJobFileInStateDir,
   resolveJobLogFile,
+  resolveStateDir,
   setConfig,
   upsertJob,
   writeCompletionSignalFile,
   writeJobFile
 } from "./lib/state.mjs";
+import { readCurrentTurnIdentity, resolveAuthoritativeStatus } from "./lib/codex-progress.mjs";
 import {
   buildSingleJobSnapshot,
   buildStatusSnapshot,
@@ -1167,8 +1168,9 @@ async function handleCancel(argv) {
   const reference = positionals[0] ?? "";
   const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env, allowCrossWorkspace: !expected });
   const existing = readStoredJob(workspaceRoot, job.id) ?? {};
-  const threadId = existing.threadId ?? job.threadId ?? null;
-  const turnId = existing.turnId ?? job.turnId ?? null;
+  // Turn identity now lives in events.ndjson (Option A: progress -> events), not the
+  // per-job record, so recover the current ids from there for the turn interrupt.
+  const { threadId, turnId } = readCurrentTurnIdentity(resolveStateDir(workspaceRoot), job.id);
 
   const completedAt = nowIso();
   const cancelPatch = {
@@ -1188,26 +1190,20 @@ async function handleCancel(argv) {
   // the runner, watchdog, and dead-PID reconcile). Mirrors shared cancelJob.
   const result = applyJobPatchIfActive(workspaceRoot, job.id, () => cancelPatch);
 
-  // Defensive fallback: the per-job file was pruned mid-flight (stored===null),
-  // so there is no terminal record to clobber — recreate the cancelled record,
-  // but ONLY if no other actor already finalized the job in the shared index.
-  // Without this guard cancel could resurrect a job to "cancelled" that the
-  // index already records as completed/failed (matches the runner/failure
-  // recreate guards — first terminal writer wins).
-  const recreatedCancelled =
-    !result.applied &&
-    result.stored === null &&
-    !indexedTerminalStatus(workspaceRoot, job.id) &&
-    claimTerminalTransition(workspaceRoot, job.id, "cancelled", completedAt);
-  if (recreatedCancelled) {
-    writeJobFile(workspaceRoot, job.id, { ...existing, ...job, ...cancelPatch });
-    upsertJob(workspaceRoot, { id: job.id, ...cancelPatch });
-  }
-
-  const finalizedAsCancelled = result.applied || recreatedCancelled;
+  // A vanished per-job file (stored===null) is NOT recreated: the shared finalizeJob
+  // refuses to resurrect a removed job, and an active job's record is never pruned
+  // (pruneJobs keeps all active), so a missing record means external deletion that
+  // stays gone. cancel simply loses in that case (first terminal writer wins).
+  const finalizedAsCancelled = result.applied;
+  // On CAS loss the job was finalized by someone else (worker/watchdog/another cancel).
+  // result.stored is the pre-claim snapshot — still "running"/"queued" — so reporting it
+  // would mis-state a finished job as active. Read the terminal.lock as authority first
+  // (R1), then fall back to the legacy index, then to "cancelled".
   const finalStatus = finalizedAsCancelled
     ? "cancelled"
-    : result.stored?.status ?? indexedTerminalStatus(workspaceRoot, job.id) ?? "cancelled";
+    : resolveAuthoritativeStatus(resolveStateDir(workspaceRoot), job.id) ??
+      indexedTerminalStatus(workspaceRoot, job.id) ??
+      "cancelled";
 
   let interrupt = { attempted: false, interrupted: false };
   if (finalizedAsCancelled) {
@@ -1351,16 +1347,21 @@ export async function handleAttach(argv, deps = {}) {
   let jobId;
   let logFile;
   let statusFile;
+  let statusStateDir;
   if (reference) {
     const snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
     workspaceRoot = snapshot.workspaceRoot;
     jobId = snapshot.job.id;
-    logFile = snapshot.job.logFile ?? resolveJobLogFile(workspaceRoot, jobId);
-    // For a cross-workspace hit, read status from the job's PHYSICAL state dir;
+    // For a cross-workspace hit, read from the job's PHYSICAL state dir;
     // re-deriving from workspaceRoot can resolve to a different (missing) path.
+    statusStateDir = snapshot.stateDir ?? resolveStateDir(workspaceRoot);
     statusFile = snapshot.stateDir
       ? resolveJobFileInStateDir(snapshot.stateDir, jobId)
       : resolveJobFile(workspaceRoot, jobId);
+    // Derive the log from the SAME per-job dir as the resolved job.json (a pure
+    // join, no mkdir) so a record missing logFile never re-derives a wrong dir
+    // under the current workspace root (directory-per-job: log sits beside job.json).
+    logFile = snapshot.job.logFile ?? path.join(path.dirname(statusFile), "log");
   } else {
     workspaceRoot = resolveCommandWorkspace(options);
     const active = sortJobsNewestFirst(listJobs(workspaceRoot)).find(
@@ -1371,6 +1372,7 @@ export async function handleAttach(argv, deps = {}) {
     }
     jobId = active.id;
     logFile = active.logFile ?? resolveJobLogFile(workspaceRoot, jobId);
+    statusStateDir = resolveStateDir(workspaceRoot);
     statusFile = resolveJobFile(workspaceRoot, jobId);
   }
 
@@ -1380,7 +1382,11 @@ export async function handleAttach(argv, deps = {}) {
     deps.readStatus ??
     (() => {
       try {
-        return readJobFile(statusFile)?.status ?? null;
+        // R1: read the AUTHORITATIVE status (terminal.lock over a stale-running
+        // job.json), not raw job.json.status. A markJobRunning-vs-finalizeJob race
+        // can leave job.json "running" after a finalize won the lock; reading raw
+        // status would tail a finished job until maxPolls (~65 min).
+        return resolveAuthoritativeStatus(statusStateDir, jobId) ?? null;
       } catch {
         return null;
       }

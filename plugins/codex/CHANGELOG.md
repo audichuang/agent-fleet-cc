@@ -1,5 +1,80 @@
 # Changelog
 
+## 1.0.34
+
+A follow-up adversarial review (cross-model, read-only) of the 1.0.31→1.0.33 range
+found two defects the changeset itself introduced. Both fixed; the other two findings
+were pre-existing code outside this range and are deferred to the shared-runtime
+migration. Full suite + e2e green.
+
+- **R5 (blocker)** — codex's own duplicate orphan-lock repair
+  (`state.mjs` `reconcileDeadPidJobs`) wrote with the default `writeJob()`, missing the
+  R3 `ensureDir:false` hardening the shared `reconcileDeadPids` got: a concurrent prune
+  that deleted the job dir between the fresh-read and the write would be resurrected
+  (TOCTOU). Now mirrors the shared pattern (`ensureDir:false` + try/catch + abort).
+  New regression test (`tests/codex/reconcile-no-resurrect.test.mjs`), teeth-proven.
+- **R6 (reporting)** — `/codex:cancel` on a CAS loss reported `result.stored.status`,
+  the pre-claim snapshot (still `"running"`), mis-stating a finished job as active. Now
+  resolves the authoritative status (terminal.lock) first, then the legacy index. No
+  safety impact (a lost CAS never signalled the pid).
+
+Deferred (pre-existing, not in the 1.0.31→1.0.33 diff): the session-end cleanup hook
+still decides off raw `job.json.status` before the CAS, and the shared public
+`waitForJob`/`cancelJob` readers do not overlay the terminal.lock. Both land with the
+shared-runtime migration (which also deletes codex's duplicate reconcile).
+
+## 1.0.33
+
+Close the Phase 1A read-side gaps a 4-lens adversarial review found: the
+lock-as-authority overlay was wired into `listJobs` but not the readers that read
+`job.json` directly, so the markJobRunning-vs-finalizeJob window (the `.wlock`
+removal opened) could over-wait/over-tail a finished job. TDD; 8 regression tests;
+hermetic suite + real-engine smoke + completed happy-path all green.
+
+- **R1 (major)** — `/codex:attach` and `/codex:logs --follow` (`handleAttach`'s
+  `readStatus`) read raw `job.json.status`; now read through
+  `resolveAuthoritativeStatus` (terminal.lock over a stale job.json).
+- **R2 (minor)** — the cross-workspace lookup (`findJobByIdAcrossWorkspaces`) now
+  overlays the terminal.lock (mirrors `listJobs`), so `/codex:wait <foreign-id>`
+  no longer polls to timeout on a finished job.
+- **R3 (shared)** — `writeJsonAtomic`/`writeJob` gain `ensureDir:false`; the
+  reconcile lock-repair (shared + codex) writes with it + try/catch, so a dir a
+  concurrent prune deleted fails cleanly instead of being resurrected (TOCTOU).
+- **R4 (shared)** — new `sweepOrphanLockDirs` (called by `pruneJobs` + codex
+  `saveState`) reaps a lock-only zombie dir left by a prune that crashed between
+  the `job.json` and `terminal.lock` unlinks; in-flight dirs (no lock) untouched.
+
+Shared changes re-vendored into cc + codex.
+
+## 1.0.32
+
+Phase 1A of the shared state-store migration (no behaviour change — every consumer + e2e
+preserved). codex's persistence moves onto the shared directory-per-job store
+(`shared/lib/core/state-store.mjs`), making the B/C cross-process races structurally
+impossible rather than mitigated, and shrinking `state.mjs`.
+
+- **1a** directory-per-job layout (`jobs/<id>/{job.json,log,done.json,terminal.lock}`);
+  `saveState` deletes in the load-bearing unlink order (job.json before terminal.lock).
+- **1c-i** `listJobs` scans the per-job directory (the per-job file is the single source of
+  truth; the `state.json` index is dead-for-reads, still written until 1e).
+- **1c-ii-a** live progress (phase/threadId/turnId) moves to append-only `events.ndjson`
+  (`engine-event`), so `job.json` is written only by `markJobRunning`/`finalizeJob` —
+  **B3 (a progress write clobbering a terminal record) is structurally eliminated**. The
+  four interrupt readers (watchdog/cancel/crash-net/timeout) and the status/result display
+  fold turn identity from the event log.
+- **1c-ii-b** terminal transitions route through the shared `finalizeJob`; the bespoke
+  fail-open per-job write mutex (`.wlock`) and codex's own terminal-claim + stale-reclaim
+  machinery are **deleted**. `listJobs` treats the `terminal.lock` as authoritative over a
+  stale-active `job.json` (lock-as-authority).
+- **Shared store hardening** (benefits cc too): `finalizeJob`/`markJobRunning` gain an
+  optional `guard` checked atomically on the fresh record after the claim;
+  `reconcileDeadPids` reclaims an orphaned `terminal.lock` based on the CLAIM owner's
+  liveness + a TTL (not the worker pid), so a separate finalizer (cancel/watchdog) that
+  crashed mid-transition — while the worker is still alive — is recovered, and a malformed
+  lock self-heals once stale. A live finalizer's fresh claim is never reclaimed.
+
+Validated by a 4-round cross-model Codex review (final: PROCEED).
+
 ## 1.0.31
 
 Internal scaffolding (no behaviour change) — Phase 0 of the shared state-store migration

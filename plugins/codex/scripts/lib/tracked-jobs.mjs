@@ -5,24 +5,24 @@ import { terminateProcessTree } from "./process.mjs";
 
 import {
   applyJobPatchIfActive,
-  claimTerminalTransition,
   loadState,
   readJobFile,
   resolveJobFile,
   resolveJobLogFile,
+  resolveStateDir,
   upsertJob,
   writeCompletionSignalFile,
   writeJobFile
 } from "./state.mjs";
+import { appendProgressEvent, readCurrentTurnIdentity } from "./codex-progress.mjs";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 // Returns the index's terminal status for a job (completed/failed/cancelled),
 // or null when the job is absent or still active. Exported so the cancel handler
-// can report the real outcome when it loses the terminal race. The stored===null
-// recreate fallbacks no longer rely on this — they go through the cross-process
-// O_EXCL claim (claimTerminalTransition) so first-terminal-writer-wins holds even
-// when the per-job file was pruned.
+// can report the real outcome when it loses the terminal race (shared finalizeJob
+// returned false). The vanished-file recreate fallbacks are gone — the shared store
+// never resurrects a removed job.
 export function indexedTerminalStatus(workspaceRoot, jobId) {
   const entry = loadState(workspaceRoot).jobs.find((job) => job.id === jobId);
   return entry && TERMINAL_STATUSES.has(entry.status) ? entry.status : null;
@@ -130,30 +130,31 @@ export function createJobRecord(base, options = {}) {
 }
 
 export function createJobProgressUpdater(workspaceRoot, jobId) {
+  const stateDir = resolveStateDir(workspaceRoot);
   let lastPhase = null;
   let lastThreadId = null;
   let lastTurnId = null;
 
   return (event) => {
     const normalized = normalizeProgressEvent(event);
-    const patch = { id: jobId };
+    const fields = {};
     let changed = false;
 
     if (normalized.phase && normalized.phase !== lastPhase) {
       lastPhase = normalized.phase;
-      patch.phase = normalized.phase;
+      fields.phase = normalized.phase;
       changed = true;
     }
 
     if (normalized.threadId && normalized.threadId !== lastThreadId) {
       lastThreadId = normalized.threadId;
-      patch.threadId = normalized.threadId;
+      fields.threadId = normalized.threadId;
       changed = true;
     }
 
     if (normalized.turnId && normalized.turnId !== lastTurnId) {
       lastTurnId = normalized.turnId;
-      patch.turnId = normalized.turnId;
+      fields.turnId = normalized.turnId;
       changed = true;
     }
 
@@ -161,12 +162,12 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
       return;
     }
 
-    // Suppress progress updates once the job has already reached a terminal
-    // state. Without this, a runner that keeps producing events after the
-    // layer-2 hard timeout rejected Promise.race would race the failure
-    // write (`phase: failed`) back into `phase: investigating`, flicker
-    // `updatedAt`, and pollute the persisted record with stale fields.
-    applyJobPatchIfActive(workspaceRoot, jobId, patch);
+    // Option A: progress goes to the append-only events.ndjson, NEVER job.json, so a
+    // progress update can never resurrect a terminal record (B3 structurally gone).
+    // The old post-terminal suppression is unnecessary: an event sets no status, and
+    // no actor interrupts/acts on a job it reads as terminal, so a late progress event
+    // after finalize is inert (readers fold turn identity but ignore terminal jobs).
+    appendProgressEvent(stateDir, jobId, fields);
   };
 }
 
@@ -232,12 +233,14 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
     }
     fired = true;
 
-    // Capture turn identity from the per-job file (the progress updater writes
-    // threadId/turnId there once the turn starts) BEFORE finalizing, so we can
-    // reap the orphaned turn even though the finalize patch sets pid:null.
+    // Capture turn identity from events.ndjson (Option A: the progress updater appends
+    // threadId/turnId as engine-events once the turn starts) BEFORE finalizing, so we
+    // can reap the orphaned turn even though the finalize patch sets pid:null.
     const stored = readStoredJob();
-    const threadId = stored?.threadId ?? null;
-    const turnId = stored?.turnId ?? null;
+    const { threadId, turnId } = (options.readTurnIdentity ?? readCurrentTurnIdentity)(
+      resolveStateDir(job.workspaceRoot),
+      job.id
+    );
 
     // A terminating signal (host kill / Ctrl-C / shell timeout reaping the tree) is not
     // an uncaught error — record it as such so the failure reason is not misleading.
@@ -257,25 +260,16 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
 
     let wrote = false;
     try {
+      // Route through the shared finalizeJob CAS (first-terminal-writer-wins). A
+      // vanished per-job file (stored===null) is NOT recreated: the shared store
+      // refuses to resurrect a removed job, and an active job's record is never pruned
+      // (pruneJobs keeps all active), so a missing record means external deletion that
+      // is meant to stay gone.
       const result = applyJobPatchIfActive(job.workspaceRoot, job.id, (existing) => ({
         ...failurePatch,
         logFile: logFile ?? existing.logFile ?? null
       }));
       wrote = result.applied;
-      if (
-        !wrote &&
-        result.stored === null &&
-        !indexedTerminalStatus(job.workspaceRoot, job.id) &&
-        claimTerminalTransition(job.workspaceRoot, job.id, "failed", completedAt)
-      ) {
-        writeJobFile(job.workspaceRoot, job.id, {
-          ...runningRecord,
-          ...failurePatch,
-          logFile: logFile ?? runningRecord?.logFile ?? null
-        });
-        upsertJob(job.workspaceRoot, { id: job.id, ...failurePatch });
-        wrote = true;
-      }
     } catch {
       // Never let the crash handler itself throw before it can exit.
     }
@@ -481,44 +475,11 @@ export async function runTrackedJob(job, runner, options = {}) {
       })
     );
 
-    // Defensive fallback (mirror of the failure path): if the per-job file
-    // vanished (pruned while a silent long job was still alive), the CAS reads
-    // stored===null and does not apply. Recreate the terminal record directly
-    // so a successful run is not silently dropped — keeping the index light.
-    // BUT only if no other actor already finalized the job; the recreate goes
-    // through the SAME cross-process O_EXCL terminal claim as the normal path,
-    // so two pruned-file recreaters (e.g. runner success vs cancel/watchdog)
-    // cannot both write a terminal record — first-terminal-writer-wins holds.
-    const recreateSuccess =
-      !result.applied &&
-      result.stored === null &&
-      !indexedTerminalStatus(job.workspaceRoot, job.id) &&
-      claimTerminalTransition(job.workspaceRoot, job.id, completionStatus, completedAt);
-    if (recreateSuccess) {
-      writeJobFile(job.workspaceRoot, job.id, {
-        ...runningRecord,
-        status: completionStatus,
-        threadId: execution.threadId ?? null,
-        turnId: execution.turnId ?? null,
-        pid: null,
-        phase,
-        completedAt,
-        result: execution.payload,
-        rendered: execution.rendered
-      });
-      upsertJob(job.workspaceRoot, {
-        id: job.id,
-        status: completionStatus,
-        threadId: execution.threadId ?? null,
-        turnId: execution.turnId ?? null,
-        summary: execution.summary,
-        phase,
-        pid: null,
-        completedAt
-      });
-    }
-
-    if (result.applied || recreateSuccess) {
+    // A vanished per-job file (stored===null) is NOT recreated under the shared store:
+    // an active job's record is never pruned (pruneJobs keeps all active), so a missing
+    // record means external deletion that stays gone — resurrecting it would defeat the
+    // store's "a removed job is never revived" invariant.
+    if (result.applied) {
       appendLogBlock(options.logFile ?? job.logFile ?? null, "Final output", execution.rendered);
       // Terminal signal so a monitor (Claude-side `until [ -f signalFile ]` loop
       // or the detached watchdog) learns the job finished and can surface the
@@ -553,11 +514,12 @@ export async function runTrackedJob(job, runner, options = {}) {
     if (timedOut || idleTimedOut) {
       const interrupt = options.interruptOnTimeout ?? defaultInterruptOnTimeout;
       try {
-        const stored = readJobFile(resolveJobFile(job.workspaceRoot, job.id));
-        // interruptAppServerTurn no-ops unless BOTH ids are present; gate on AND
-        // so a half-populated record does not trigger a guaranteed-useless RPC.
-        const threadId = stored?.threadId ?? error?.threadId ?? null;
-        const turnId = stored?.turnId ?? error?.turnId ?? null;
+        // Turn identity now lives in events.ndjson (Option A); fall back to the ids
+        // carried on the idle error. interruptAppServerTurn no-ops unless BOTH ids are
+        // present; gate on AND so a half-populated identity does not trigger a useless RPC.
+        const current = readCurrentTurnIdentity(resolveStateDir(job.workspaceRoot), job.id);
+        const threadId = current.threadId ?? error?.threadId ?? null;
+        const turnId = current.turnId ?? error?.turnId ?? null;
         if (threadId && turnId) {
           await interrupt(job.cwd ?? job.workspaceRoot, { threadId, turnId });
         }
@@ -590,31 +552,13 @@ export async function runTrackedJob(job, runner, options = {}) {
       })
     );
 
-    // Defensive fallback: if the per-job file somehow went missing between
-    // runningRecord write and now, the helper returns applied=false with
-    // stored=null. Fall back to a direct write so the job does not silently
-    // disappear — but only if we win the SAME cross-process terminal claim as the
-    // normal path (first-terminal-writer-wins; do not resurrect another actor's
-    // terminal state).
-    const recreateFailure =
-      !result.applied &&
-      result.stored === null &&
-      !indexedTerminalStatus(job.workspaceRoot, job.id) &&
-      claimTerminalTransition(job.workspaceRoot, job.id, "failed", completedAt);
-    if (recreateFailure) {
-      writeJobFile(job.workspaceRoot, job.id, {
-        ...runningRecord,
-        ...failurePatch,
-        logFile: options.logFile ?? job.logFile ?? runningRecord.logFile ?? null
-      });
-      upsertJob(job.workspaceRoot, { id: job.id, ...failurePatch });
-    }
-    // Terminal signal on the failure path too, so a waiting monitor stops and
-    // the failure reason can be surfaced rather than hanging — but ONLY if we
-    // actually wrote the failure. If the CAS lost because another actor already
-    // finalized the job (e.g. user cancel, watchdog), do not stomp its terminal
-    // signal with "failed".
-    if (result.applied || recreateFailure) {
+    // A vanished per-job file (stored===null) is NOT recreated under the shared store
+    // (a removed job is never revived; an active job's record is never pruned anyway).
+    // Terminal signal on the failure path too, so a waiting monitor stops and the
+    // failure reason can be surfaced rather than hanging — but ONLY if we actually
+    // wrote the failure. If the CAS lost because another actor already finalized the
+    // job (e.g. user cancel, watchdog), do not stomp its terminal signal with "failed".
+    if (result.applied) {
       writeCompletionSignalFile(job.workspaceRoot, job.id, {
         status: "failed",
         reason: errorMessage
