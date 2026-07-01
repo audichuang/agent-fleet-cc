@@ -35,6 +35,18 @@ export function stateDirFor(cwd, env = process.env) {
   return workspaceStateDir(resolveDataRoot(env), cwd);
 }
 
+// Multi-session isolation (D-14 / BEHAVIOR CHANGE 6): the host session id lives
+// in the shared job's top-level `sessionId` field (makeRecord writes it from
+// ANTIGRAVITY_PLUGIN_SESSION_ID). status/result/cancel filter jobs to the
+// current session over that field. Ported from the deleted job-control.mjs so
+// the filter has a home once that module is gone.
+export const SESSION_ID_ENV = "ANTIGRAVITY_PLUGIN_SESSION_ID";
+export function filterJobsForCurrentSession(jobs, env = process.env) {
+  const sessionId = env[SESSION_ID_ENV] ?? null;
+  if (!sessionId) return jobs;
+  return jobs.filter((j) => j.sessionId === sessionId);
+}
+
 // updatedAt-desc re-sort (D-7 / codex regression fix): shared listJobs sorts by
 // createdAt (state-store.mjs), but status/result present newest-activity-first.
 // Ported from job-control.mjs's sortJobsNewestFirst.

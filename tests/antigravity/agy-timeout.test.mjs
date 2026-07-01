@@ -1,58 +1,55 @@
 /**
- * Worker timeout wiring. A hung `agy --print` must be bounded:
+ * Worker timeout wiring (shared runtime). A hung `agy --print` must be bounded:
  *  - agy's own `--print-timeout` is forwarded explicitly (no reliance on its
- *    hidden 5m default), and
- *  - resolveAgyTimeouts derives a Node-side hard backstop so a wedged agy that
- *    ignores its own timeout is still killed by runAgyPrint's SIGTERM timer.
+ *    hidden 5m default) — asserted on the adapter's buildInvocation argv, and
+ *  - the shared worker's Node-side hard backstop (job.timeoutMs) kills a wedged
+ *    agy that ignores its own timeout, finalizing the job `timed-out`.
+ *
+ * resolveAgyTimeouts moved to lib/adapter.mjs and is unit-tested there
+ * (adapter.test.mjs). This suite drives the real shared worker + fake-agy.
  */
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { makeAntigravityAdapter } from "../../plugins/antigravity/scripts/lib/adapter.mjs";
+import { createJobRecord } from "../../plugins/antigravity/scripts/lib/shared/core/job.mjs";
+import { createJob, readJob } from "../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs";
+import { runWorker } from "../../plugins/antigravity/scripts/lib/shared/runtime/worker.mjs";
 
-import { runAgyPrint, resolveAgyTimeouts } from '../../plugins/antigravity/scripts/lib/agent-runtime.mjs';
+const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fake-agy.mjs");
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "agy-timeout-"));
 
-let tempDir;
-let argEcho;
-beforeEach(() => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-timeout-'));
-  // Fake agy that prints each argv entry on its own line.
-  argEcho = path.join(tempDir, 'agy');
-  fs.writeFileSync(argEcho, '#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
-});
-afterEach(() => {
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-describe('resolveAgyTimeouts', () => {
-  it('defaults to a 5m print timeout and a longer hard backstop', () => {
-    const { printMs, hardMs } = resolveAgyTimeouts({});
-    assert.equal(printMs, 300000);
-    assert.ok(hardMs > printMs, 'hard backstop should exceed the print timeout');
+test("buildInvocation forwards --print-timeout as a Go duration", () => {
+  const a = makeAntigravityAdapter({ env: {} });
+  const { argv } = a.buildInvocation({
+    job: { request: { mode: "print", printTimeoutMs: 30000 } },
+    prompt: "hi",
   });
-
-  it('honors AGY_PRINT_TIMEOUT_MS and AGY_JOB_TIMEOUT_MS overrides', () => {
-    const { printMs, hardMs } = resolveAgyTimeouts({
-      AGY_PRINT_TIMEOUT_MS: '1000',
-      AGY_JOB_TIMEOUT_MS: '5000',
-    });
-    assert.equal(printMs, 1000);
-    assert.equal(hardMs, 5000);
-  });
+  const ti = argv.indexOf("--print-timeout");
+  assert.ok(ti >= 0, "--print-timeout present");
+  assert.equal(argv[ti + 1], "30s");
 });
 
-describe('runAgyPrint forwards --print-timeout', () => {
-  it('passes the print timeout as a Go duration when printTimeoutMs is set', async () => {
-    const res = await runAgyPrint({ prompt: 'hi', printTimeoutMs: 30000, bin: argEcho });
-    assert.equal(res.status, 'completed');
-    assert.match(res.stdout, /--print-timeout/);
-    assert.match(res.stdout, /\b30s\b/);
-  });
-
-  it('omits --print-timeout when not requested', async () => {
-    const res = await runAgyPrint({ prompt: 'hi', bin: argEcho });
-    assert.doesNotMatch(res.stdout, /--print-timeout/);
-  });
+test("hard backstop: a hung agy is killed and finalized timed-out", async () => {
+  const sd = tmp();
+  // job.timeoutMs is the worker's hard backstop timer (worker.mjs:177). Use a
+  // short one so the fake `hang` mode (never exits) is force-terminated.
+  const rec = createJobRecord({ engine: "antigravity", timeoutMs: 400, request: { mode: "print" } });
+  createJob(sd, rec, "hang please");
+  const base = makeAntigravityAdapter();
+  const adapter = {
+    ...base,
+    buildInvocation: ({ prompt }) => ({
+      argv: [process.execPath, FAKE, "--print", prompt],
+      env: { FAKE_AGY_MODE: "hang" },
+      stdinPayload: "",
+    }),
+  };
+  await runWorker({ stateDir: sd, jobId: rec.id, adapter, deps: { graceMs: 150 } });
+  const job = readJob(sd, rec.id);
+  assert.equal(job.status, "timed-out");
 });

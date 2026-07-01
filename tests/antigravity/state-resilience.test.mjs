@@ -1,13 +1,15 @@
 /**
- * State resilience:
- *  - Corrupt state.json / per-job files are quarantined (renamed aside) and a
- *    warning is emitted, instead of silently returning an empty index — so a
- *    partial write or power loss can't make every job vanish without a trace.
- *  - touchJobProgress writes lastProgressAt/lastHeartbeatAt so the health
- *    classifier's 'active' branch is reachable (previously nothing wrote them,
- *    so every long job eventually showed a misleading 'possibly_stalled').
+ * State resilience on the shared runtime (directory-per-job layout).
+ *
+ * The old flat `state.json` index quarantined corrupt files aside; the shared
+ * store instead makes reads defensive — `readJob` returns null on a corrupt or
+ * missing job.json (never throws) and `listJobs` simply skips any unreadable
+ * job directory, so a partial write / power loss / an old ≤0.2.0 flat-layout
+ * `jobs/<id>.json` file can never make every job vanish or crash a read
+ * (state-store.mjs:52-75; migration DATA-INTEGRITY §). The exhaustive CAS /
+ * corruption matrix lives in tests/shared/; here we assert the antigravity
+ * plugin inherits it through the vendored copy.
  */
-
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,94 +17,60 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+import { createJobRecord } from '../../plugins/antigravity/scripts/lib/shared/core/job.mjs';
 import {
-  ensureStateDir,
-  loadState,
-  readJobFile,
-  resolveStateFile,
-  resolveJobFile,
-  upsertJob,
-  writeJobFile,
-  touchJobProgress,
-} from '../../plugins/antigravity/scripts/lib/state.mjs';
-import { buildSingleJobSnapshot } from '../../plugins/antigravity/scripts/lib/job-control.mjs';
+  createJob,
+  readJob,
+  listJobs,
+  jobDir,
+} from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
 
-const ORIGINAL = process.env.CLAUDE_PLUGIN_DATA;
-let tempDir;
+let stateDir;
 beforeEach(() => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-resil-'));
-  process.env.CLAUDE_PLUGIN_DATA = tempDir;
+  stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-resil-'));
 });
 afterEach(() => {
-  if (ORIGINAL === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-  else process.env.CLAUDE_PLUGIN_DATA = ORIGINAL;
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  fs.rmSync(stateDir, { recursive: true, force: true });
 });
 
-function captureStderr() {
-  const buf = [];
-  const orig = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (c) => (buf.push(String(c)), true);
-  return { text: () => buf.join(''), restore: () => { process.stderr.write = orig; } };
+function seed(id, resultText = 'ok') {
+  const rec = createJobRecord({ engine: 'antigravity' });
+  createJob(stateDir, { ...rec, id, status: 'completed', resultText }, 'prompt');
+  return id;
 }
 
-describe('corruption quarantine', () => {
-  it('quarantines a corrupt state.json and returns defaults', () => {
-    ensureStateDir(tempDir);
-    const stateFile = resolveStateFile(tempDir);
-    fs.writeFileSync(stateFile, '{ not valid json ');
-    const cap = captureStderr();
-    let state;
+describe('shared read resilience', () => {
+  it('readJob returns null (no throw) for a corrupt job.json', () => {
+    const id = 'corrupt-' + randomBytes(2).toString('hex');
+    fs.mkdirSync(jobDir(stateDir, id), { recursive: true });
+    fs.writeFileSync(path.join(jobDir(stateDir, id), 'job.json'), '{ not valid json ');
+    assert.equal(readJob(stateDir, id), null);
+  });
+
+  it('readJob returns null for a missing job', () => {
+    assert.equal(readJob(stateDir, 'never-created'), null);
+  });
+
+  it('listJobs skips corrupt/foreign directories and keeps the good jobs', () => {
+    seed('good-one');
+    seed('good-two');
+    // A corrupt job dir.
+    const bad = 'bad-' + randomBytes(2).toString('hex');
+    fs.mkdirSync(jobDir(stateDir, bad), { recursive: true });
+    fs.writeFileSync(path.join(jobDir(stateDir, bad), 'job.json'), 'definitely not json');
+    // An old ≤0.2.0 flat-layout file where the shared store expects a directory.
+    fs.writeFileSync(path.join(jobDir(stateDir, '..'), 'legacy.json'), '{"id":"legacy"}');
+
+    const ids = listJobs(stateDir).map((j) => j.id).sort();
+    assert.deepEqual(ids, ['good-one', 'good-two']);
+  });
+
+  it('listJobs returns [] for a state dir with no jobs root (never throws)', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-empty-'));
     try {
-      state = loadState(tempDir);
+      assert.deepEqual(listJobs(empty), []);
     } finally {
-      cap.restore();
+      fs.rmSync(empty, { recursive: true, force: true });
     }
-    assert.deepEqual(state.jobs, []);
-    const dir = path.dirname(stateFile);
-    assert.ok(
-      fs.readdirSync(dir).some((f) => f.startsWith('state.json.corrupt')),
-      'corrupt state.json should be quarantined aside',
-    );
-    assert.match(cap.text(), /corrupt/i);
-  });
-
-  it('readJobFile returns null and quarantines a corrupt per-job file', () => {
-    ensureStateDir(tempDir);
-    const jf = resolveJobFile(tempDir, 'bad');
-    fs.writeFileSync(jf, 'definitely not json');
-    const cap = captureStderr();
-    let r;
-    try {
-      r = readJobFile(tempDir, 'bad');
-    } finally {
-      cap.restore();
-    }
-    assert.equal(r, null);
-    const dir = path.dirname(jf);
-    assert.ok(fs.readdirSync(dir).some((f) => f.startsWith('bad.json.corrupt')));
-  });
-
-  it('readJobFile returns null for a missing file without quarantining', () => {
-    ensureStateDir(tempDir);
-    assert.equal(readJobFile(tempDir, 'nope'), null);
-    const dir = path.dirname(resolveJobFile(tempDir, 'nope'));
-    assert.ok(!fs.readdirSync(dir).some((f) => f.includes('corrupt')));
-  });
-});
-
-describe('heartbeat → health', () => {
-  it('touchJobProgress drives a live running job to active health', async () => {
-    const id = 'hb' + randomBytes(2).toString('hex');
-    ensureStateDir(tempDir);
-    const job = { id, kind: 'task', status: 'running', phase: 'running', pid: process.pid };
-    await upsertJob(tempDir, job);
-    await writeJobFile(tempDir, id, job);
-
-    await touchJobProgress(tempDir, id);
-
-    const snap = buildSingleJobSnapshot(tempDir, id);
-    assert.equal(snap.job.healthStatus, 'active');
-    assert.ok(readJobFile(tempDir, id).lastProgressAt);
   });
 });

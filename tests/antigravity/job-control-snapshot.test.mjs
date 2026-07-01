@@ -1,281 +1,91 @@
 /**
- * Deep tests for scripts/lib/job-control.mjs and the status/result/cancel
- * helpers it powers.
+ * The status/result command projection on the shared runtime.
  *
- * All tests are pure data-driven: we seed jobs via state.mjs (no subprocesses)
- * and exercise buildStatusSnapshot, buildSingleJobSnapshot, resolveResultJob,
- * resolveCancelableJob, plus the classifyRuntimeHealth branches (active /
- * quiet / possibly_stalled / worker_missing / persisted_diagnostic).
+ * The old deep job-control helpers (buildStatusSnapshot / buildSingleJobSnapshot
+ * / resolveResultJob / resolveCancelableJob) and the whole health classifier are
+ * gone (BEHAVIOR CHANGE 5): status/result now read the shared store via
+ * `listProjectedJobs` (listJobs → updatedAt-desc → projectJob) and select inline.
+ * These tests assert the surviving, non-health projection: newest-activity-first
+ * ordering (D-7) and the antigravity-shaped fields render.mjs consumes. Job
+ * selection (exact/substring/1-based index) and the multi-active refusal are
+ * covered end-to-end against the shared layout by cancel-cas.test.mjs and
+ * e2e-cli.test.mjs.
  */
-
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
 
+import { createJobRecord } from '../../plugins/antigravity/scripts/lib/shared/core/job.mjs';
+import { createJob, jobDir } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
 import {
-  upsertJob,
-  writeJobFile,
-  appendJobLog,
-  ensureStateDir,
-  saveState,
-  resolveJobLogFile,
-} from '../../plugins/antigravity/scripts/lib/state.mjs';
-import {
-  buildStatusSnapshot,
-  buildSingleJobSnapshot,
-  resolveResultJob,
-  resolveCancelableJob,
-  SESSION_ID_ENV,
-  QUIET_AFTER_MS,
-  POSSIBLY_STALLED_AFTER_MS,
-} from '../../plugins/antigravity/scripts/lib/job-control.mjs';
+  listProjectedJobs,
+  projectJob,
+} from '../../plugins/antigravity/scripts/lib/job-runtime.mjs';
 
-const TMPROOT = '/tmp';
-
-let workCwd;
-let dataDir;
-const savedEnv = {};
-
+let stateDir;
 beforeEach(() => {
-  // Fresh workspace + data dir per test so the on-disk state is deterministic.
-  workCwd = fs.mkdtempSync(path.join(TMPROOT, 'antigravity-jc-'));
-  dataDir = fs.mkdtempSync(path.join(TMPROOT, 'antigravity-jc-data-'));
-  savedEnv.CLAUDE_PLUGIN_DATA = process.env.CLAUDE_PLUGIN_DATA;
-  savedEnv[SESSION_ID_ENV] = process.env[SESSION_ID_ENV];
-  process.env.CLAUDE_PLUGIN_DATA = dataDir;
-  process.env[SESSION_ID_ENV] = 'sess-' + randomBytes(2).toString('hex');
+  stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-jc-'));
+});
+afterEach(() => {
+  fs.rmSync(stateDir, { recursive: true, force: true });
 });
 
-after(() => {
-  // Best-effort restore.
-  if (savedEnv.CLAUDE_PLUGIN_DATA === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-  else process.env.CLAUDE_PLUGIN_DATA = savedEnv.CLAUDE_PLUGIN_DATA;
-  if (savedEnv[SESSION_ID_ENV] === undefined) delete process.env[SESSION_ID_ENV];
-  else process.env[SESSION_ID_ENV] = savedEnv[SESSION_ID_ENV];
-});
-
-async function seedJob(overrides = {}) {
-  const id = overrides.id ?? randomBytes(4).toString('hex');
-  const sessionId = overrides.sessionId ?? process.env[SESSION_ID_ENV];
-  const job = {
-    id,
-    kind: 'task',
-    status: 'queued',
-    phase: 'queued',
-    sessionId,
-    pid: null,
-    createdAt: new Date(2024, 0, 1, 0, 0, 0).toISOString(),
-    updatedAt: new Date(2024, 0, 1, 0, 0, 1).toISOString(),
-    logFile: resolveJobLogFile(workCwd, id),
-    ...overrides,
-  };
-  await upsertJob(workCwd, job);
-  await writeJobFile(workCwd, id, { ...job, request: null, result: null });
-  return job;
+// createJob writes the record verbatim (no updatedAt bump), so timestamps stamped
+// on the record land on disk unchanged.
+function seed(id, { createdAt, updatedAt, status = 'completed', resultText = null } = {}) {
+  const rec = createJobRecord({ engine: 'antigravity' });
+  createJob(
+    stateDir,
+    { ...rec, id, status, resultText, createdAt, updatedAt },
+    'prompt',
+  );
 }
 
-describe('buildStatusSnapshot', () => {
-  it('partitions session jobs into running/recent and respects maxJobs', async () => {
-    await seedJob({ id: 'a', status: 'running' });
-    await seedJob({ id: 'b', status: 'queued' });
-    await seedJob({ id: 'c', status: 'completed', completedAt: new Date().toISOString() });
-    await seedJob({ id: 'd', status: 'failed' });
-
-    const snap = buildStatusSnapshot(workCwd, { env: process.env, maxJobs: 2 });
-    assert.equal(snap.running.length, 2);
-    assert.equal(snap.recent.length, 2);
-    assert.ok(snap.running.some((j) => j.id === 'a'));
-    assert.ok(snap.recent.some((j) => j.id === 'c'));
-    assert.equal(snap.needsReview, false);
-    assert.ok(snap.workspaceRoot.length > 0);
+describe('listProjectedJobs', () => {
+  it('orders by updatedAt desc even when createdAt disagrees (D-7)', () => {
+    seed('a', { createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' });
+    seed('b', { createdAt: '2026-01-02T00:00:00Z', updatedAt: '2026-01-09T00:00:00Z' });
+    seed('c', { createdAt: '2026-01-03T00:00:00Z', updatedAt: '2026-01-04T00:00:00Z' });
+    const ids = listProjectedJobs(stateDir).map((j) => j.id);
+    assert.deepEqual(ids, ['b', 'c', 'a']);
   });
 
-  it('falls back to all jobs when no session id is set', async () => {
-    await seedJob({ id: 'q', status: 'running', sessionId: 'other-session' });
-    delete process.env[SESSION_ID_ENV];
-    const snap = buildStatusSnapshot(workCwd, { env: { /* no session */ } });
-    assert.ok(snap.running.some((j) => j.id === 'q'));
+  it('projects each record into the render-facing shape', () => {
+    seed('done', {
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:01Z',
+      status: 'completed',
+      resultText: 'first line\nsecond line',
+    });
+    const [job] = listProjectedJobs(stateDir);
+    assert.equal(job.id, 'done');
+    assert.equal(job.result.rawOutput, 'first line\nsecond line');
+    assert.equal(job.result.status, 'completed');
+    assert.equal(job.summary, 'first line');
+    assert.equal(job.threadId, null);
+    // No health fields leak into the projection (BEHAVIOR CHANGE 5).
+    assert.equal(job.healthStatus, undefined);
+    assert.equal(job.lastProgressAt, undefined);
+  });
+
+  it('returns [] for an empty state dir', () => {
+    assert.deepEqual(listProjectedJobs(stateDir), []);
   });
 });
 
-describe('buildSingleJobSnapshot', () => {
-  it('resolves by exact id, partial id, and 1-based positional index', async () => {
-    await seedJob({ id: 'abcd1234', status: 'running' });
-    const exact = buildSingleJobSnapshot(workCwd, 'abcd1234');
-    assert.equal(exact.job.id, 'abcd1234');
-
-    const partial = buildSingleJobSnapshot(workCwd, 'abcd');
-    assert.equal(partial.job.id, 'abcd1234');
-
-    const byIdx = buildSingleJobSnapshot(workCwd, '1');
-    assert.equal(byIdx.job.id, 'abcd1234');
+describe('projectJob field mapping', () => {
+  it('null resultText → result null, no health section', () => {
+    const rec = createJobRecord({ engine: 'antigravity' });
+    const p = projectJob({ ...rec, status: 'completed', resultText: null });
+    assert.equal(p.result, null);
+    assert.equal(p.summary, null);
+    assert.equal(p.healthStatus, undefined);
   });
 
-  it('throws a helpful error when no job matches', () => {
-    assert.throws(() => buildSingleJobSnapshot(workCwd, 'missing'), /No job found/);
-  });
-
-  it('enriches a running job with computed elapsed and reads tail of the log file', async () => {
-    const created = new Date(Date.now() - 3000).toISOString();
-    const job = await seedJob({
-      id: 'enrich1',
-      status: 'running',
-      startedAt: created,
-      lastProgressAt: new Date().toISOString(),
-    });
-    appendJobLog(workCwd, job.id, 'progress: line 1');
-    appendJobLog(workCwd, job.id, 'progress: line 2');
-    const snap = buildSingleJobSnapshot(workCwd, job.id);
-    assert.ok(snap.job.elapsed, 'expected elapsed to be computed');
-    assert.ok(Array.isArray(snap.job.recentProgress));
-    assert.ok(snap.job.recentProgress.length >= 1);
-  });
-});
-
-describe('classifyRuntimeHealth — branches via buildSingleJobSnapshot', () => {
-  it('active when lastProgressAt is recent', async () => {
-    const job = await seedJob({
-      id: 'h-active',
-      status: 'running',
-      startedAt: new Date().toISOString(),
-      lastProgressAt: new Date().toISOString(),
-    });
-    const snap = buildSingleJobSnapshot(workCwd, job.id);
-    assert.equal(snap.job.healthStatus, 'active');
-  });
-
-  it('quiet when recent heartbeat but stale progress', async () => {
-    const now = Date.now();
-    const job = await seedJob({
-      id: 'h-quiet',
-      status: 'running',
-      startedAt: new Date(now - QUIET_AFTER_MS * 2).toISOString(),
-      lastHeartbeatAt: new Date(now).toISOString(),
-      lastProgressAt: new Date(now - QUIET_AFTER_MS - 30_000).toISOString(),
-    });
-    const snap = buildSingleJobSnapshot(workCwd, job.id, { now });
-    assert.equal(snap.job.healthStatus, 'quiet');
-  });
-
-  it('possibly_stalled when neither progress nor heartbeat are recent', async () => {
-    const now = Date.now();
-    const job = await seedJob({
-      id: 'h-stall',
-      status: 'running',
-      startedAt: new Date(now - POSSIBLY_STALLED_AFTER_MS * 3).toISOString(),
-      lastHeartbeatAt: new Date(now - POSSIBLY_STALLED_AFTER_MS * 2).toISOString(),
-      lastProgressAt: new Date(now - POSSIBLY_STALLED_AFTER_MS * 2).toISOString(),
-    });
-    const snap = buildSingleJobSnapshot(workCwd, job.id, { now });
-    assert.equal(snap.job.healthStatus, 'possibly_stalled');
-  });
-
-  it('worker_missing when pid is dead (via injected isProcessAlive)', async () => {
-    // Use a live pid (this process) so the listJobs dead-PID reconcile does NOT
-    // auto-fail it; we exercise the health classifier in isolation via the
-    // injected isProcessAlive seam.
-    const job = await seedJob({ id: 'h-dead', status: 'running', pid: process.pid });
-    const snap = buildSingleJobSnapshot(workCwd, job.id, { isProcessAlive: () => false });
-    assert.equal(snap.job.healthStatus, 'worker_missing');
-  });
-
-  it('persisted auth_required survives reclassification', async () => {
-    const job = await seedJob({
-      id: 'h-auth',
-      status: 'running',
-      healthStatus: 'auth_required',
-      healthMessage: 'auth pending',
-    });
-    const snap = buildSingleJobSnapshot(workCwd, job.id);
-    assert.equal(snap.job.healthStatus, 'auth_required');
-  });
-
-  it('terminal jobs get no classifier output', async () => {
-    const job = await seedJob({ id: 'h-done', status: 'completed' });
-    const snap = buildSingleJobSnapshot(workCwd, job.id);
-    assert.equal(snap.job.healthStatus, null);
-  });
-});
-
-describe('resolveResultJob', () => {
-  it('returns the most recent terminal job when no reference is given', async () => {
-    await seedJob({ id: 'r-done', status: 'completed', updatedAt: '2024-01-02T00:00:00Z' });
-    await seedJob({ id: 'r-run', status: 'running', updatedAt: '2024-01-03T00:00:00Z' });
-    const { job } = resolveResultJob(workCwd, null, process.env);
-    assert.equal(job.id, 'r-done');
-  });
-
-  it('throws when the matched job is still running, suggesting --wait', async () => {
-    await seedJob({ id: 'r-run-only', status: 'running' });
-    assert.throws(() => resolveResultJob(workCwd, 'r-run-only', process.env), /still running/);
-  });
-
-  it('throws when nothing matches a reference', async () => {
-    await seedJob({ id: 'x', status: 'completed' });
-    assert.throws(() => resolveResultJob(workCwd, 'nothing', process.env), /No job found/);
-  });
-
-  it('throws when no finished jobs exist at all', () => {
-    assert.throws(() => resolveResultJob(workCwd, null, process.env), /No finished/);
-  });
-});
-
-describe('resolveCancelableJob', () => {
-  it('returns the matching active job', async () => {
-    await seedJob({ id: 'c1', status: 'running' });
-    await seedJob({ id: 'c2', status: 'queued' });
-    const { job } = resolveCancelableJob(workCwd, 'c1');
-    assert.equal(job.id, 'c1');
-  });
-
-  it('selects the only active job when no reference is given', async () => {
-    await seedJob({ id: 'only-active', status: 'running' });
-    const { job } = resolveCancelableJob(workCwd, null);
-    assert.equal(job.id, 'only-active');
-  });
-
-  it('still refuses to guess with no reference when multiple active jobs exist', async () => {
-    await seedJob({ id: 'active-one', status: 'running' });
-    await seedJob({ id: 'active-two', status: 'queued' });
-    assert.throws(
-      () => resolveCancelableJob(workCwd, null),
-      (err) => {
-        assert.match(err.message, /Multiple active antigravity jobs/);
-        assert.match(err.message, /active-one/);
-        assert.match(err.message, /active-two/);
-        return true;
-      },
-    );
-  });
-
-  it('accepts a 1-based positional index when multiple active jobs exist', async () => {
-    await seedJob({ id: 'idx-one', status: 'running', updatedAt: '2024-01-01T00:00:01Z' });
-    await seedJob({ id: 'idx-two', status: 'queued', updatedAt: '2024-01-01T00:00:02Z' });
-    const { job } = resolveCancelableJob(workCwd, '1');
-    assert.equal(job.id, 'idx-two');
-  });
-
-  it('accepts a unique substring/prefix when multiple active jobs exist', async () => {
-    await seedJob({ id: 'agy-c1-active', status: 'running' });
-    await seedJob({ id: 'agy-d2-active', status: 'queued' });
-    const { job } = resolveCancelableJob(workCwd, 'c1');
-    assert.equal(job.id, 'agy-c1-active');
-  });
-
-  it('refuses an ambiguous fragment that matches more than one active job', async () => {
-    await seedJob({ id: 'agy-ambiguous-one', status: 'running' });
-    await seedJob({ id: 'agy-ambiguous-two', status: 'queued' });
-    assert.throws(() => resolveCancelableJob(workCwd, 'agy'), /No active job matched/);
-  });
-
-  it('errors when there are no active jobs', () => {
-    assert.throws(() => resolveCancelableJob(workCwd, null), /No active antigravity jobs/);
-  });
-
-  it('errors when reference does not match any active job', async () => {
-    await seedJob({ id: 'c3', status: 'running' });
-    assert.throws(() => resolveCancelableJob(workCwd, 'unknown'), /No active job matched/);
+  it('surfaces the log directory location for the projected job', () => {
+    seed('loc', { createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' });
+    assert.ok(fs.existsSync(jobDir(stateDir, 'loc')));
   });
 });

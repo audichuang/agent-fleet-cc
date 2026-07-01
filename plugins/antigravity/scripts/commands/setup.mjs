@@ -6,7 +6,7 @@
  * cache is already valid.
  */
 import { spawn } from 'node:child_process';
-import { resolveAgyBin, probeAgy } from '../lib/agent-runtime.mjs';
+import { resolveAgyBin, probeAgy } from '../lib/adapter.mjs';
 import { runAsMain } from '../lib/cli-entry.mjs';
 
 export async function run(argv = [], ctx = {}) {

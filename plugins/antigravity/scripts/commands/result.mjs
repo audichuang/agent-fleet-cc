@@ -13,9 +13,8 @@
 
 import { parseCommandInput } from "../lib/args.mjs";
 import { runAsMain } from "../lib/cli-entry.mjs";
-import { filterJobsForCurrentSession } from "../lib/job-control.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
-import { stateDirFor, listProjectedJobs } from "../lib/job-runtime.mjs";
+import { stateDirFor, listProjectedJobs, filterJobsForCurrentSession } from "../lib/job-runtime.mjs";
 import { reconcileDeadPids } from "../lib/shared/core/reconcile.mjs";
 import { outputCommandResult, renderResultOutput } from "../lib/render.mjs";
 

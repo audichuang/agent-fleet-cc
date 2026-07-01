@@ -1,28 +1,16 @@
+// Session filtering (D-14 / BEHAVIOR CHANGE 6) survived the shared-runtime
+// migration and now lives in lib/job-runtime.mjs (job-control.mjs deleted).
+// The host session id rides the shared job's top-level `sessionId` field
+// (agy's engine sessionId is always null), so status/result/cancel keep their
+// multi-session isolation. sortJobsNewestFirst is now private to job-runtime and
+// covered via listProjectedJobs (job-runtime.test.mjs); process-liveness is owned
+// by the shared reconcile layer (tests/shared/).
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sortJobsNewestFirst,
   filterJobsForCurrentSession,
-  defaultIsProcessAlive,
   SESSION_ID_ENV,
-} from '../../plugins/antigravity/scripts/lib/job-control.mjs';
-
-describe('sortJobsNewestFirst', () => {
-  it('sorts by updatedAt descending', () => {
-    const jobs = [
-      { id: 'a', updatedAt: '2026-05-22T10:00:00Z' },
-      { id: 'b', updatedAt: '2026-05-22T12:00:00Z' },
-      { id: 'c', updatedAt: '2026-05-22T11:00:00Z' },
-    ];
-    assert.deepEqual(sortJobsNewestFirst(jobs).map((j) => j.id), ['b', 'c', 'a']);
-  });
-
-  it('does not mutate input array', () => {
-    const jobs = [{ id: 'a', updatedAt: '1' }, { id: 'b', updatedAt: '2' }];
-    sortJobsNewestFirst(jobs);
-    assert.deepEqual(jobs.map((j) => j.id), ['a', 'b']);
-  });
-});
+} from '../../plugins/antigravity/scripts/lib/job-runtime.mjs';
 
 describe('filterJobsForCurrentSession', () => {
   it('returns input unchanged when SESSION_ID_ENV is absent', () => {
@@ -30,7 +18,7 @@ describe('filterJobsForCurrentSession', () => {
     assert.deepEqual(filterJobsForCurrentSession(jobs, {}), jobs);
   });
 
-  it('keeps only jobs matching the current session id', () => {
+  it('keeps only jobs whose top-level sessionId matches the current session', () => {
     const jobs = [
       { id: 'a', sessionId: 's1' },
       { id: 'b', sessionId: 's2' },
@@ -39,19 +27,10 @@ describe('filterJobsForCurrentSession', () => {
     const env = { [SESSION_ID_ENV]: 's1' };
     assert.deepEqual(filterJobsForCurrentSession(jobs, env).map((j) => j.id), ['a', 'c']);
   });
-});
 
-describe('defaultIsProcessAlive', () => {
-  it('returns true for own PID', () => {
-    assert.equal(defaultIsProcessAlive(process.pid), true);
-  });
-  it('returns true for falsy pid (treat as no-info)', () => {
-    assert.equal(defaultIsProcessAlive(undefined), true);
-    assert.equal(defaultIsProcessAlive(0), true);
-    assert.equal(defaultIsProcessAlive(null), true);
-  });
-  it('returns false for a PID that does not exist', () => {
-    // Very high PID unlikely to exist
-    assert.equal(defaultIsProcessAlive(2 ** 22), false);
+  it('drops jobs from other sessions (isolation)', () => {
+    const jobs = [{ id: 'x', sessionId: 'other' }];
+    const env = { [SESSION_ID_ENV]: 'mine' };
+    assert.deepEqual(filterJobsForCurrentSession(jobs, env), []);
   });
 });
