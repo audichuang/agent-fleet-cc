@@ -30,7 +30,7 @@ import {
 // seed via the shared store (createJob/finalizeJob) instead of the legacy flat
 // state.json layout used by the still-unflipped wait/logs/cancel commands.
 import { createJobRecord } from '../../plugins/antigravity/scripts/lib/shared/core/job.mjs';
-import { createJob, finalizeJob } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
+import { createJob, finalizeJob, writeJob, logFilePath } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
 import { stateDirFor } from '../../plugins/antigravity/scripts/lib/job-runtime.mjs';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -123,7 +123,11 @@ function seedSharedJob(overrides = {}) {
   if (overrides.id) record.id = overrides.id;
   createJob(stateDir, record, overrides.prompt ?? 'hello');
   const status = overrides.status ?? 'completed';
-  if (status !== 'queued') {
+  if (status === 'running') {
+    // Active job with NO pid: reconcileDeadPids skips it (never auto-failed),
+    // so it stays active and a wait/logs deadline can fire.
+    writeJob(stateDir, { ...record, status: 'running', pid: overrides.pid ?? null });
+  } else if (status !== 'queued') {
     const patch = { status };
     if (status === 'completed' || status === 'failed') {
       patch.resultText = overrides.resultText ?? null;
@@ -131,6 +135,11 @@ function seedSharedJob(overrides = {}) {
     if (overrides.error) patch.error = overrides.error;
     if (overrides.errorKind) patch.errorKind = overrides.errorKind;
     finalizeJob(stateDir, record.id, patch);
+  }
+  // Optionally seed log content (shared layout: logFilePath(stateDir, id)).
+  if (overrides.log != null) {
+    fs.mkdirSync(path.dirname(logFilePath(stateDir, record.id)), { recursive: true });
+    fs.writeFileSync(logFilePath(stateDir, record.id), overrides.log);
   }
   return { stateDir, id: record.id };
 }
@@ -219,44 +228,42 @@ describe('/antigravity:result', () => {
 });
 
 // ───────────────────────────── wait ─────────────────────────────
+// wait now runs on the shared runtime; seed via seedSharedJob. Exhaustive
+// exit-code coverage (0/2/1/10 + terminal-timed-out vs deadline + missing)
+// lives in poll.test.mjs; these are the command-level smoke checks.
 
 describe('/antigravity:wait', () => {
   it('emits JSON and exits 0 for a completed job', async () => {
-    const job = await seedStoredJob({
+    const { id } = seedSharedJob({
       id: 'waitdone',
       status: 'completed',
-      completedAt: new Date().toISOString(),
-      summary: 'all done',
+      resultText: 'all done',
     });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id, '--json'], { cwd: tempDir });
+      exit = await run([id, '--json'], { cwd: tempDir });
     } finally {
       cap.restore();
     }
     assert.equal(exit, 0);
     const payload = JSON.parse(cap.out.join(''));
     assert.equal(payload.engine, 'antigravity');
-    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.jobId, id);
     assert.equal(payload.status, 'completed');
     assert.equal(payload.summary, 'all done');
   });
 
   it('returns 2 for a cancelled job', async () => {
-    const job = await seedStoredJob({
-      id: 'waitcancelled',
-      status: 'cancelled',
-      completedAt: new Date().toISOString(),
-    });
+    const { id } = seedSharedJob({ id: 'waitcancelled', status: 'cancelled' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id, '--json'], { cwd: tempDir });
+      exit = await run([id, '--json'], { cwd: tempDir });
     } finally {
       cap.restore();
     }
@@ -265,41 +272,35 @@ describe('/antigravity:wait', () => {
   });
 
   it('returns 10 when timeout expires before the job reaches terminal state', async () => {
-    const job = await seedStoredJob({
-      id: 'waitrunning',
-      status: 'running',
-      startedAt: new Date().toISOString(),
-    });
+    const { id } = seedSharedJob({ id: 'waitrunning', status: 'running' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id, '--timeout-ms', '1', '--json'], { cwd: tempDir });
+      // timeout-ms 0 → deadline reached on the first poll without a timer tick
+      // (a tick under the global stdout capture leaks test-runner IPC bytes).
+      exit = await run([id, '--timeout-ms', '0', '--json'], { cwd: tempDir });
     } finally {
       cap.restore();
     }
     assert.equal(exit, 10);
     const payload = JSON.parse(cap.out.join(''));
     assert.equal(payload.engine, 'antigravity');
-    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.jobId, id);
     assert.equal(payload.status, 'running');
     assert.equal(payload.timedOut, true);
   });
 
   it('rejects invalid and missing timeout values', async () => {
-    const job = await seedStoredJob({
-      id: 'waitbadtimeout',
-      status: 'running',
-      startedAt: new Date().toISOString(),
-    });
+    const { id } = seedSharedJob({ id: 'waitbadtimeout', status: 'running' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
     for (const args of [
-      [job.id, '--timeout-ms', 'abc'],
-      [job.id, '--timeout-ms'],
-      [job.id, '--timeout-ms', '-1'],
-      [job.id, '--timeout-ms=-1'],
+      [id, '--timeout-ms', 'abc'],
+      [id, '--timeout-ms'],
+      [id, '--timeout-ms', '-1'],
+      [id, '--timeout-ms=-1'],
     ]) {
       const cap = captureStdio();
       let exit;
@@ -319,15 +320,17 @@ describe('/antigravity:wait', () => {
 
 describe('/antigravity:logs', () => {
   it('prints the persisted job log without follow', async () => {
-    const job = await seedStoredJob({ id: 'logdone', status: 'completed' });
-    appendJobLog(tempDir, job.id, 'first persisted line');
-    appendJobLog(tempDir, job.id, 'second persisted line');
+    const { id } = seedSharedJob({
+      id: 'logdone',
+      status: 'completed',
+      log: 'first persisted line\nsecond persisted line\n',
+    });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id], { cwd: tempDir });
+      exit = await run([id], { cwd: tempDir });
     } finally {
       cap.restore();
     }
@@ -338,34 +341,32 @@ describe('/antigravity:logs', () => {
   });
 
   it('emits JSON with engine, job id, status, and log', async () => {
-    const job = await seedStoredJob({ id: 'logjson', status: 'failed' });
-    appendJobLog(tempDir, job.id, 'failure details');
+    const { id } = seedSharedJob({ id: 'logjson', status: 'failed', log: 'failure details\n' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id, '--json'], { cwd: tempDir });
+      exit = await run([id, '--json'], { cwd: tempDir });
     } finally {
       cap.restore();
     }
     assert.equal(exit, 0);
     const payload = JSON.parse(cap.out.join(''));
     assert.equal(payload.engine, 'antigravity');
-    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.jobId, id);
     assert.equal(payload.status, 'failed');
     assert.match(payload.log, /failure details/);
   });
 
   it('follows an already-terminal job log and exits cleanly', async () => {
-    const job = await seedStoredJob({ id: 'logfollow', status: 'completed' });
-    appendJobLog(tempDir, job.id, 'already terminal log');
+    const { id } = seedSharedJob({ id: 'logfollow', status: 'completed', log: 'already terminal log\n' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id, '--follow'], { cwd: tempDir });
+      exit = await run([id, '--follow'], { cwd: tempDir });
     } finally {
       cap.restore();
     }
@@ -384,47 +385,40 @@ describe('/antigravity:logs', () => {
     }
     assert.equal(exit, 1);
     assert.match(cap.err.join(''), /antigravity:logs/);
-    assert.match(cap.err.join(''), /No job found/);
+    assert.match(cap.err.join(''), /no job found/i);
   });
 
   it('follow json emits current log and exits 10 when timeout expires before terminal state', async () => {
-    const job = await seedStoredJob({
-      id: 'logfollowtimeout',
-      status: 'running',
-      startedAt: new Date().toISOString(),
-    });
-    appendJobLog(tempDir, job.id, 'still running');
+    const { id } = seedSharedJob({ id: 'logfollowtimeout', status: 'running', log: 'still running\n' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id, '--follow', '--json', '--timeout-ms', '1'], { cwd: tempDir });
+      // timeout-ms 0 → the follow-to-terminal loop reaches the deadline on its
+      // first check WITHOUT parking on a timer (a timer tick under the global
+      // stdout capture would let the test-runner IPC leak into cap.out).
+      exit = await run([id, '--follow', '--json', '--timeout-ms', '0'], { cwd: tempDir });
     } finally {
       cap.restore();
     }
     assert.equal(exit, 10);
     const payload = JSON.parse(cap.out.join(''));
     assert.equal(payload.engine, 'antigravity');
-    assert.equal(payload.jobId, job.id);
+    assert.equal(payload.jobId, id);
     assert.equal(payload.status, 'running');
     assert.equal(payload.timedOut, true);
     assert.match(payload.log, /still running/);
   });
 
   it('rejects invalid timeout values in --flag=value form', async () => {
-    const job = await seedStoredJob({
-      id: 'logbadtimeout',
-      status: 'running',
-      startedAt: new Date().toISOString(),
-    });
-    appendJobLog(tempDir, job.id, 'still running');
+    const { id } = seedSharedJob({ id: 'logbadtimeout', status: 'running', log: 'still running\n' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/logs.mjs');
     const cap = captureStdio();
     let exit;
     try {
-      exit = await run([job.id, '--follow', '--json', '--timeout-ms=-1'], { cwd: tempDir });
+      exit = await run([id, '--follow', '--json', '--timeout-ms=-1'], { cwd: tempDir });
     } finally {
       cap.restore();
     }
@@ -451,23 +445,10 @@ describe('/antigravity:cancel', () => {
   });
 
   it('marks a running job cancelled (no tracked pid to signal)', async () => {
-    const id = 'runningjob';
-    ensureStateDir(tempDir);
     // A running job with no recorded worker pid: the dead-PID reconcile skips it
     // (no pid), and cancel marks it cancelled without signalling anything. A
-    // dead-pid running job is instead auto-failed by reconcile (reconcile.test.mjs).
-    await upsertJob(tempDir, {
-      id,
-      kind: 'task',
-      status: 'running',
-      phase: 'running',
-      sessionId: process.env.ANTIGRAVITY_PLUGIN_SESSION_ID,
-      pid: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-    });
-    await writeJobFile(tempDir, id, { id, status: 'running', pid: null });
+    // dead-pid running job is instead auto-failed by reconcile (tests/shared).
+    const { id } = seedSharedJob({ id: 'runningjob', status: 'running' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/cancel.mjs');
     const cap = captureStdio();
@@ -477,7 +458,7 @@ describe('/antigravity:cancel', () => {
     } finally {
       cap.restore();
     }
-    assert.equal(exit, 0);
+    assert.equal(exit, 0, cap.err.join(''));
     assert.match(cap.out.join(''), /Antigravity Cancel/);
     assert.match(cap.out.join(''), new RegExp(`Cancelled ${id}`));
   });

@@ -1,79 +1,172 @@
+/**
+ * /antigravity:wait exit-code contract, locked against the shared runtime.
+ *
+ * `waitForJob` returns `{done, job}`:
+ *   - done:true  + terminal job  → the job reached a terminal state
+ *   - done:false + active  job   → the wait DEADLINE elapsed (job still active)
+ *   - done:true  + job:null      → the job is missing/pruned
+ *
+ * The four exit codes are load-bearing and the distinctions are subtle, so this
+ * suite drives wait.run() end-to-end against a real shared state dir:
+ *   0  completed
+ *   2  cancelled
+ *   1  failed / timed-out (terminal) / missing
+ *   10 wait deadline exceeded before terminal state
+ *
+ * The critical distinction: a job finalized `timed-out` is TERMINAL → exit 1
+ * (NOT 10); only the wait deadline (done:false) yields 10.
+ */
+
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { randomBytes } from "node:crypto";
 
+import { createJobRecord } from "../../plugins/antigravity/scripts/lib/shared/core/job.mjs";
 import {
-  POLL_MS,
-  TERMINAL_STATUSES,
-  parseTimeoutMs,
-  waitForTerminal,
-} from "../../plugins/antigravity/scripts/lib/poll.mjs";
+  createJob,
+  finalizeJob,
+  writeJob,
+} from "../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs";
+import { stateDirFor } from "../../plugins/antigravity/scripts/lib/job-runtime.mjs";
 
-describe("poll helpers", () => {
-  test("parseTimeoutMs returns the default when no value is provided", () => {
-    assert.equal(parseTimeoutMs(undefined, 60000), 60000);
+const ORIGINAL = process.env.CLAUDE_PLUGIN_DATA;
+const ORIGINAL_SESSION = process.env.ANTIGRAVITY_PLUGIN_SESSION_ID;
+let tempDir;
+
+beforeEach(() => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-wait-"));
+  process.env.CLAUDE_PLUGIN_DATA = tempDir;
+  delete process.env.ANTIGRAVITY_PLUGIN_SESSION_ID;
+});
+afterEach(() => {
+  if (ORIGINAL === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+  else process.env.CLAUDE_PLUGIN_DATA = ORIGINAL;
+  if (ORIGINAL_SESSION === undefined) delete process.env.ANTIGRAVITY_PLUGIN_SESSION_ID;
+  else process.env.ANTIGRAVITY_PLUGIN_SESSION_ID = ORIGINAL_SESSION;
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+function capture() {
+  const out = [];
+  const err = [];
+  const o = process.stdout.write.bind(process.stdout);
+  const e = process.stderr.write.bind(process.stderr);
+  process.stdout.write = (c) => (out.push(String(c)), true);
+  process.stderr.write = (c) => (err.push(String(c)), true);
+  return {
+    out,
+    err,
+    restore: () => {
+      process.stdout.write = o;
+      process.stderr.write = e;
+    },
+  };
+}
+
+// Seed a shared-layout job in the terminal status given (or leave it active).
+function seed({ id, status, resultText, pid } = {}) {
+  const stateDir = stateDirFor(tempDir);
+  const record = createJobRecord({ engine: "antigravity", cwd: tempDir, request: { kind: "task" } });
+  if (id) record.id = id;
+  createJob(stateDir, record, "hello");
+  if (status === "running" || status === "queued") {
+    // A running job with NO pid is skipped by reconcile (never auto-failed),
+    // so it stays active and the wait deadline can fire → exit 10.
+    writeJob(stateDir, { ...record, status, pid: pid ?? null });
+  } else if (status) {
+    const patch = { status };
+    if (resultText != null) patch.resultText = resultText;
+    finalizeJob(stateDir, record.id, patch);
+  }
+  return { stateDir, id: record.id };
+}
+
+async function runWait(args) {
+  const { run } = await import("../../plugins/antigravity/scripts/commands/wait.mjs");
+  const cap = capture();
+  let exit;
+  try {
+    exit = await run(args, { cwd: tempDir });
+  } finally {
+    cap.restore();
+  }
+  return { exit, out: cap.out.join(""), err: cap.err.join("") };
+}
+
+describe("/antigravity:wait exit-code contract (0/2/1/10)", () => {
+  it("completed → exit 0", async () => {
+    const { id } = seed({ status: "completed", resultText: "done" });
+    const { exit, out } = await runWait([id, "--json"]);
+    assert.equal(exit, 0);
+    const payload = JSON.parse(out);
+    assert.equal(payload.status, "completed");
+    assert.equal(payload.timedOut, false);
   });
 
-  test("parseTimeoutMs accepts numeric millisecond values", () => {
-    assert.equal(parseTimeoutMs("5000", 60000), 5000);
-    assert.equal(parseTimeoutMs("0", 60000), 0);
+  it("cancelled → exit 2", async () => {
+    const { id } = seed({ status: "cancelled" });
+    const { exit, out } = await runWait([id, "--json"]);
+    assert.equal(exit, 2);
+    assert.equal(JSON.parse(out).status, "cancelled");
   });
 
-  test("parseTimeoutMs rejects invalid values", () => {
-    assert.throws(
-      () => parseTimeoutMs("", 60000),
-      /--timeout-ms must be a non-negative number of milliseconds/,
-    );
-    assert.throws(
-      () => parseTimeoutMs("-1", 60000),
-      /--timeout-ms must be a non-negative number of milliseconds/,
-    );
-    assert.throws(
-      () => parseTimeoutMs("abc", 60000),
-      /--timeout-ms must be a non-negative number of milliseconds/,
-    );
+  it("failed (terminal) → exit 1", async () => {
+    const { id } = seed({ status: "failed" });
+    const { exit } = await runWait([id, "--json"]);
+    assert.equal(exit, 1);
   });
 
-  test("TERMINAL_STATUSES includes only terminal job states", () => {
-    assert.equal(TERMINAL_STATUSES.has("completed"), true);
-    assert.equal(TERMINAL_STATUSES.has("failed"), true);
-    assert.equal(TERMINAL_STATUSES.has("cancelled"), true);
-    assert.equal(TERMINAL_STATUSES.has("running"), false);
-    assert.equal(TERMINAL_STATUSES.has("pending"), false);
+  it("timed-out (terminal) → exit 1, NOT 10 (done:true, not a deadline)", async () => {
+    const { id } = seed({ status: "timed-out" });
+    const { exit, out } = await runWait([id, "--json"]);
+    assert.equal(exit, 1);
+    const payload = JSON.parse(out);
+    assert.equal(payload.status, "timed-out");
+    // done:true → not a wait-deadline; timedOut reflects the deadline, not status.
+    assert.equal(payload.timedOut, false);
   });
 
-  test("TERMINAL_STATUSES is the single set shared with state.mjs (drift guard)", async () => {
-    // Dynamic import so a missing export surfaces as a clean assertion failure
-    // rather than a module-link error that crashes the whole file.
-    const state = await import("../../plugins/antigravity/scripts/lib/state.mjs");
-    assert.ok(state.TERMINAL_STATUSES, "state.mjs must export TERMINAL_STATUSES");
-    // Identity, not equality: re-exporting one source of truth is the only way
-    // these stay the same object. A future `new Set(...)` copy fails here.
-    assert.strictEqual(
-      TERMINAL_STATUSES,
-      state.TERMINAL_STATUSES,
-      "poll.mjs and state.mjs must share one TERMINAL_STATUSES set",
-    );
+  it("wait DEADLINE on an active job → exit 10 (done:false)", async () => {
+    const { id } = seed({ status: "running" });
+    // timeout-ms 0 → the deadline is already reached on the first poll, so the
+    // wait returns {done:false} WITHOUT parking on a timer (a timer tick under
+    // the global stdout capture would let the test-runner IPC leak into cap.out).
+    const { exit, out } = await runWait([id, "--timeout-ms", "0", "--json"]);
+    assert.equal(exit, 10);
+    const payload = JSON.parse(out);
+    assert.equal(payload.status, "running");
+    assert.equal(payload.timedOut, true);
   });
 
-  test("POLL_MS is a positive interval", () => {
-    assert.equal(typeof POLL_MS, "number");
-    assert.equal(POLL_MS >= 1, true);
+  it("missing/pruned job → exit 1 (no null deref)", async () => {
+    // No seed for this id: waitForJob would return {done:true, job:null}, but
+    // the readJob pre-check short-circuits to exit 1 first.
+    const { exit, err } = await runWait(["does-not-exist", "--json"]);
+    assert.equal(exit, 1);
+    assert.match(err, /antigravity:wait/);
+    assert.match(err, /no job found/i);
   });
 
-  test("waitForTerminal resolves when injected snapshots reach a terminal state", async () => {
-    let calls = 0;
-    const result = await waitForTerminal("/repo", "j1", 60000, {
-      buildSingleJobSnapshot(cwd, jobId) {
-        calls += 1;
-        assert.equal(cwd, "/repo");
-        assert.equal(jobId, "j1");
-        if (calls === 1) return { job: { id: "j1", status: "running" } };
-        return { job: { id: "j1", status: "completed" } };
-      },
-    });
+  it("no reference → exit 1 with a hint", async () => {
+    const { exit, err } = await runWait([]);
+    assert.equal(exit, 1);
+    assert.match(err, /job id required/);
+  });
 
-    assert.equal(result.timedOut, false);
-    assert.equal(result.snapshot.job.status, "completed");
-    assert.equal(calls, 2);
+  it("rejects invalid / missing --timeout-ms values", async () => {
+    const { id } = seed({ status: "completed" });
+    for (const args of [
+      [id, "--timeout-ms", "abc"],
+      [id, "--timeout-ms"],
+      [id, "--timeout-ms", "-1"],
+      [id, "--timeout-ms=-1"],
+    ]) {
+      const { exit, err } = await runWait(args);
+      assert.equal(exit, 1, `args=${JSON.stringify(args)}`);
+      assert.match(err, /--timeout-ms/);
+    }
   });
 });
