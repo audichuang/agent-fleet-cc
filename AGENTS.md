@@ -21,22 +21,28 @@ consistency test), `package.json` (add a `test:<plugin>` script), and `README.md
 - `npm run sync-shared` — after editing `shared/lib/`, re-vendor it into each migrated
   plugin's `scripts/lib/shared/` (`cc`, `codex`, `antigravity`). **Commit BOTH the source and
   the vendored copy** — CI drift-checks them.
+- `npm run bump-version <plugin> <patch|minor|major>` — the one way to bump a version; locks
+  `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
+  check-version` verifies). Only those two files are tracked — root `plugin.json`,
+  `.codex-plugin/plugin.json`, `.agents/…`, and `package.json` drift silently; sync by hand.
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
   `node:assert/strict`, and are hermetic — fake binaries, redirected `CLAUDE_PLUGIN_DATA`,
   no network. Prefer injectable seams (spawn / env / fs) over calling them directly so
   tests need no real binaries.
-- Commit trailer on every commit: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+- Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
+  it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
 - Branch from `main` for new feature work; don't commit features straight to `main`.
 
 ## Gotchas
-- `tests/codex/runtime.test.mjs` is occasionally flaky — re-run `node --test tests/codex/*.test.mjs`
-  once to confirm; an intermittent failure there is not a real regression.
-- `shared/lib/` is the source of truth. `cc` (v0.3.0, full runtime) and `antigravity`
-  (v0.3.0, full runtime — ProcessAdapter + runWorker) are migrated onto it; `codex` adopts
-  the shared **state-store only** (its app-server broker stays engine-specific). Don't assume
-  a plugin uses the shared runtime the same way — check before editing.
+- `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
+  (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
+  in CI, is not a real regression.
+- `shared/lib/` is the source of truth. `cc` and `antigravity` run the full shared runtime
+  (ProcessAdapter + runWorker); `codex` adopts the shared **state-store only** (its app-server
+  broker stays engine-specific). Don't assume a plugin uses the shared runtime the same way —
+  check before editing.
 
 ## Where things live
 - Specs / plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/specs/`
