@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.35
+
+A follow-up to the 1.0.34 adversarial review found a background-launch race the
+directory-per-job migration left untouched. Full suite + e2e green.
+
+- **Bootstrap race (background jobs)** — `enqueueBackgroundTask` spawns the detached
+  task-worker *before* it writes the job record (`spawnWorker` then `writeJobFile`, no
+  await between). Normally the parent's synchronous write wins against the child's Node
+  bootstrap, but under scheduler pressure the child could reach `readStoredJob` first and
+  hard-throw `No stored job found`, killing the background job instantly. `handleTaskWorker`
+  now bounded-waits via `readStoredJobWithRetry` (~2s: 40 × 50ms) instead of betting on the
+  order. New regression tests (`tests/codex/enqueue-background.test.mjs`, `wait-logs.test.mjs`).
+- **`wait` ergonomics** — document `--timeout-ms`/`--poll-interval-ms` in usage (the flags
+  already worked as of 1.0.34) and make the missing-job-id error point at `/codex:status`.
+
 ## 1.0.34
 
 A follow-up adversarial review (cross-model, read-only) of the 1.0.31→1.0.33 range
