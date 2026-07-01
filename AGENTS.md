@@ -19,7 +19,7 @@ consistency test), `package.json` (add a `test:<plugin>` script), and `README.md
 - `npm run test:e2e` — black-box CLI e2e for all 4 plugins (cc + codex + antigravity + fleet;
   real subprocess, fake engine, no API key)
 - `npm run sync-shared` — after editing `shared/lib/`, re-vendor it into each migrated
-  plugin's `scripts/lib/shared/` (currently only `cc`). **Commit BOTH the source and
+  plugin's `scripts/lib/shared/` (`cc`, `codex`, `antigravity`). **Commit BOTH the source and
   the vendored copy** — CI drift-checks them.
 
 ## Conventions
@@ -33,9 +33,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), and `README.md
 ## Gotchas
 - `tests/codex/runtime.test.mjs` is occasionally flaky — re-run `node --test tests/codex/*.test.mjs`
   once to confirm; an intermittent failure there is not a real regression.
-- `shared/lib/` is the source of truth. `cc` (v0.3.0) is migrated onto it;
-  `antigravity` and `codex` are **not yet** (roadmap). Don't assume a plugin uses the
-  shared runtime — check before editing.
+- `shared/lib/` is the source of truth. `cc` (v0.3.0, full runtime) and `antigravity`
+  (v0.3.0, full runtime — ProcessAdapter + runWorker) are migrated onto it; `codex` adopts
+  the shared **state-store only** (its app-server broker stays engine-specific). Don't assume
+  a plugin uses the shared runtime the same way — check before editing.
 
 ## Where things live
 - Specs / plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/specs/`

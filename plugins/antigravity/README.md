@@ -8,14 +8,16 @@ Hardened fork of
 (itself the successor to `gemini-plugin-cc`, archived because Google
 [retires Gemini CLI on June 18, 2026](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)
 for free / personal users). This fork adds image generation and a handoff
-loop, makes background jobs crash-survivable (cross-process terminal CAS,
-dead-PID reconcile, a liveness watchdog), and ships the missing slash-command
-wiring with a CI-gated test suite.
+loop, runs the job runtime on the shared `shared/lib/` foundation (directory-per-job
+state-store with cross-process terminal CAS + TTL dead-PID reconcile, the same runtime
+as `cc`), and ships the missing slash-command wiring with a CI-gated test suite.
 
 ## Status
 
-> **Pre-release (v0.2.0).** Active development. Expect breaking changes until
-> v1.0.0. See [`CHANGELOG.md`](./CHANGELOG.md).
+> **Pre-release (v0.3.0).** Active development. Expect breaking changes until
+> v1.0.0. As of 0.3.0 the job runtime runs on the shared `shared/lib/` foundation
+> (directory-per-job state-store, same model as `cc`); see [`CHANGELOG.md`](./CHANGELOG.md)
+> for the 0.3.0 behavior changes (on-disk layout clean break, OAuth fail-fast).
 
 ## What it does
 
@@ -81,10 +83,10 @@ claude plugin install antigravity@antigravity
 | `/antigravity:handoff [focus] [--print] [--background]` | Write a handoff doc and hand the work to agy to continue. |
 | `/antigravity:status [<id>] [--wait]` · `/antigravity:result [<id>]` · `/antigravity:cancel [<id>]` | Inspect / fetch / cancel background jobs. |
 
-Background jobs survive a crashed or SIGKILL'd worker: a synchronous dead-PID
-reconcile (on every status read) plus a detached liveness watchdog mark a job
-failed instead of leaving it stuck `running` forever, and terminal transitions
-use a cross-process O_EXCL lock so a cancel never clobbers a real result.
+Background jobs survive a crashed or SIGKILL'd worker: the shared runtime's dead-PID
+reconcile (with a TTL claim-orphan check, on every status read) marks a stuck job
+failed instead of leaving it `running` forever, and terminal transitions use a
+cross-process O_EXCL CAS so a cancel never clobbers a real result.
 
 ## Documentation
 
