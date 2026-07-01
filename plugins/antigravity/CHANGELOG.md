@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-02
+
+Migrated the job runtime onto the shared `shared/lib/` foundation (directory-per-job
+state-store + O_EXCL terminal CAS + TTL claim-orphan reconcile + orphan-lock sweep),
+replacing the bespoke flat-`state.json` runtime. Same shape as `cc` (a ~120-line
+`ProcessAdapter` for agy + the shared `runWorker`). This is a **hardening upgrade** —
+the race protections now match `cc`/`codex`.
+
+### Behavior changes
+- **On-disk job layout** is now directory-per-job (`jobs/<id>/…` + append-only
+  `events.ndjson`). Jobs started under ≤0.2.0 are **not visible** to 0.3.0 commands —
+  let them finish or cancel before upgrading. The old `state.json` job index is inert;
+  its `config` block (`stopReviewGate`) is migrated once into `config.json`.
+- **OAuth**: an unauthenticated background job now fails fast with `errorKind:"auth"` and
+  a hint to run `/antigravity:setup` and retry (the background pause-and-surface flow is
+  gone). The interactive `/antigravity:setup` OAuth path is unchanged.
+- Foreground commands no longer stream stdout live (agy `--print` is one-shot).
+- Health/heartbeat/watchdog fields removed from `status`/`result`/`wait` output; liveness
+  is now shared reconcile-per-poll + TTL claim-orphan detection.
+- Added a recursion guard (`ANTIGRAVITY_ACTIVE`) that refuses agy-in-agy invocation.
+
+### Hardening (via the shared store)
+- Cross-process terminal CAS with a TTL, claim-owner (not worker-pid) dead-PID reconcile,
+  orphan-lock sweep, and no-resurrect-on-prune — none of which the 0.2.0 runtime had.
+
 ## [0.2.0] — 2026-06-10
 
 Hardening fork (audichuang). Adds features, makes background jobs
