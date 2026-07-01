@@ -4,6 +4,10 @@
  * Asks agy (read-only, under --sandbox) to return a JSON review, parses it, and
  * renders it structurally. Falls back to the raw text if agy does not return
  * parseable JSON.
+ *
+ * Runs on the shared runtime (Phase 4e): runForeground drives the shared worker
+ * lifecycle; the launch seam lives in lib/job-runtime.mjs. The prompt building
+ * + JSON parse/render stay engine-specific.
  */
 
 import { parseCommandInput } from "../lib/args.mjs";
@@ -11,7 +15,7 @@ import { runAsMain } from "../lib/cli-entry.mjs";
 import { collectReviewContext } from "../lib/git.mjs";
 import { buildAdversarialReviewPrompt } from "../lib/prompt-templates.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
-import { runForegroundJob } from "../lib/job-helpers.mjs";
+import { runForeground } from "../lib/job-runtime.mjs";
 import { outputCommandResult, renderReviewResult, parseReviewJson } from "../lib/render.mjs";
 
 export async function run(argv = [], ctx = {}) {
@@ -25,6 +29,7 @@ export async function run(argv = [], ctx = {}) {
   const scope = options.scope ? String(options.scope) : "auto";
   const base = options.base ? String(options.base) : undefined;
   const model = options.model ? String(options.model) : undefined;
+  const json = Boolean(options.json);
   const sandbox = !options["no-sandbox"]; // read-only by default
 
   let envelope;
@@ -43,35 +48,42 @@ export async function run(argv = [], ctx = {}) {
   const prompt = buildAdversarialReviewPrompt(envelope);
   const title = `adversarial-review: ${envelope.scope}${base ? ` vs ${base}` : ""}`;
 
-  const { result } = await runForegroundJob({
-    workspaceRoot,
+  // M8: conversationId (?? null) flows into request even though this command has
+  // no resume flag — keeps the 5 launch commands consistent (the adapter reads
+  // only job.request.conversationId).
+  const request = {
+    scope: envelope.scope,
+    base: base ?? null,
+    conversationId: null,
+    model,
+    sandbox,
+  };
+
+  const { job: finished } = await runForeground({
+    cwd: workspaceRoot,
     kind: "adversarial-review",
     title,
     prompt,
-    model,
-    sandbox,
-    cwd: workspaceRoot,
-    request: { scope: envelope.scope, base: base ?? null, model, sandbox },
-    onStdout: (chunk) => process.stderr.write(chunk),
+    request,
   });
 
-  if (result.status === "auth_required") {
+  if (finished.errorKind === "auth") {
     process.stderr.write(
-      "\nantigravity:adversarial-review — Antigravity is not authenticated. Run /antigravity:setup, then retry.\n",
+      "\nantigravity:adversarial-review — Antigravity is not authenticated.\nRun /antigravity:setup to complete the OAuth flow, then retry.\n",
     );
-    if (result.oauthUrl) process.stderr.write(`OAuth URL: ${result.oauthUrl}\n`);
     return 1;
   }
-  if (result.status !== "completed") {
-    process.stderr.write(`\nantigravity:adversarial-review — failed (${result.status}).\n`);
-    if (result.stderr) process.stderr.write(result.stderr);
-    return result.status === "cancelled" ? 2 : 1;
+  if (finished.status !== "completed") {
+    process.stderr.write(`\nantigravity:adversarial-review — failed (${finished.status}).\n`);
+    if (finished.error) process.stderr.write(finished.error);
+    return finished.status === "cancelled" ? 2 : 1;
   }
 
-  const review = parseReviewJson(result.stdout);
+  const rawOutput = finished.resultText ?? "";
+  const review = parseReviewJson(rawOutput);
   if (review) {
     const rendered = renderReviewResult(review);
-    outputCommandResult({ scope: envelope.scope, review }, rendered, Boolean(options.json));
+    outputCommandResult({ scope: envelope.scope, review }, rendered, json);
     return 0;
   }
 
@@ -79,7 +91,7 @@ export async function run(argv = [], ctx = {}) {
   process.stderr.write(
     "antigravity:adversarial-review — could not parse a structured JSON review; showing agy's raw output.\n",
   );
-  outputCommandResult({ scope: envelope.scope, raw: result.stdout }, result.stdout, Boolean(options.json));
+  outputCommandResult({ scope: envelope.scope, raw: rawOutput }, rawOutput, json);
   return 0;
 }
 

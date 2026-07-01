@@ -1,6 +1,10 @@
 /**
  * /antigravity:review — read-only review of working tree or branch diff.
  *
+ * Runs on the shared runtime (Phase 4e): runForeground/startBackground drive
+ * the shared worker lifecycle; the launch seam lives in lib/job-runtime.mjs.
+ * The git context collection + prompt building stay engine-specific.
+ *
  * Flags:
  *   --base <ref>      base ref for branch diff
  *   --scope <auto|working-tree|branch>
@@ -16,8 +20,14 @@ import { runAsMain } from "../lib/cli-entry.mjs";
 import { collectReviewContext } from "../lib/git.mjs";
 import { buildReviewPrompt } from "../lib/prompt-templates.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
-import { runForegroundJob, startBackgroundJob, waitForJob } from "../lib/job-helpers.mjs";
+import { runForeground, startBackground, projectJob } from "../lib/job-runtime.mjs";
+import { waitForJob } from "../lib/shared/core/wait.mjs";
+import { reconcileDeadPids } from "../lib/shared/core/reconcile.mjs";
 import { outputCommandResult } from "../lib/render.mjs";
+
+// A background --wait blocks on an explicit finite budget (shared waitForJob has
+// no infinite mode). 15m mirrors the wait command's default.
+const DEFAULT_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 
 export async function run(argv = [], ctx = {}) {
   const { options } = parseCommandInput(argv, {
@@ -30,6 +40,7 @@ export async function run(argv = [], ctx = {}) {
   const scope = (options.scope ? String(options.scope) : "auto");
   const base = options.base ? String(options.base) : undefined;
   const model = options.model ? String(options.model) : undefined;
+  const json = Boolean(options.json);
   // Review is read-only: run agy under --sandbox so a misbehaving model cannot
   // mutate the tree. Escape hatch: --no-sandbox.
   const sandbox = !options["no-sandbox"];
@@ -53,19 +64,27 @@ export async function run(argv = [], ctx = {}) {
     : options.continue
     ? "continue"
     : "print";
-  const conversationId = options.conversation ? String(options.conversation) : undefined;
+  const conversationId = options.conversation ? String(options.conversation) : null;
   const title = `review: ${envelope.scope}${base ? ` vs ${base}` : ""}`;
 
+  // M8: conversationId (?? null) flows into request so --continue/--conversation
+  // resume survives the rewiring (the adapter reads only job.request.conversationId).
+  const request = {
+    scope: envelope.scope,
+    base: base ?? null,
+    mode,
+    conversationId: conversationId ?? null,
+    model,
+    sandbox,
+  };
+
   if (options.background) {
-    const { job } = await startBackgroundJob({
-      workspaceRoot,
+    const { stateDir, job } = startBackground({
+      cwd: workspaceRoot,
       kind: "review",
       title,
       prompt,
-      mode,
-      conversationId,
-      cwd: workspaceRoot,
-      request: { scope: envelope.scope, base: base ?? null, mode, model, sandbox },
+      request,
     });
     const payload = {
       jobId: job.id,
@@ -75,48 +94,49 @@ export async function run(argv = [], ctx = {}) {
     outputCommandResult(
       payload,
       `Background review started: ${job.id}\nRun /antigravity:status ${job.id} to check progress.\n`,
-      Boolean(options.json),
+      json,
     );
     if (options.wait) {
-      const final = await waitForJob(workspaceRoot, job.id);
-      return final?.status === "completed" ? 0 : final?.status === "cancelled" ? 2 : 1;
+      const { done, job: final } = await waitForJob({
+        stateDir,
+        jobId: job.id,
+        timeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+        reconcile: reconcileDeadPids,
+      });
+      if (!final) return 1;
+      if (!done) return 10;
+      const projected = projectJob(final);
+      return projected.status === "completed" ? 0 : projected.status === "cancelled" ? 2 : 1;
     }
     return 0;
   }
 
-  const { result } = await runForegroundJob({
-    workspaceRoot,
+  const { job: finished } = await runForeground({
+    cwd: workspaceRoot,
     kind: "review",
     title,
     prompt,
-    mode,
-    conversationId,
-    model,
-    sandbox,
-    cwd: workspaceRoot,
-    request: { scope: envelope.scope, base: base ?? null, mode, model, sandbox },
-    onStdout: (chunk) => process.stderr.write(chunk),
+    request,
   });
 
-  if (result.status === "auth_required") {
+  if (finished.errorKind === "auth") {
     process.stderr.write(
-      `\nantigravity:review — Antigravity is not authenticated.\n` +
-        `Run /antigravity:setup to complete the OAuth flow, then retry.\n`,
+      "\nantigravity:review — Antigravity is not authenticated.\n" +
+        "Run /antigravity:setup to complete the OAuth flow, then retry.\n",
     );
-    if (result.oauthUrl) process.stderr.write(`OAuth URL: ${result.oauthUrl}\n`);
     return 1;
   }
-  if (result.status !== "completed") {
-    process.stderr.write(`\nantigravity:review — failed (${result.status}).\n`);
-    if (result.stderr) process.stderr.write(result.stderr);
-    return result.status === "cancelled" ? 2 : 1;
+  if (finished.status !== "completed") {
+    process.stderr.write(`\nantigravity:review — failed (${finished.status}).\n`);
+    if (finished.error) process.stderr.write(finished.error);
+    return finished.status === "cancelled" ? 2 : 1;
   }
 
   const payload = {
     scope: envelope.scope,
-    review: result.stdout,
+    review: finished.resultText,
   };
-  outputCommandResult(payload, result.stdout, Boolean(options.json));
+  outputCommandResult(payload, finished.resultText ?? "", json);
   return 0;
 }
 

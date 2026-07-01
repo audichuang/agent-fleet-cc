@@ -1,15 +1,11 @@
 /**
- * Smoke tests for the per-command modules.
+ * Smoke tests for the per-command modules, all on the SHARED runtime.
  *
- * The tests mock `agent-runtime.runAgyPrint` and `child_process.spawn` so
- * that no real `agy` binary is invoked and no detached worker is spawned.
- * Each test runs against a fresh ANTIGRAVITY plugin-data directory.
- *
- * Strategy: we cannot ESM-monkey-patch the bound import of runAgyPrint
- * inside review/rescue/task once they are imported. Instead we drive the
- * happy-path through job-helpers directly and verify the state machine,
- * and we drive review/result/status/cancel through their `run()` entry
- * with carefully constructed jobs persisted on disk.
+ * Read commands (status/result/wait/logs/cancel) seed the shared dir-per-job
+ * layout via createJob/finalizeJob (seedSharedJob). Launch commands
+ * (task/rescue/review/adversarial/image) run their real run() entry in-process
+ * against a directly-spawnable bash `agy` stub (AGY_BIN) so the shared worker
+ * lifecycle is exercised end-to-end without a real agy binary.
  */
 
 import { describe, it, beforeEach, afterEach, test } from 'node:test';
@@ -18,17 +14,38 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { execSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-import {
-  upsertJob,
-  writeJobFile,
-  appendJobLog,
-  resolveJobLogFile,
-  ensureStateDir,
-} from '../../plugins/antigravity/scripts/lib/state.mjs';
-// Phase 4a: status/result read the SHARED dir-per-job layout, so their tests
-// seed via the shared store (createJob/finalizeJob) instead of the legacy flat
-// state.json layout used by the still-unflipped wait/logs/cancel commands.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const cmdPath = (name) =>
+  path.resolve(HERE, `../../plugins/antigravity/scripts/commands/${name}.mjs`);
+
+// Run a launch command as a REAL subprocess against the bash `agy` stub. Launch
+// commands await real engine work; running them in-process under the shared
+// process.stdout capture would swallow the test runner's own reporter output
+// for sibling tests during the await. A subprocess keeps stdio fully isolated.
+// Callers pass a stub body (agy script) + the state/data dir via CLAUDE_PLUGIN_DATA.
+function runCmdSubprocess(name, args, { cwd, data, agyBody }) {
+  const agy = path.join(data, 'agy');
+  fs.writeFileSync(agy, `#!/usr/bin/env bash\n${agyBody}`, { mode: 0o755 });
+  const childEnv = {
+    ...process.env,
+    CLAUDE_PLUGIN_DATA: data,
+    AGY_BIN: agy,
+    ANTIGRAVITY_PLUGIN_SESSION_ID: '',
+  };
+  // Strip the test-runner IPC so a detached worker child does not switch into
+  // test-reporter mode (undefined env values would stringify to "undefined").
+  delete childEnv.NODE_TEST_CONTEXT;
+  delete childEnv.NODE_TEST_WORKER_ID;
+  return spawnSync(process.execPath, [cmdPath(name), ...args], {
+    encoding: 'utf8',
+    cwd,
+    env: childEnv,
+  });
+}
+
 import { createJobRecord } from '../../plugins/antigravity/scripts/lib/shared/core/job.mjs';
 import { createJob, finalizeJob, writeJob, logFilePath } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
 import { stateDirFor } from '../../plugins/antigravity/scripts/lib/job-runtime.mjs';
@@ -81,31 +98,51 @@ afterEach(() => {
   process.env.CLAUDE_PLUGIN_DATA = ORIGINAL_ENV.CLAUDE_PLUGIN_DATA ?? '';
   delete process.env.CLAUDE_PLUGIN_DATA;
   delete process.env.ANTIGRAVITY_PLUGIN_SESSION_ID;
+  if (ORIGINAL_ENV.AGY_BIN === undefined) delete process.env.AGY_BIN;
+  else process.env.AGY_BIN = ORIGINAL_ENV.AGY_BIN;
   try {
     fs.rmSync(tempDir, { recursive: true, force: true });
   } catch {}
 });
 
-async function seedStoredJob(overrides = {}) {
-  const id = overrides.id ?? 'job' + randomBytes(3).toString('hex');
-  const status = overrides.status ?? 'completed';
-  const now = new Date().toISOString();
-  const job = {
-    id,
-    kind: 'task',
-    title: 'demo',
-    status,
-    phase: overrides.phase ?? status,
-    sessionId: process.env.ANTIGRAVITY_PLUGIN_SESSION_ID,
-    pid: null,
-    createdAt: now,
-    updatedAt: now,
-    logFile: resolveJobLogFile(tempDir, id),
-    ...overrides,
+// Turn tempDir into a real git repo so resolveWorkspaceRoot anchors on it and
+// review's collectReviewContext can produce a diff.
+function initGitRepo() {
+  const genv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e.com',
+    GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e.com',
   };
-  ensureStateDir(tempDir);
-  await upsertJob(tempDir, job);
-  await writeJobFile(tempDir, id, { ...job, request: null, result: null });
+  execSync('git init -q', { cwd: tempDir, stdio: 'ignore' });
+  execSync('git commit --allow-empty -q -m init', { cwd: tempDir, stdio: 'ignore', env: genv });
+}
+
+// Commit a tracked file then modify it, so `git diff HEAD` (the working-tree
+// diff review collects) is non-empty. Untracked files do NOT appear in that
+// diff, so a tracked+modified file is required to exercise the review path.
+function commitAndModify() {
+  const genv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e.com',
+    GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e.com',
+  };
+  fs.writeFileSync(path.join(tempDir, 'f.txt'), 'one\n');
+  execSync('git add f.txt && git commit -q -m add', { cwd: tempDir, stdio: 'ignore', env: genv });
+  fs.writeFileSync(path.join(tempDir, 'f.txt'), 'one\ntwo\n');
+}
+
+// Wait for a detached background worker to finalize the job (and be reaped), so
+// it does not outlive the test file. Returns the terminal job.
+async function waitForTerminal(id, deadlineMs = 10000) {
+  const stateDir = stateDirFor(tempDir);
+  const { readJob } = await import('../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs');
+  const deadline = Date.now() + deadlineMs;
+  const TERMINAL = ['completed', 'failed', 'cancelled', 'timed-out'];
+  let job = readJob(stateDir, id);
+  while (Date.now() < deadline && !TERMINAL.includes(job?.status)) {
+    await new Promise((r) => setTimeout(r, 50));
+    job = readJob(stateDir, id);
+  }
   return job;
 }
 
@@ -502,11 +539,37 @@ describe('/antigravity:review', () => {
     assert.equal(exit, 0);
     assert.match(cap.out.join(''), /no changes to review/i);
   });
+
+  it('foreground: runs agy on the diff and returns its output (exit 0)', () => {
+    initGitRepo();
+    commitAndModify(); // tracked change → non-empty `git diff HEAD`
+    const res = runCmdSubprocess('review', [], {
+      cwd: tempDir,
+      data: tempDir,
+      agyBody: 'echo "REVIEW_OK"\nexit 0\n',
+    });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /REVIEW_OK/);
+  });
+
+  it('foreground: prints setup hint and exits 1 on an auth failure', () => {
+    initGitRepo();
+    commitAndModify(); // tracked change → non-empty `git diff HEAD`
+    // agy emits the auth sentinel to stderr and exits nonzero → errorKind auth.
+    const res = runCmdSubprocess('review', [], {
+      cwd: tempDir,
+      data: tempDir,
+      agyBody: 'echo "Authentication required" 1>&2\nexit 1\n',
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /not authenticated/i);
+    assert.match(res.stderr, /antigravity:setup/);
+  });
 });
 
-// ───────────────────────────── rescue + task argv parsing ─────────────────────────────
+// ───────────────────────────── rescue + task launch ─────────────────────────────
 
-describe('/antigravity:rescue argv parsing', () => {
+describe('/antigravity:rescue', () => {
   it('rejects empty prompt without --conversation', async () => {
     const { run } = await import('../../plugins/antigravity/scripts/commands/rescue.mjs');
     const cap = captureStdio();
@@ -520,32 +583,44 @@ describe('/antigravity:rescue argv parsing', () => {
     assert.match(cap.err.join(''), /no task text/);
   });
 
-  it('logs an ignored-model warning when --model is passed', async () => {
-    // Pass an unknown conversation id so we go via the background path quickly,
-    // but startBackgroundJob will spawn a worker — so we stop at the model
-    // warning by passing an empty prompt+conversation: hitting the early
-    // model warning then the "no task text" error path. We assert the
-    // warning + the eventual exit=1 from the empty-prompt check (because the
-    // model check happens before the empty-prompt check).
-    const { run } = await import('../../plugins/antigravity/scripts/commands/rescue.mjs');
-    const cap = captureStdio();
-    let exit;
-    try {
-      exit = await run(['--model', 'pro'], { cwd: tempDir });
-    } finally {
-      cap.restore();
-    }
-    assert.equal(exit, 1);
-    const errText = cap.err.join('');
-    // Either the model warning printed OR the empty-prompt error printed.
-    // We require the empty-prompt error to be present so the test is robust
-    // against argv-parser changes; the model warning is logged in the
-    // happy path through rescue.run prior to this exit.
-    assert.match(errText, /no task text/);
+  it('foreground: runs agy and returns its output (exit 0)', () => {
+    const res = runCmdSubprocess('rescue', ['do a thing'], {
+      cwd: tempDir,
+      data: tempDir,
+      agyBody: 'echo "RESCUE_DONE"\nexit 0\n',
+    });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /RESCUE_DONE/);
+  });
+
+  it('foreground: setup hint + exit 1 on auth failure', () => {
+    const res = runCmdSubprocess('rescue', ['do a thing'], {
+      cwd: tempDir,
+      data: tempDir,
+      agyBody: 'echo "Authentication required" 1>&2\nexit 1\n',
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /not authenticated/i);
+    assert.match(res.stderr, /antigravity:setup/);
+  });
+
+  it('background: queues a job and returns immediately (exit 0)', async () => {
+    const res = runCmdSubprocess('rescue', ['--background', 'do a thing', '--json'], {
+      cwd: tempDir,
+      data: tempDir,
+      agyBody: 'echo "BG_RESCUE"\nexit 0\n',
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const payload = JSON.parse(res.stdout);
+    assert.equal(payload.status, 'queued');
+    assert.ok(payload.jobId);
+    // The detached worker finalizes the job on its own; wait so it is reaped.
+    const final = await waitForTerminal(payload.jobId);
+    assert.equal(final.status, 'completed', `got ${final?.status}`);
   });
 });
 
-describe('/antigravity:task argv parsing', () => {
+describe('/antigravity:task', () => {
   it('rejects empty prompt without --conversation', async () => {
     const { run } = await import('../../plugins/antigravity/scripts/commands/task.mjs');
     const cap = captureStdio();
@@ -558,26 +633,30 @@ describe('/antigravity:task argv parsing', () => {
     assert.equal(exit, 1);
     assert.match(cap.err.join(''), /no task text/);
   });
-});
 
-// ───────────────────────────── job-helpers state machine ─────────────────────────────
-
-describe('job-helpers.createTrackedJob', () => {
-  it('creates a queued job index + per-job file', async () => {
-    const { createTrackedJob } = await import('../../plugins/antigravity/scripts/lib/job-helpers.mjs');
-    const job = await createTrackedJob({
-      workspaceRoot: tempDir,
-      kind: 'task',
-      title: 'demo',
-      request: { prompt: 'hello' },
+  it('foreground: runs agy and returns its output (exit 0)', () => {
+    const res = runCmdSubprocess('task', ['--foreground', 'do it'], {
+      cwd: tempDir,
+      data: tempDir,
+      agyBody: 'echo "TASK_DONE"\nexit 0\n',
     });
-    assert.equal(job.kind, 'task');
-    assert.equal(job.status, 'queued');
-    assert.equal(typeof job.id, 'string');
-    assert.ok(job.id.length > 0);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /TASK_DONE/);
+  });
 
-    const logPath = resolveJobLogFile(tempDir, job.id);
-    assert.ok(fs.existsSync(logPath));
+  it('background (default): queues a job and returns a jobId (exit 0)', async () => {
+    const res = runCmdSubprocess('task', ['do it', '--json'], {
+      cwd: tempDir,
+      data: tempDir,
+      agyBody: 'echo "BG_TASK"\nexit 0\n',
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const payload = JSON.parse(res.stdout);
+    assert.equal(payload.status, 'queued');
+    assert.ok(payload.jobId);
+    // The detached worker finalizes the job on its own; wait so it is reaped.
+    const final = await waitForTerminal(payload.jobId);
+    assert.equal(final.status, 'completed', `got ${final?.status}`);
   });
 });
 

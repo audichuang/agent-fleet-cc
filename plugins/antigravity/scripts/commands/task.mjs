@@ -5,6 +5,9 @@
  * --foreground to run inline. See /antigravity:rescue for the foreground-by-
  * default variant.
  *
+ * Runs on the shared runtime (Phase 4e): runForeground/startBackground drive
+ * the shared worker lifecycle; the launch seam lives in lib/job-runtime.mjs.
+ *
  * Flags:
  *   --wait                block until completion
  *   --foreground          run inline instead of forking a worker
@@ -18,8 +21,15 @@ import { parseCommandInput } from "../lib/args.mjs";
 import { runAsMain } from "../lib/cli-entry.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 import { buildTaskPrompt } from "../lib/prompt-templates.mjs";
-import { runForegroundJob, startBackgroundJob, waitForJob } from "../lib/job-helpers.mjs";
+import { runForeground, startBackground, projectJob } from "../lib/job-runtime.mjs";
+import { waitForJob } from "../lib/shared/core/wait.mjs";
+import { reconcileDeadPids } from "../lib/shared/core/reconcile.mjs";
 import { outputCommandResult } from "../lib/render.mjs";
+
+// A background --wait blocks on an explicit finite budget: shared waitForJob has
+// no infinite mode (missing timeoutMs → deadline=NaN, always-false = fragile
+// accidental-infinite). 15m mirrors the wait command's default.
+const DEFAULT_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 
 export async function run(argv = [], ctx = {}) {
   const { options, positionals } = parseCommandInput(argv, {
@@ -30,6 +40,7 @@ export async function run(argv = [], ctx = {}) {
   const cwd = options.cwd ? String(options.cwd) : ctx.cwd ?? process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const model = options.model ? String(options.model) : undefined;
+  const json = Boolean(options.json);
 
   const userPrompt = positionals.join(" ").trim();
   if (!userPrompt && !options.continue && !options.conversation) {
@@ -38,7 +49,7 @@ export async function run(argv = [], ctx = {}) {
   }
 
   let mode = "print";
-  let conversationId;
+  let conversationId = null;
   if (options.conversation) {
     mode = "conversation";
     conversationId = String(options.conversation);
@@ -55,48 +66,41 @@ export async function run(argv = [], ctx = {}) {
   const prompt = buildTaskPrompt(userPrompt || "(continue)");
   const title = userPrompt ? truncate(userPrompt, 80) : `resume ${conversationId ?? "last"}`;
 
+  // M8: conversationId (?? null) flows into request so --continue/--conversation
+  // resume survives the rewiring (the adapter reads only job.request.conversationId).
+  const request = { mode, conversationId: conversationId ?? null, model, addDirs };
+
   if (options.foreground) {
-    const { result } = await runForegroundJob({
-      workspaceRoot,
+    const { job: finished } = await runForeground({
+      cwd: workspaceRoot,
       kind: "task",
       title,
       prompt,
-      mode,
-      conversationId,
-      addDirs,
-      model,
-      cwd: workspaceRoot,
-      request: { mode, addDirs, model },
-      onStdout: (chunk) => process.stderr.write(chunk),
+      request,
     });
 
-    if (result.status === "auth_required") {
+    if (finished.errorKind === "auth") {
       process.stderr.write(
-        `\nantigravity:task — not authenticated. Run /antigravity:setup, then retry.\n`,
+        "\nantigravity:task — Antigravity is not authenticated.\nRun /antigravity:setup to complete the OAuth flow, then retry.\n",
       );
-      if (result.oauthUrl) process.stderr.write(`OAuth URL: ${result.oauthUrl}\n`);
       return 1;
     }
-    if (result.status !== "completed") {
-      process.stderr.write(`\nantigravity:task — failed (${result.status}).\n`);
-      if (result.stderr) process.stderr.write(result.stderr);
-      return result.status === "cancelled" ? 2 : 1;
+    if (finished.status !== "completed") {
+      process.stderr.write(`\nantigravity:task — failed (${finished.status}).\n`);
+      if (finished.error) process.stderr.write(finished.error);
+      return finished.status === "cancelled" ? 2 : 1;
     }
-    outputCommandResult({ task: result.stdout }, result.stdout, Boolean(options.json));
+    outputCommandResult({ task: finished.resultText }, finished.resultText ?? "", json);
     return 0;
   }
 
   // Background path (default).
-  const { job } = await startBackgroundJob({
-    workspaceRoot,
+  const { stateDir, job } = startBackground({
+    cwd: workspaceRoot,
     kind: "task",
     title,
     prompt,
-    mode,
-    conversationId,
-    addDirs,
-    cwd: workspaceRoot,
-    request: { mode, addDirs, model },
+    request,
   });
   const payload = {
     jobId: job.id,
@@ -106,16 +110,23 @@ export async function run(argv = [], ctx = {}) {
   outputCommandResult(
     payload,
     `Background task started: ${job.id}\nRun /antigravity:status ${job.id} to check progress.\n`,
-    Boolean(options.json),
+    json,
   );
 
   if (options.wait) {
-    const final = await waitForJob(workspaceRoot, job.id);
+    const { done, job: final } = await waitForJob({
+      stateDir,
+      jobId: job.id,
+      timeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+      reconcile: reconcileDeadPids,
+    });
     if (!final) return 1;
-    if (final.status === "completed" && final.result?.rawOutput) {
-      process.stdout.write(final.result.rawOutput);
+    if (!done) return 10;
+    const projected = projectJob(final);
+    if (projected.status === "completed" && projected.result?.rawOutput) {
+      process.stdout.write(projected.result.rawOutput);
     }
-    return final.status === "completed" ? 0 : final.status === "cancelled" ? 2 : 1;
+    return projected.status === "completed" ? 0 : projected.status === "cancelled" ? 2 : 1;
   }
   return 0;
 }

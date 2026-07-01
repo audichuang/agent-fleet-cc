@@ -1,6 +1,9 @@
 /**
  * /antigravity:rescue — hand a free-form task off to Antigravity (agy).
  *
+ * Runs on the shared runtime (Phase 4e): runForeground/startBackground drive
+ * the shared worker lifecycle; the launch seam lives in lib/job-runtime.mjs.
+ *
  * Positional: prompt text.
  * Flags:
  *   --background          fork worker, return immediately
@@ -10,7 +13,7 @@
  *   --continue            alias of --resume (parity with agy)
  *   --conversation <id>   resume a specific conversation
  *   --add-dir <path>      additional workspace dir (repeatable)
- *   --model <id>          accepted for forward-compat, currently logged + ignored
+ *   --model <id>          native agy --model, forwarded verbatim
  *   --json                emit JSON instead of markdown
  */
 
@@ -20,8 +23,14 @@ import { parseCommandInput } from "../lib/args.mjs";
 import { runAsMain } from "../lib/cli-entry.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 import { buildRescuePrompt } from "../lib/prompt-templates.mjs";
-import { runForegroundJob, startBackgroundJob, waitForJob } from "../lib/job-helpers.mjs";
+import { runForeground, startBackground, projectJob } from "../lib/job-runtime.mjs";
+import { waitForJob } from "../lib/shared/core/wait.mjs";
+import { reconcileDeadPids } from "../lib/shared/core/reconcile.mjs";
 import { outputCommandResult } from "../lib/render.mjs";
+
+// A background --wait blocks on an explicit finite budget (shared waitForJob has
+// no infinite mode). 15m mirrors the wait command's default.
+const DEFAULT_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 
 export async function run(argv = [], ctx = {}) {
   const { options, positionals } = parseCommandInput(argv, {
@@ -31,6 +40,7 @@ export async function run(argv = [], ctx = {}) {
 
   const cwd = options.cwd ? String(options.cwd) : ctx.cwd ?? process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
+  const json = Boolean(options.json);
 
   let userPrompt = positionals.join(" ").trim();
   if (options["prompt-file"]) {
@@ -53,7 +63,7 @@ export async function run(argv = [], ctx = {}) {
 
   // Resolve conversation mode. --conversation wins; then --resume/--continue; then fresh.
   let mode = "print";
-  let conversationId;
+  let conversationId = null;
   if (options.conversation) {
     mode = "conversation";
     conversationId = String(options.conversation);
@@ -70,17 +80,17 @@ export async function run(argv = [], ctx = {}) {
   const prompt = buildRescuePrompt(userPrompt || "(continue)");
   const title = userPrompt ? truncate(userPrompt, 80) : `resume ${conversationId ?? "last"}`;
 
+  // M8: conversationId (?? null) flows into request so --continue/--conversation
+  // resume survives the rewiring (the adapter reads only job.request.conversationId).
+  const request = { mode, conversationId: conversationId ?? null, model, addDirs };
+
   if (options.background) {
-    const { job } = await startBackgroundJob({
-      workspaceRoot,
+    const { stateDir, job } = startBackground({
+      cwd: workspaceRoot,
       kind: "rescue",
       title,
       prompt,
-      mode,
-      conversationId,
-      addDirs,
-      cwd: workspaceRoot,
-      request: { mode, addDirs, model },
+      request,
     });
     const payload = {
       jobId: job.id,
@@ -90,43 +100,44 @@ export async function run(argv = [], ctx = {}) {
     outputCommandResult(
       payload,
       `Background rescue started: ${job.id}\nRun /antigravity:status ${job.id} to check progress.\n`,
-      Boolean(options.json),
+      json,
     );
     if (options.wait) {
-      const final = await waitForJob(workspaceRoot, job.id);
-      return final?.status === "completed" ? 0 : final?.status === "cancelled" ? 2 : 1;
+      const { done, job: final } = await waitForJob({
+        stateDir,
+        jobId: job.id,
+        timeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+        reconcile: reconcileDeadPids,
+      });
+      if (!final) return 1;
+      if (!done) return 10;
+      const projected = projectJob(final);
+      return projected.status === "completed" ? 0 : projected.status === "cancelled" ? 2 : 1;
     }
     return 0;
   }
 
-  const { result } = await runForegroundJob({
-    workspaceRoot,
+  const { job: finished } = await runForeground({
+    cwd: workspaceRoot,
     kind: "rescue",
     title,
     prompt,
-    mode,
-    conversationId,
-    addDirs,
-    model,
-    cwd: workspaceRoot,
-    request: { mode, addDirs, model },
-    onStdout: (chunk) => process.stderr.write(chunk),
+    request,
   });
 
-  if (result.status === "auth_required") {
+  if (finished.errorKind === "auth") {
     process.stderr.write(
-      `\nantigravity:rescue — Antigravity is not authenticated. Run /antigravity:setup, then retry.\n`,
+      "\nantigravity:rescue — Antigravity is not authenticated.\nRun /antigravity:setup to complete the OAuth flow, then retry.\n",
     );
-    if (result.oauthUrl) process.stderr.write(`OAuth URL: ${result.oauthUrl}\n`);
     return 1;
   }
-  if (result.status !== "completed") {
-    process.stderr.write(`\nantigravity:rescue — failed (${result.status}).\n`);
-    if (result.stderr) process.stderr.write(result.stderr);
-    return result.status === "cancelled" ? 2 : 1;
+  if (finished.status !== "completed") {
+    process.stderr.write(`\nantigravity:rescue — failed (${finished.status}).\n`);
+    if (finished.error) process.stderr.write(finished.error);
+    return finished.status === "cancelled" ? 2 : 1;
   }
 
-  outputCommandResult({ rescue: result.stdout }, result.stdout, Boolean(options.json));
+  outputCommandResult({ rescue: finished.resultText }, finished.resultText ?? "", json);
   return 0;
 }
 

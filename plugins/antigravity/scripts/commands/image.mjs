@@ -5,6 +5,10 @@
  * Runs in the FOREGROUND only: image generation is a one-shot that returns a
  * path you want immediately, so there is no background/job-polling surface.
  *
+ * Runs on the shared runtime (Phase 4e): runForeground drives the shared worker
+ * lifecycle; the launch seam lives in lib/job-runtime.mjs. The prompt building
+ * + IMAGE_PATH marker recovery stay engine-specific.
+ *
  * Flags:
  *   --name <id>      ask agy to save the image under this name
  *   --output <path>  copy the generated file to this path
@@ -20,7 +24,7 @@ import { runAsMain } from "../lib/cli-entry.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 import { buildImagePrompt } from "../lib/prompt-templates.mjs";
 import { extractImagePath } from "../lib/image.mjs";
-import { runForegroundJob } from "../lib/job-helpers.mjs";
+import { runForeground } from "../lib/job-runtime.mjs";
 import { outputCommandResult } from "../lib/render.mjs";
 
 export async function run(argv = [], ctx = {}) {
@@ -41,6 +45,8 @@ export async function run(argv = [], ctx = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const name = options.name ? String(options.name) : undefined;
   const output = options.output ? String(options.output) : undefined;
+  const model = options.model ? String(options.model) : undefined;
+  const json = Boolean(options.json);
 
   const addDirs = Array.isArray(options["add-dir"])
     ? options["add-dir"].map(String)
@@ -50,32 +56,40 @@ export async function run(argv = [], ctx = {}) {
 
   const prompt = buildImagePrompt(description, { name });
 
-  const { result } = await runForegroundJob({
-    workspaceRoot,
+  // M8: conversationId (?? null) flows into request even though image has no
+  // resume flag — keeps the 5 launch commands consistent (the adapter reads
+  // only job.request.conversationId).
+  const request = {
+    addDirs,
+    conversationId: null,
+    model,
+    name: name ?? null,
+    output: output ?? null,
+  };
+
+  const { job: finished } = await runForeground({
+    cwd: workspaceRoot,
     kind: "image",
     title: truncate(description, 80),
     prompt,
-    addDirs,
-    model: options.model ? String(options.model) : undefined,
-    cwd: workspaceRoot,
-    request: { addDirs, name: name ?? null, output: output ?? null },
-    onStdout: (chunk) => process.stderr.write(chunk),
+    request,
   });
 
-  if (result.status === "auth_required") {
+  if (finished.errorKind === "auth") {
     process.stderr.write(
-      "\nantigravity:image — not authenticated. Run /antigravity:setup, then retry.\n",
+      "\nantigravity:image — Antigravity is not authenticated.\nRun /antigravity:setup to complete the OAuth flow, then retry.\n",
     );
-    if (result.oauthUrl) process.stderr.write(`OAuth URL: ${result.oauthUrl}\n`);
     return 1;
   }
-  if (result.status !== "completed") {
-    process.stderr.write(`\nantigravity:image — failed (${result.status}).\n`);
-    if (result.stderr) process.stderr.write(result.stderr);
-    return result.status === "cancelled" ? 2 : 1;
+  if (finished.status !== "completed") {
+    process.stderr.write(`\nantigravity:image — failed (${finished.status}).\n`);
+    if (finished.error) process.stderr.write(finished.error);
+    return finished.status === "cancelled" ? 2 : 1;
   }
 
-  const { imagePath, source } = extractImagePath(result.stdout);
+  // The IMAGE_PATH marker lives in the raw agy output (image.mjs marker contract).
+  const rawOutput = finished.result?.rawOutput ?? finished.resultText ?? "";
+  const { imagePath, source } = extractImagePath(rawOutput);
 
   let copiedTo = null;
   let warning = null;
@@ -98,7 +112,7 @@ export async function run(argv = [], ctx = {}) {
     source,
     copiedTo,
     warning,
-    rawOutput: result.stdout,
+    rawOutput,
   };
 
   const lines = [];
@@ -106,8 +120,8 @@ export async function run(argv = [], ctx = {}) {
   if (copiedTo) lines.push(`Copied to: ${copiedTo}`);
   if (warning) lines.push(`Warning: ${warning}`);
   lines.push("");
-  lines.push(result.stdout.trimEnd());
-  outputCommandResult(payload, `${lines.join("\n")}\n`, Boolean(options.json));
+  lines.push(rawOutput.trimEnd());
+  outputCommandResult(payload, `${lines.join("\n")}\n`, json);
   return 0;
 }
 

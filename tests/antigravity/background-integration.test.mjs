@@ -1,8 +1,9 @@
 /**
- * End-to-end background-job path: startBackgroundJob spawns the REAL
- * scripts/commands/_worker.mjs subprocess, which runs `agy --print` (here a
- * fake `agy` stub) and finalizes the job through the CAS. This is the highest-
- * fidelity guard for the worker → state finalize wiring.
+ * End-to-end background-job path on the SHARED runtime: startBackground spawns
+ * the REAL scripts/worker-entry.mjs subprocess (2-arg: <stateDir> <jobId>),
+ * which runs `agy --print` (here a directly-spawnable fake `agy` stub) and
+ * finalizes the job through the shared CAS. Highest-fidelity guard for the
+ * worker → state finalize wiring after the Phase 4e migration.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -11,42 +12,67 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { startBackground } from '../../plugins/antigravity/scripts/lib/job-runtime.mjs';
+import { readJob, jobDir } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
+import { readEvents } from '../../plugins/antigravity/scripts/lib/shared/core/events.mjs';
+
 const ORIGINAL = { ...process.env };
 let tempDir;
-let agyStub;
+let cwd;
+let env;
 
 beforeEach(() => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-bg-'));
-  process.env.CLAUDE_PLUGIN_DATA = tempDir;
-  delete process.env.ANTIGRAVITY_PLUGIN_SESSION_ID;
-  // Fake agy: echoes a line, ignoring all flags/positionals.
-  agyStub = path.join(tempDir, 'agy');
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-bg-data-'));
+  cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-bg-cwd-'));
+  fs.mkdirSync(path.join(cwd, '.git'), { recursive: true }); // resolveWorkspaceRoot anchor
+  // Directly-spawnable fake agy: echoes a line, ignoring all flags/positionals.
+  // resolveAgyBin returns AGY_BIN when it exists and spawnEngine spawns argv[0].
+  const agyStub = path.join(tempDir, 'agy');
   fs.writeFileSync(agyStub, '#!/usr/bin/env bash\necho "hello from fake agy"\nexit 0\n', { mode: 0o755 });
-  process.env.AGY_BIN = agyStub;
+  // A hermetic env for the launch helper: state root under tempDir, AGY_BIN →
+  // stub, and NO test-runner IPC (so the detached worker does not switch into
+  // node --test reporter mode).
+  env = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    CLAUDE_PLUGIN_DATA: tempDir,
+    AGY_BIN: agyStub,
+  };
 });
 afterEach(() => {
-  process.env.CLAUDE_PLUGIN_DATA = ORIGINAL.CLAUDE_PLUGIN_DATA ?? '';
-  if (ORIGINAL.CLAUDE_PLUGIN_DATA === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-  if (ORIGINAL.AGY_BIN === undefined) delete process.env.AGY_BIN;
-  else process.env.AGY_BIN = ORIGINAL.AGY_BIN;
+  process.env = { ...ORIGINAL };
   fs.rmSync(tempDir, { recursive: true, force: true });
+  fs.rmSync(cwd, { recursive: true, force: true });
 });
 
 describe('background job end-to-end', () => {
-  it('runs the worker and finalizes the job as completed with output', async () => {
-    const { startBackgroundJob, waitForJob } = await import('../../plugins/antigravity/scripts/lib/job-helpers.mjs');
-    const { job } = await startBackgroundJob({
-      workspaceRoot: tempDir,
+  it('runs the detached worker and finalizes the job completed with output', async () => {
+    const { stateDir, job, failed } = startBackground({
+      cwd,
       kind: 'task',
       title: 'fake',
       prompt: 'say hi',
-      cwd: tempDir,
-      request: {},
-      watchdog: false,
+      request: { mode: 'print' },
+      env,
     });
-    const final = await waitForJob(tempDir, job.id, { pollMs: 100, timeoutMs: 15000 });
+    assert.equal(failed, false);
+
+    // Poll for the detached worker to finalize the job.
+    const deadline = Date.now() + 15000;
+    const TERMINAL = ['completed', 'failed', 'cancelled', 'timed-out'];
+    let final = readJob(stateDir, job.id);
+    while (Date.now() < deadline && !TERMINAL.includes(final?.status)) {
+      await new Promise((r) => setTimeout(r, 100));
+      final = readJob(stateDir, job.id);
+    }
     assert.ok(final, 'job should reach a terminal state');
     assert.equal(final.status, 'completed', `got ${final?.status}`);
-    assert.match(final.result?.rawOutput ?? '', /hello from fake agy/);
+    assert.match(final.resultText ?? '', /hello from fake agy/);
+
+    // The full shared event trail must be present.
+    const events = readEvents(jobDir(stateDir, job.id));
+    for (const t of ['job-created', 'spawned', 'result', 'finalized']) {
+      assert.ok(events.some((e) => e.type === t), `missing event ${t}`);
+    }
   });
 });
