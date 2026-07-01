@@ -26,6 +26,12 @@ import {
   resolveJobLogFile,
   ensureStateDir,
 } from '../../plugins/antigravity/scripts/lib/state.mjs';
+// Phase 4a: status/result read the SHARED dir-per-job layout, so their tests
+// seed via the shared store (createJob/finalizeJob) instead of the legacy flat
+// state.json layout used by the still-unflipped wait/logs/cancel commands.
+import { createJobRecord } from '../../plugins/antigravity/scripts/lib/shared/core/job.mjs';
+import { createJob, finalizeJob } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
+import { stateDirFor } from '../../plugins/antigravity/scripts/lib/job-runtime.mjs';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -103,6 +109,32 @@ async function seedStoredJob(overrides = {}) {
   return job;
 }
 
+// Seed a job in the SHARED dir-per-job layout (Phase 4a status/result read this).
+// status/result key off top-level sessionId (D-14), so stamp the current one.
+function seedSharedJob(overrides = {}) {
+  const stateDir = stateDirFor(tempDir);
+  const record = createJobRecord({
+    engine: 'antigravity',
+    title: overrides.title ?? 'demo',
+    cwd: tempDir,
+    request: { kind: overrides.kind ?? 'task' },
+  });
+  record.sessionId = process.env.ANTIGRAVITY_PLUGIN_SESSION_ID ?? null;
+  if (overrides.id) record.id = overrides.id;
+  createJob(stateDir, record, overrides.prompt ?? 'hello');
+  const status = overrides.status ?? 'completed';
+  if (status !== 'queued') {
+    const patch = { status };
+    if (status === 'completed' || status === 'failed') {
+      patch.resultText = overrides.resultText ?? null;
+    }
+    if (overrides.error) patch.error = overrides.error;
+    if (overrides.errorKind) patch.errorKind = overrides.errorKind;
+    finalizeJob(stateDir, record.id, patch);
+  }
+  return { stateDir, id: record.id };
+}
+
 // ───────────────────────────── status ─────────────────────────────
 
 describe('/antigravity:status', () => {
@@ -121,20 +153,7 @@ describe('/antigravity:status', () => {
   });
 
   it('renders a single job snapshot when given a job id', async () => {
-    const id = 'jobx' + randomBytes(2).toString('hex');
-    ensureStateDir(tempDir);
-    await upsertJob(tempDir, {
-      id,
-      kind: 'task',
-      title: 'demo',
-      status: 'completed',
-      phase: 'completed',
-      sessionId: process.env.ANTIGRAVITY_PLUGIN_SESSION_ID,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-    });
-    await writeJobFile(tempDir, id, { id, status: 'completed', result: { rawOutput: 'hi' } });
+    const { id } = seedSharedJob({ status: 'completed', resultText: 'hi' });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/status.mjs');
     const cap = captureStdio();
@@ -168,22 +187,9 @@ describe('/antigravity:result', () => {
   });
 
   it('renders a completed job and exits 0', async () => {
-    const id = 'job' + randomBytes(3).toString('hex');
-    ensureStateDir(tempDir);
-    await upsertJob(tempDir, {
-      id,
-      kind: 'task',
+    const { id } = seedSharedJob({
       status: 'completed',
-      phase: 'completed',
-      sessionId: process.env.ANTIGRAVITY_PLUGIN_SESSION_ID,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-    });
-    await writeJobFile(tempDir, id, {
-      id,
-      status: 'completed',
-      result: { rawOutput: 'hello world from agy' },
+      resultText: 'hello world from agy',
     });
 
     const { run } = await import('../../plugins/antigravity/scripts/commands/result.mjs');
@@ -199,19 +205,7 @@ describe('/antigravity:result', () => {
   });
 
   it('returns 2 for cancelled jobs', async () => {
-    const id = 'cancelledjob';
-    ensureStateDir(tempDir);
-    await upsertJob(tempDir, {
-      id,
-      kind: 'task',
-      status: 'cancelled',
-      phase: 'cancelled',
-      sessionId: process.env.ANTIGRAVITY_PLUGIN_SESSION_ID,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-    });
-    await writeJobFile(tempDir, id, { id, status: 'cancelled' });
+    const { id } = seedSharedJob({ id: 'cancelledjob', status: 'cancelled' });
     const { run } = await import('../../plugins/antigravity/scripts/commands/result.mjs');
     const cap = captureStdio();
     let exit;

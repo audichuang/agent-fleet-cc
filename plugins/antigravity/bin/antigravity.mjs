@@ -107,6 +107,15 @@ const COMMAND_HELP = {
 const [, , raw, ...rest] = process.argv;
 const arg0 = (raw || '').toLowerCase();
 
+// Recursion guard (spec D-15): the adapter force-injects ANTIGRAVITY_ACTIVE=1
+// into the agy child env (buildEngineEnv), so an agy-in-agy invocation is
+// refused. Mirrors cc's CLAUDE_CC_ACTIVE guard (cc-companion.mjs:91). This is
+// a new protection — antigravity had no read-side before.
+if (process.env.ANTIGRAVITY_ACTIVE === '1') {
+  process.stderr.write('antigravity: refusing recursive invocation (ANTIGRAVITY_ACTIVE=1)\n');
+  process.exit(1);
+}
+
 if (arg0 === '--version' || arg0 === '-v') {
   process.stdout.write(`${readVersion()}\n`);
   process.exit(0);
