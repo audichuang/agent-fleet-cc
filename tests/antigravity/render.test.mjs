@@ -98,6 +98,24 @@ describe('renderStatusSnapshot', () => {
     // Failed jobs render "-" as follow-up, not the result command.
     assert.doesNotMatch(out, /\/antigravity:result f1/);
   });
+
+  it('uses durationMs for a terminal job, not a growing wall-clock estimate', () => {
+    // Shared runtime writes durationMs but NOT startedAt/completedAt; a stale
+    // createdAt→now estimate would grow on every status read. durationMs is fixed.
+    const anHourAgo = new Date(Date.now() - 3600_000).toISOString();
+    const finished = { id: 'd1', kind: 'task', status: 'completed', createdAt: anHourAgo, durationMs: 5000, summary: 'ok' };
+    const out = renderStatusSnapshot({
+      workspaceRoot: '/tmp',
+      config: {},
+      runtimeStatus: {},
+      running: [],
+      latestFinished: finished,
+      recent: [finished],
+      needsReview: false,
+    });
+    // durationMs 5000 → "5s" (fixed); a createdAt→now estimate would show ~60m.
+    assert.match(out, /\b5s\b/);
+  });
 });
 
 describe('renderSingleJobStatus', () => {

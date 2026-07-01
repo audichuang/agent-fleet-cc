@@ -439,12 +439,25 @@ export function outputCommandResult(payload, rendered, json) {
 }
 
 function computeElapsedDisplay(job) {
-  const start = job.startedAt ?? job.createdAt;
-  const end = job.completedAt ?? new Date().toISOString();
-  if (!start) {
+  // Prefer the authoritative durationMs written by the shared runtime's
+  // finalizeJob for terminal jobs — the shared store does NOT write
+  // startedAt/completedAt, so a wall-clock estimate (createdAt → now) would keep
+  // GROWING on every status read of an already-finished job. Fall back to a
+  // wall-clock estimate only for still-active jobs (no durationMs yet).
+  let ms;
+  if (Number.isFinite(job.durationMs)) {
+    ms = job.durationMs;
+  } else {
+    const start = job.startedAt ?? job.createdAt;
+    if (!start) {
+      return "-";
+    }
+    const end = job.completedAt ?? new Date().toISOString();
+    ms = new Date(end).getTime() - new Date(start).getTime();
+  }
+  if (!Number.isFinite(ms) || ms < 0) {
     return "-";
   }
-  const ms = new Date(end).getTime() - new Date(start).getTime();
   if (ms < 1000) {
     return `${ms}ms`;
   }
