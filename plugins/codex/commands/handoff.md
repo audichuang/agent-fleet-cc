@@ -49,6 +49,8 @@ cat <<'PROMPT_EOF' > "$TMPFILE"
 [the composed GPT-5.5 prompt]
 PROMPT_EOF
 ```
+
+> **Shell note.** Run these through the Bash tool as-is — it uses bash, not the user's login shell (often **fish**), so heredoc / `$(...)` / `&&` are correct; don't convert them. Only translate when you hand a command to the user to run themselves: `set VAR (cmd)`, no heredoc, `;`/`and` for `&&`.
 2. Run it through Codex with the companion task runner (defaults to gpt-5.5 / xhigh):
    - Mode A (review handoff) is **read-only** — do NOT add `--write`.
    - Mode B: add `--write` only if the task clearly needs to edit code, or the user passed `--write`.
