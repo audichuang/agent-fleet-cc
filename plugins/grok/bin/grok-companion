@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# grok launcher — resolves its own real location (follows symlinks), then execs
+# the adjacent ../scripts/grok-companion.mjs.
+set -euo pipefail
+src="${BASH_SOURCE[0]}"
+while [ -h "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+here="$(cd -P "$(dirname "$src")" && pwd)"
+exec node "$here/../scripts/grok-companion.mjs" "$@"
