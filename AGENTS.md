@@ -30,8 +30,9 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   the vendored copy** — CI drift-checks them.
 - `npm run bump-version <plugin> <patch|minor|major>` — the one way to bump a version; locks
   `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
-  check-version` verifies). Only those two files are tracked — root `plugin.json`,
-  `.codex-plugin/plugin.json`, `.agents/…`, and `package.json` drift silently; sync by hand.
+  check-version` verifies). It syncs only those two; the per-plugin `.codex-plugin/plugin.json`
+  dual-host manifests (`cc`, `antigravity`), `.agents/plugins/marketplace.json`, and root
+  `package.json` also carry versions and drift silently — sync those by hand.
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
@@ -46,10 +47,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.
-- `shared/lib/` is the source of truth. `cc` and `antigravity` run the full shared runtime
-  (ProcessAdapter + runWorker); `codex` adopts the shared **state-store only** (its app-server
-  broker stays engine-specific). Don't assume a plugin uses the shared runtime the same way —
-  check before editing.
+- `shared/lib/` is the source of truth. `cc`, `antigravity`, and `grok` run the full shared
+  runtime (ProcessAdapter + runWorker); `codex` adopts the shared **state-store only** (its
+  app-server broker stays engine-specific). Don't assume a plugin uses the shared runtime the
+  same way — check before editing.
 
 ## Where things live
 - Specs / plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/specs/`
