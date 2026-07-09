@@ -10,6 +10,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs, UsageError } from "./lib/shared/args.mjs";
 import { createJobRecord, TERMINAL_STATUSES } from "./lib/shared/core/job.mjs";
 import {
@@ -330,32 +331,53 @@ async function cmdLogs({ argv, out, stateDir }) {
     out(`No job ${jobId} in this workspace.`);
     return 1;
   }
+  // Story 10: logs shows the RAW grok stream (thought/text/end), not the normalized
+  // lifecycle events — parseEvent drops `thought`, so the thinking only survives in
+  // the raw stdout log the worker writes (logFilePath). Both modes read that file.
+  const logPath = logFilePath(stateDir, jobId);
   if (!flags.follow) {
-    // Story 10: show the RAW grok stream (thought/text/end), not just the
-    // normalized lifecycle events — parseEvent drops `thought`, so the only place
-    // the thinking survives is the raw stdout log the worker writes. Fall back to
-    // the lifecycle events if the raw log was never written (engine never spawned).
     let raw = "";
     try {
-      raw = fs.readFileSync(logFilePath(stateDir, jobId), "utf8");
+      raw = fs.readFileSync(logPath, "utf8");
     } catch {
       raw = "";
     }
     if (raw.trim()) {
       out(raw.replace(/\n$/, ""));
     } else {
+      // Fall back to the lifecycle events if the raw log was never written
+      // (e.g. the engine never spawned).
       for (const e of readEvents(jobDir(stateDir, jobId))) out(JSON.stringify(e));
     }
     return 0;
   }
-  const { job } = await waitForJob({
-    stateDir,
-    jobId,
-    timeoutMs: 24 * 60 * 60 * 1000,
-    reconcile: reconcileDeadPids,
-    onEvent: (e) => out(JSON.stringify(e)),
-  });
-  return TERMINAL_STATUSES.has(job?.status) ? 0 : 1;
+  // --follow: tail the raw grok stream line-by-line until the job is terminal.
+  let offset = 0;
+  const drain = () => {
+    let buf;
+    try {
+      buf = fs.readFileSync(logPath, "utf8");
+    } catch {
+      return;
+    }
+    if (buf.length <= offset) return;
+    const fresh = buf.slice(offset);
+    const lastNl = fresh.lastIndexOf("\n");
+    if (lastNl < 0) return; // no complete line yet — wait for the newline
+    offset += lastNl + 1;
+    for (const line of fresh.slice(0, lastNl).split("\n")) if (line) out(line);
+  };
+  for (;;) {
+    reconcileDeadPids(stateDir);
+    drain();
+    const job = readJob(stateDir, jobId);
+    if (!job || TERMINAL_STATUSES.has(job.status)) {
+      drain();
+      break;
+    }
+    await sleep(150);
+  }
+  return TERMINAL_STATUSES.has(readJob(stateDir, jobId)?.status) ? 0 : 1;
 }
 
 const isCliEntry = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

@@ -130,6 +130,18 @@ test("logs exposes the raw grok stream including thinking (issue #2 story 10)", 
   } finally { w.cleanup(); }
 });
 
+test("logs --follow streams the raw grok thinking until terminal", async () => {
+  const w = makeWorkspace();
+  try {
+    const start = jsonOne(cli(w, ["task", "follow me", "--background", "--json"]));
+    await pollStatus(w, start.jobId, "completed");
+    const logs = cli(w, ["logs", start.jobId, "--follow"]);
+    assert.equal(logs.status, 0);
+    assert.match(logs.stdout, /"type":"thought"/, "--follow must stream Grok's thinking");
+    assert.match(logs.stdout, /"type":"end"/);
+  } finally { w.cleanup(); }
+});
+
 test("cancel reaps the engine process and marks the job cancelled", async () => {
   const w = makeWorkspace();
   try {

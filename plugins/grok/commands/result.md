@@ -1,6 +1,6 @@
 ---
 description: Fetch the result of a grok job
-argument-hint: "[<job-id>|--last]"
+argument-hint: "[<job-id>|--last] [--json]"
 ---
 
 Run and relay:

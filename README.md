@@ -145,9 +145,9 @@ codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/
 ## Development
 
 ```bash
-npm test               # structure + shared + cc + antigravity + codex + fleet suites (Node >= 22.3)
-npm run test:cc  # one suite at a time (also test:fleet, test:codex, …)
-npm run test:e2e       # black-box CLI end-to-end regression for all 4 plugins (real subprocess, fake engine, no API key)
+npm test               # structure + shared + cc + antigravity + codex + grok + fleet suites (Node >= 22.3)
+npm run test:cc  # one suite at a time (also test:fleet, test:codex, test:grok, …)
+npm run test:e2e       # black-box CLI end-to-end regression for all 5 plugins (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```
@@ -159,8 +159,7 @@ source repo's hermetic suite (fake binaries, redirected `CLAUDE_PLUGIN_DATA`, no
 directory-per-job state store with O_EXCL CAS terminal transitions, a generic
 adapter-driven worker (process-group spawn/kill so engine grandchildren are reaped),
 mandatory env sanitization with a recursion guard, and a parameterized 10-scenario
-conformance suite. `cc` (v0.3.0) is fully migrated onto it: engine knowledge
-lives in a `ClaudeAdapter`, the job runtime in the shared lib. Each plugin carries a
-vendored copy under `scripts/lib/shared/` kept in sync by `npm run sync-shared` and
-drift-checked in CI. Migrating `antigravity` and `codex` onto the same base is the
-remaining roadmap. Designs live in `docs/specs/`.
+conformance suite. `cc` (v0.3.0) and `grok` (v0.1.0) are built on it: engine knowledge
+lives in a per-engine adapter (`ClaudeAdapter`, `GrokAdapter`), the job runtime in the
+shared lib. Each plugin carries a vendored copy under `scripts/lib/shared/` kept in sync
+by `npm run sync-shared` and drift-checked in CI. Designs live in `docs/specs/`.

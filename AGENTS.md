@@ -1,6 +1,6 @@
 # agent-fleet-cc — agent working rules
 
-A Claude Code plugin marketplace: 4 plugins (`codex`, `antigravity`, `cc`,
+A Claude Code plugin marketplace: 5 plugins (`codex`, `antigravity`, `cc`, `grok`,
 `fleet`). Each `plugins/<name>/` is the exact install payload; engine knowledge lives
 per plugin, the job runtime is shared in `shared/lib/`. Tests mirror each plugin under
 `tests/<name>/`.
@@ -13,20 +13,20 @@ memory — that helps one session on one machine, and users never see it.
 
 ## IRONCLAD — do not touch siblings
 When working on one plugin, do **NOT** modify other plugins or their tests
-(`plugins/{codex,antigravity,cc}/`, `tests/{codex,antigravity,cc}/`).
+(`plugins/{codex,antigravity,cc,grok}/`, `tests/{codex,antigravity,cc,grok}/`).
 When **adding** a sibling plugin, the only existing files you may edit are:
 `.claude-plugin/marketplace.json`, `tests/fleet-structure.test.mjs` (the marketplace
 consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-shared.mjs`
 (add the plugin to the vendored-runtime target list — CI drift-checks it), and `README.md`.
 
 ## Commands
-- `npm test` — full chain: structure + shared + cc + antigravity + codex + fleet + e2e (Node >= 22.3)
+- `npm test` — full chain: structure + shared + cc + antigravity + codex + grok + fleet + e2e (Node >= 22.3)
 - `node --test tests/<plugin>/*.test.mjs` — run one plugin's suite (antigravity also needs
   `--experimental-test-module-mocks`)
-- `npm run test:e2e` — black-box CLI e2e for all 4 plugins (cc + codex + antigravity + fleet;
+- `npm run test:e2e` — black-box CLI e2e for all 5 plugins (cc + codex + antigravity + fleet + grok;
   real subprocess, fake engine, no API key)
 - `npm run sync-shared` — after editing `shared/lib/`, re-vendor it into each migrated
-  plugin's `scripts/lib/shared/` (`cc`, `codex`, `antigravity`). **Commit BOTH the source and
+  plugin's `scripts/lib/shared/` (`cc`, `codex`, `antigravity`, `grok`). **Commit BOTH the source and
   the vendored copy** — CI drift-checks them.
 - `npm run bump-version <plugin> <patch|minor|major>` — the one way to bump a version; locks
   `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
