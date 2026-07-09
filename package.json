@@ -10,7 +10,7 @@
     "test:structure": "node --test tests/*.test.mjs",
     "test:shared": "node --test \"tests/shared/*.test.mjs\" \"tests/shared/conformance/*.test.mjs\"",
     "test:cc": "node --test tests/cc/*.test.mjs",
-    "test:e2e": "node --test tests/cc/e2e-cli.test.mjs tests/codex/e2e-cli.test.mjs tests/antigravity/e2e-cli.test.mjs tests/fleet/e2e-cli.test.mjs",
+    "test:e2e": "node --test tests/cc/e2e-cli.test.mjs tests/codex/e2e-cli.test.mjs tests/antigravity/e2e-cli.test.mjs tests/fleet/e2e-cli.test.mjs tests/grok/e2e-cli.test.mjs",
     "test:antigravity": "node --test --experimental-test-module-mocks tests/antigravity/*.test.mjs",
     "test:codex": "node --test tests/codex/*.test.mjs",
     "test:grok": "node --test tests/grok/*.test.mjs",

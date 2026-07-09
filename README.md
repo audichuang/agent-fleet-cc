@@ -1,12 +1,13 @@
 # agent-fleet — one marketplace for AI-agent delegation plugins
 
-Four Claude Code plugins, one marketplace:
+Five Claude Code plugins, one marketplace:
 
 | Plugin | Commands | What it delegates to |
 |---|---|---|
 | `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server) |
 | `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, image, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
 | `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
+| `grok` | `/grok:*` (task, status, wait, logs, result, cancel, setup) | xAI Grok Build (`grok`), headless — default model grok-4.5; auth via `grok login` or `XAI_API_KEY` |
 | `fleet` | `/fleet:*` (setup, doctor, status) | Guided onboarding plus read-only fleet diagnostics/status |
 
 > **`cc` v0.3.0** runs on the shared job runtime (`shared/lib/`). Its companion
@@ -29,6 +30,7 @@ Four Claude Code plugins, one marketplace:
 /plugin install codex@agent-fleet
 /plugin install antigravity@agent-fleet
 /plugin install cc@agent-fleet
+/plugin install grok@agent-fleet
 /reload-plugins
 ```
 
