@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SOURCE = path.join(root, "shared", "lib");
-// cc + codex + antigravity migrated onto shared/lib.
-const TARGETS = ["cc", "codex", "antigravity"].map((p) =>
+// cc + codex + antigravity + grok migrated onto shared/lib.
+const TARGETS = ["cc", "codex", "antigravity", "grok"].map((p) =>
   path.join(root, "plugins", p, "scripts", "lib", "shared"),
 );
 

@@ -16,7 +16,8 @@ When working on one plugin, do **NOT** modify other plugins or their tests
 (`plugins/{codex,antigravity,cc}/`, `tests/{codex,antigravity,cc}/`).
 When **adding** a sibling plugin, the only existing files you may edit are:
 `.claude-plugin/marketplace.json`, `tests/fleet-structure.test.mjs` (the marketplace
-consistency test), `package.json` (add a `test:<plugin>` script), and `README.md`.
+consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-shared.mjs`
+(add the plugin to the vendored-runtime target list — CI drift-checks it), and `README.md`.
 
 ## Commands
 - `npm test` — full chain: structure + shared + cc + antigravity + codex + fleet + e2e (Node >= 22.3)

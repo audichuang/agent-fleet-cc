@@ -1,0 +1,5 @@
+{
+  "name": "grok",
+  "version": "0.1.0",
+  "description": "Run tasks on a headless xAI Grok Build instance (grok-4.5) — launch, wait, tail, cancel, resume"
+}
