@@ -345,16 +345,38 @@ export class SpawnedCodexAppServerClient extends AppServerClientBase {
       this.handleExit(detail);
     });
 
-    this.readline = readline.createInterface({ input: this.proc.stdout });
-    this.readline.on("line", (line) => {
-      this.handleLine(line);
-    });
+    this.attachTransportStream(this.proc.stdout);
 
     await this.request("initialize", {
       clientInfo: this.options.clientInfo ?? DEFAULT_CLIENT_INFO,
       capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES
     });
     this.notify("initialized", {});
+  }
+
+  // Wire the app-server's stdout: parse JSONL lines, AND treat stdout EOF as
+  // connection death. The proc 'exit' event is not the only failure mode — a
+  // wedged app-server can close its stdout (no more notifications will ever
+  // arrive) while the process lingers, and a stream 'end' also precedes 'exit'
+  // on a normal death. Without reacting to the EOF, exitPromise would never
+  // resolve for the stdout-closed-but-alive case and a waiting turn would hang
+  // (the idle watchdog is off by default). handleExit is idempotent, so this
+  // coexists with the proc 'exit'/'error' handlers — whichever fires first wins.
+  // A stdout EOF during our OWN close() is a clean shutdown, not a fault.
+  attachTransportStream(stdout) {
+    this.readline = readline.createInterface({ input: stdout });
+    this.readline.on("line", (line) => {
+      this.handleLine(line);
+    });
+    this.readline.on("close", () => {
+      if (this.closed) {
+        this.handleExit(this.exitError);
+        return;
+      }
+      this.handleExit(
+        this.exitError ?? createProtocolError("codex app-server closed its stdout (EOF) before the connection was shut down.")
+      );
+    });
   }
 
   async close() {

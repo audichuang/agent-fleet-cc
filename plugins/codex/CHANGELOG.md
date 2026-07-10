@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.0.36
+
+Root-caused and fixed a "sometimes a turn just silently dies" report: when the shared
+app-server dies mid-turn, the turn hung with no error until the 1-hour hard cap. Two
+fixes across the broker and the direct client, each proven with a fake-engine e2e that
+hangs before the fix and terminates in ~300ms after. A cross-model adversarial review of
+the first fix surfaced the second. Full suite + e2e green.
+
+- **Broker doesn't propagate upstream death (silent hang)** — turn completion streams as
+  NOTIFICATIONS, not as a reply the appClient exit could reject, so a client that already
+  got its `turn/start` ACK is not waiting on any request. The broker never observed the
+  upstream `codex app-server` exiting, so on an upstream crash / panic / daemon
+  idle-shutdown / self-update restart the client socket stayed open, `turn/completed`
+  never arrived, and the turn hung silently (client transport watchdog only fires on ITS
+  socket closing; the per-turn idle watchdog is off by default). `attachUpstreamExitHandler`
+  now watches `appClient.exitPromise`: it best-effort hands the streaming client a clean
+  `willRetry:false` terminal error (so the turn resolves as `failed` with a real reason),
+  then drops every client socket (guaranteed unblock via the transport watchdog), clears
+  its own `broker.json` (match-guarded), logs the cause, and exits. Guarded against
+  re-entry from our own idle/SIGTERM shutdown.
+- **Direct client missed a stdout EOF (wedge)** — `SpawnedCodexAppServerClient` only called
+  `handleExit` on the proc `exit`/`error` events, so an app-server that closed its stdout
+  but kept the process alive left `exitPromise` unresolved forever (and the broker's own
+  upstream client IS this direct client, so this re-opened the hang above). `initialize`
+  now wires stdout via `attachTransportStream`, which treats a `readline` `close` (stdout
+  EOF) as connection death — also a faster, more reliable signal on normal exits. A stdout
+  EOF during our own `close()` stays a clean shutdown.
+- New regression tests in `tests/codex/app-server-broker.test.mjs` and
+  `app-server-close-reap.test.mjs`.
+- Skills: `gpt-5-5-prompting` notes Codex's built-in `image_gen`/`imagegen` capability;
+  `/codex:handoff` gains a shell note (its bash snippets run through the Bash tool as-is;
+  translate only when handing a command to the user's fish shell).
+
 ## 1.0.35
 
 A follow-up to the 1.0.34 adversarial review found a background-launch race the

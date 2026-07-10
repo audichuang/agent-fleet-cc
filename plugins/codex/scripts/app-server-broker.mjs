@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "./lib/args.mjs";
 import { BROKER_BUSY_RPC_CODE, CodexAppServerClient } from "./lib/app-server.mjs";
 import { parseBrokerEndpoint } from "./lib/broker-endpoint.mjs";
+import { clearBrokerSession, loadBrokerSession } from "./lib/broker-lifecycle.mjs";
 import { createIdleTracker } from "./lib/idle-shutdown.mjs";
 
 const STREAMING_METHODS = new Set(["turn/start", "review/start", "thread/compact/start"]);
@@ -77,6 +78,7 @@ async function main() {
   let activeRequestSocket = null;
   let activeStreamSocket = null;
   let activeStreamThreadIds = null;
+  let shuttingDown = false;
   const sockets = new Set();
 
   function clearSocketOwnership(socket) {
@@ -108,6 +110,10 @@ async function main() {
   }
 
   async function shutdown(server) {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
     for (const socket of sockets) {
       socket.end();
     }
@@ -119,9 +125,55 @@ async function main() {
     if (pidFile && fs.existsSync(pidFile)) {
       fs.unlinkSync(pidFile);
     }
+    // Clear our own session record so `reuseExistingBroker` and status reads
+    // don't resolve to a dead endpoint. Match-guarded on the endpoint so a newer
+    // broker that already claimed this workspace's slot is never clobbered.
+    try {
+      if (loadBrokerSession(cwd)?.endpoint === endpoint) {
+        clearBrokerSession(cwd);
+      }
+    } catch {
+      // best-effort — a missing/again-racing record must not crash teardown
+    }
   }
 
   appClient.setNotificationHandler(routeNotification);
+
+  // If the upstream codex app-server dies on its own, drop every client socket
+  // so streaming turns fail fast instead of hanging, then tear down and exit.
+  attachUpstreamExitHandler({
+    exitPromise: appClient.exitPromise,
+    sockets,
+    shutdown: () => shutdown(server),
+    isShuttingDown: () => shuttingDown,
+    onExit: () => process.exit(1),
+    log: () => {
+      const reason = appClient.exitError?.message ?? "(no error detail)";
+      const stderrTail = (appClient.stderr ?? "").trim().slice(-500);
+      process.stderr.write(
+        `[codex-broker] upstream app-server exited; failing active clients. reason=${reason}${
+          stderrTail ? ` stderr=${stderrTail}` : ""
+        }\n`
+      );
+    },
+    emitTerminal: () => {
+      // Only a client mid-stream is waiting on a turn/completed that will never
+      // arrive; a plain request socket already got (or will get) its rejection.
+      if (!activeStreamSocket || !activeStreamThreadIds) {
+        return;
+      }
+      const reason = appClient.exitError?.message ?? "the codex app-server exited before the turn completed";
+      for (const threadId of activeStreamThreadIds) {
+        // Shape mirrors codex's ErrorNotification: willRetry:false is what
+        // captureTurn treats as a terminal, thread-scoped failure. turnId is
+        // omitted — the client falls back to its own tracked turn id.
+        send(activeStreamSocket, {
+          method: "error",
+          params: { error: { message: `Codex app-server disconnected: ${reason}` }, willRetry: false, threadId }
+        });
+      }
+    }
+  });
 
   let idleTracker = null;
 
@@ -295,6 +347,53 @@ export function shouldRefuseBrokerShutdown(activeStreamSocket, activeRequestSock
     (activeStreamSocket && activeStreamSocket !== requestingSocket) ||
       (activeRequestSocket && activeRequestSocket !== requestingSocket)
   );
+}
+
+// Propagate an upstream death to connected clients. The broker relays a turn's
+// completion as NOTIFICATIONS streamed from the app-server; a client that
+// already received its turn/start ACK is not waiting on any request the
+// appClient exit could reject. So if the upstream codex app-server dies on its
+// own (crash, panic, daemon idle-shutdown, self-update restart), the client
+// socket stays open and turn/completed never arrives — the turn hangs silently
+// (client transport watchdog only fires on ITS socket closing; the per-turn idle
+// watchdog is off by default). Dropping every client socket makes each client's
+// transport watchdog fire a terminal error instead. A dead upstream makes the
+// broker useless, so we then tear down and exit; the next run spawns a fresh
+// broker + app-server. Guarded by isShuttingDown so our OWN close() (idle /
+// SIGTERM / broker/shutdown) does not re-enter this teardown.
+export function attachUpstreamExitHandler({ exitPromise, sockets, shutdown, isShuttingDown, onExit, log, emitTerminal }) {
+  return exitPromise.then(async () => {
+    if (isShuttingDown()) {
+      return;
+    }
+    // Log the reason BEFORE teardown — "the broker exited 1" with no cause is
+    // exactly the blind spot this whole fix is about. Best-effort.
+    try {
+      log?.();
+    } catch {
+      // never let diagnostics block the teardown that unblocks the client
+    }
+    // Best-effort: hand the streaming client a clean, attributable `failed`
+    // terminal (a willRetry:false error) so its turn resolves as failed with a
+    // real reason instead of only a generic transport disconnect. Purely an
+    // upgrade to the message — the guaranteed unblock is the destroy below, so
+    // if this write races the teardown the client still terminates via its
+    // transport watchdog. Never let it block that guarantee.
+    try {
+      emitTerminal?.();
+    } catch {
+      // best-effort — the destroy below is the real terminal guarantee
+    }
+    for (const socket of sockets) {
+      try {
+        socket.destroy();
+      } catch {
+        // best-effort — one wedged socket must not block dropping the rest
+      }
+    }
+    await shutdown().catch(() => {});
+    onExit();
+  });
 }
 
 const invokedDirectly =

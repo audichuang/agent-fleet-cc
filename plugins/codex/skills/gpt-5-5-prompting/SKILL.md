@@ -34,6 +34,12 @@ GPT-5.5 works best with **outcome-first** prompts: define the target outcome, su
 - Use `task` when the task is diagnosis, planning, research, or implementation and you need to control the prompt directly.
 - Use `task --resume-last` for a follow-up on the same Codex thread — send only the delta instruction unless the direction changed materially.
 
+## Codex built-in capabilities to leverage
+
+Name the outcome and let Codex use tools it already ships — don't reinvent them in the prompt:
+
+- **Raster images** — Codex has a built-in `image_gen` tool (the bundled `imagegen` skill). For a bitmap asset (mockup, icon, texture, diagram, illustration), ask for the image and where to save it; do NOT tell Codex to hand-write canvas/SVG/base64. Skip only when the asset is better as vector/SVG or code-native.
+
 ## Suggested structure
 
 Keep each section short; add detail only where it changes behavior. Omit sections a task doesn't need.
