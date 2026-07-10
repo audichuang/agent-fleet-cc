@@ -1,16 +1,16 @@
 ---
-description: Build a GPT-5.5 prompt for Codex (by default a review of the work just done in this session) and send it to Codex, returning Codex's response. Use --print to only emit the prompt for you to paste yourself.
+description: Build a GPT-5.6 prompt for Codex (by default a review of the work just done in this session) and send it to Codex, returning Codex's response. Use --print to only emit the prompt for you to paste yourself.
 argument-hint: '[task description — omit to review the work done in this session] [--print] [--background] [--write]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), Bash(mktemp:*), Bash(cat:*), Skill
 ---
 
-Build a complete GPT-5.5 prompt and, by **default, send it to Codex and return Codex's response**. This automates the loop: reflect → compose a GPT-5.5 prompt → run it through Codex → bring the answer back. With `--print` (or `--prompt-only`), do NOT run Codex — just emit the prompt in a fenced block for you to paste yourself.
+Build a complete GPT-5.6 prompt and, by **default, send it to Codex and return Codex's response**. This automates the loop: reflect → compose a GPT-5.6 prompt → run it through Codex → bring the answer back. With `--print` (or `--prompt-only`), do NOT run Codex — just emit the prompt in a fenced block for you to paste yourself.
 
 Raw slash-command arguments:
 `$ARGUMENTS`
 
 First, load the prompt methodology:
-- Use the `gpt-5-5-prompting` skill (via the `Skill` tool) and follow it when composing the prompt: outcome-first, success criteria, decision rules instead of blanket `ALWAYS`/`NEVER`, explicit stop rules, absolute file paths, and the suggested structure (`Role` / `Goal` / `Success criteria` / `Constraints` / `Output` / `Stop rules`).
+- Use the `gpt-5-6-prompting` skill (via the `Skill` tool) and follow it when composing the prompt: outcome-first, success criteria, decision rules instead of blanket `ALWAYS`/`NEVER`, explicit stop rules, absolute file paths, and the suggested structure (`Role` / `Goal` / `Success criteria` / `Constraints` / `Output` / `Stop rules`).
 
 ## Step 1 — build the prompt
 
@@ -26,12 +26,12 @@ When there is no task text, build a prompt that asks Codex to **review the work 
    - `git --no-pager diff --stat --cached` for staged work
    - `git --no-pager log --oneline -10` and `git --no-pager diff <base>...HEAD` if the work is committed on a branch
    Combine that with what you did in this conversation (the intent, the decisions, the trade-offs).
-2. Compose a **code-review** prompt using the `gpt-5-5-prompting` methodology and the code-review recipe: a senior-engineer Role, a Goal of finding bugs / contract violations / maintainability / security issues, Success criteria (file:line + severity, fix snippets, "no issues found in X" when clean), Constraints (don't pad, mark "Need to verify"), and Stop rules.
+2. Compose a **code-review** prompt using the `gpt-5-6-prompting` methodology and the code-review recipe: a senior-engineer Role, a Goal of finding bugs / contract violations / maintainability / security issues, Success criteria (file:line + severity, fix snippets, "no issues found in X" when clean), Constraints (don't pad, mark "Need to verify"), and Stop rules.
 3. List the changed files as **absolute paths** under a "Files to read" section, and tell Codex to read them itself (do NOT ask anyone to paste code). Add a one-paragraph "Context" describing what this change set was trying to achieve and any decisions worth challenging.
 
 ### Mode B — with a task: build a prompt for that task
 
-Treat the remaining text as the task. Identify the task type (code review, document/design analysis, research/grounded answer, rewrite, or agentic/tool-heavy) and build the matching prompt from the `gpt-5-5-prompting` recipes, tailoring the sections to that type. Pull in relevant absolute file paths from the conversation or repo.
+Treat the remaining text as the task. Identify the task type (code review, document/design analysis, research/grounded answer, rewrite, or agentic/tool-heavy) and build the matching prompt from the `gpt-5-6-prompting` recipes, tailoring the sections to that type. Pull in relevant absolute file paths from the conversation or repo.
 
 ## Step 2 — send it (default) or print it
 
@@ -46,10 +46,10 @@ Treat the remaining text as the task. Identify the task type (code review, docum
 ```bash
 TMPFILE=$(mktemp /tmp/codex-handoff-prompt.XXXXXX.md)
 cat <<'PROMPT_EOF' > "$TMPFILE"
-[the composed GPT-5.5 prompt]
+[the composed GPT-5.6 prompt]
 PROMPT_EOF
 ```
-2. Run it through Codex with the companion task runner (defaults to gpt-5.5 / xhigh):
+2. Run it through Codex with the companion task runner (defaults to gpt-5.6 / xhigh):
    - Mode A (review handoff) is **read-only** — do NOT add `--write`.
    - Mode B: add `--write` only if the task clearly needs to edit code, or the user passed `--write`.
 

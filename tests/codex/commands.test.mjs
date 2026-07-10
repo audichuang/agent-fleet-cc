@@ -120,12 +120,12 @@ test("task wait and logs commands expose Codex companion runtime entrypoints", (
   assert.match(logs, /Do not paraphrase, summarize, rewrite, condense, or add commentary/i);
 });
 
-test("handoff builds a GPT-5.5 prompt and sends it to Codex by default, with --print to only emit it", () => {
+test("handoff builds a GPT-5.6 prompt and sends it to Codex by default, with --print to only emit it", () => {
   const source = read("commands/handoff.md");
   assert.match(source, /argument-hint:/);
   assert.match(source, /allowed-tools:.*Skill/);
   assert.match(source, /allowed-tools:.*Bash\(node:\*\)/);
-  assert.match(source, /gpt-5-5-prompting/);
+  assert.match(source, /gpt-5-6-prompting/);
   // Default behavior: send the built prompt to Codex via the companion task runner.
   assert.match(source, /codex-companion\.mjs" task --prompt-file/);
   // --print (or --prompt-only) emits the prompt without running Codex.
@@ -157,7 +157,7 @@ test("rescue command absorbs continue semantics", () => {
   assert.match(rescue, /--resume\|--fresh/);
   assert.match(rescue, /--model <model>/);
   assert.doesNotMatch(rescue, /spark/i);
-  assert.match(rescue, /--effort <none\|minimal\|low\|medium\|high\|xhigh>/);
+  assert.match(rescue, /--effort <none\|minimal\|low\|medium\|high\|xhigh\|max>/);
   assert.match(rescue, /task-resume-candidate --json/);
   assert.match(rescue, /AskUserQuestion/);
   assert.match(rescue, /Continue current Codex thread/);
@@ -195,12 +195,12 @@ test("rescue command absorbs continue semantics", () => {
   // stdout; the subagent must surface it rather than swallow the failure.
   assert.match(agent, /On failure the companion exits non-zero and prints a structured.*envelope on stdout\. Return that stdout as-is/i);
   assert.match(agent, /Only if there is genuinely no stdout at all .* return nothing/i);
-  assert.match(agent, /gpt-5-5-prompting/);
+  assert.match(agent, /gpt-5-6-prompting/);
   assert.match(agent, /only to tighten the user's request into a better Codex prompt/i);
   assert.match(agent, /Do not use that skill to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work/i);
   assert.match(runtimeSkill, /only job is to invoke `task` once and return that stdout unchanged/i);
   assert.match(runtimeSkill, /Do not call `setup`, `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
-  assert.match(runtimeSkill, /use the `gpt-5-5-prompting` skill to rewrite the user's request into a tighter Codex prompt/i);
+  assert.match(runtimeSkill, /use the `gpt-5-6-prompting` skill to rewrite the user's request into a tighter Codex prompt/i);
   assert.match(runtimeSkill, /That prompt drafting is the only Claude-side work allowed/i);
   assert.match(runtimeSkill, /Leave `--effort` unset unless the user explicitly requests a specific effort/i);
   assert.match(runtimeSkill, /Leave model unset by default/i);
@@ -208,7 +208,7 @@ test("rescue command absorbs continue semantics", () => {
   assert.doesNotMatch(runtimeSkill, /spark/i);
   assert.match(runtimeSkill, /If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only/i);
   assert.match(runtimeSkill, /Strip it before calling `task`/i);
-  assert.match(runtimeSkill, /`--effort`: accepted values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`/i);
+  assert.match(runtimeSkill, /`--effort`: accepted values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`/i);
   assert.match(runtimeSkill, /Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own/i);
   assert.match(runtimeSkill, /If the Bash call fails or Codex cannot be invoked, return nothing/i);
   // The standalone repo's root README stayed behind in codex-plugin-cc (it is
@@ -230,8 +230,8 @@ test("result and cancel commands are exposed as deterministic runtime entrypoint
 
 test("internal docs use task terminology for rescue runs", () => {
   const runtimeSkill = read("skills/codex-cli-runtime/SKILL.md");
-  const promptingSkill = read("skills/gpt-5-5-prompting/SKILL.md");
-  const promptRecipes = read("skills/gpt-5-5-prompting/references/codex-prompt-recipes.md");
+  const promptingSkill = read("skills/gpt-5-6-prompting/SKILL.md");
+  const promptRecipes = read("skills/gpt-5-6-prompting/references/codex-prompt-recipes.md");
 
   assert.match(runtimeSkill, /codex-companion\.mjs" task "<raw arguments>"/);
   assert.match(runtimeSkill, /Use `task` for every rescue request/i);

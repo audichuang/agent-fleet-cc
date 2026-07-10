@@ -81,14 +81,18 @@ const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REVIEW_SCHEMA = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
 const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
-const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 // Defaults applied when the caller does not pass --model / --effort. Overridable
 // via env so a workspace can pin a different model or dial reasoning effort
-// down (the GPT-5.5 guide suggests re-evaluating lower effort before escalating).
+// down (the GPT-5.6 guide suggests re-evaluating lower effort before escalating).
+// Default to the explicit `gpt-5.6-sol` slug (frontier tier). Use the explicit
+// slug, not the `gpt-5.6` family alias — the alias is not resolvable on
+// ChatGPT-account Codex (400). Pass --model gpt-5.6-terra to trade capability for
+// cost. See the gpt-5-6-prompting skill for model-selection guidance.
 function resolveDefaultModel() {
   const fromEnv = process.env.CODEX_DEFAULT_MODEL?.trim();
-  return fromEnv || "gpt-5.5";
+  return fromEnv || "gpt-5.6-sol";
 }
 function resolveDefaultEffort() {
   const fromEnv = process.env.CODEX_DEFAULT_EFFORT?.trim().toLowerCase();
@@ -106,7 +110,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
+      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
       "  node scripts/codex-companion.mjs logs [job-id]",
@@ -154,7 +158,7 @@ function normalizeReasoningEffort(effort) {
   }
   if (!VALID_REASONING_EFFORTS.has(normalized)) {
     throw new Error(
-      `Unsupported reasoning effort "${effort}". Use one of: none, minimal, low, medium, high, xhigh.`
+      `Unsupported reasoning effort "${effort}". Use one of: none, minimal, low, medium, high, xhigh, max.`
     );
   }
   return normalized;

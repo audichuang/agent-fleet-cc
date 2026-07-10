@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.0
+
+GPT-5.6 support. Codex now defaults to the new frontier model and can dial its new top
+reasoning tier. Full suite green (420 codex tests).
+
+- **Default model → `gpt-5.6-sol`** — `resolveDefaultModel()` now defaults to the frontier
+  GPT-5.6 tier instead of `gpt-5.5`. Uses the **explicit** `gpt-5.6-sol` slug, not the
+  `gpt-5.6` family alias — the alias is not resolvable on ChatGPT-account Codex (400).
+  Verified live: `gpt-5.6-sol` and `gpt-5.6-terra` both work; the alias fails. Still
+  forwarded verbatim and overridable via `--model` / `CODEX_DEFAULT_MODEL`.
+- **`max` reasoning effort** — added to the accepted `--effort` values
+  (`none|minimal|low|medium|high|xhigh|max`); `max` is GPT-5.6's tier above `xhigh`,
+  reserved for the hardest quality-first tasks.
+- **Prompting skill renamed `gpt-5-5-prompting` → `gpt-5-6-prompting`** and rewritten for
+  5.6: model-selection guidance (sol vs terra; luna rarely needed), shorter-prompt bias,
+  the "don't ask for generic brevity" caveat, and a one-shot autonomy/permissions policy.
+  The 5.5 outcome-first methodology carries over unchanged.
+
 ## 1.0.35
 
 A follow-up to the 1.0.34 adversarial review found a background-launch race the

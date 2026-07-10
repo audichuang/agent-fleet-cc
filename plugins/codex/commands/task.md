@@ -1,6 +1,6 @@
 ---
 description: Send a task to Codex and present Codex's response
-argument-hint: '[--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]'
+argument-hint: '[--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [prompt]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---

@@ -1,6 +1,6 @@
-# Codex task prompts — GPT-5.5 recipes
+# Codex task prompts — GPT-5.6 recipes
 
-Use these as starting templates for Codex task prompts. They follow the GPT-5.5
+Use these as starting templates for Codex task prompts. They follow the GPT-5.6
 guide: outcome-first, success criteria, decision rules instead of blanket
 `ALWAYS`/`NEVER`, explicit stop rules, and absolute file paths so Codex reads
 the files itself. Trim any section a task does not need.

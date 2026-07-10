@@ -685,7 +685,7 @@ test("task does not alias 'spark' (the fabricated gpt-5.3-codex-spark slug is go
   assert.equal(fakeState.lastTurnStart.model, "spark");
 });
 
-test("task defaults the model to gpt-5.5 and reasoning effort to xhigh when unspecified", () => {
+test("task defaults the model to gpt-5.6-sol and reasoning effort to xhigh when unspecified", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   const statePath = path.join(binDir, "fake-codex-state.json");
@@ -702,7 +702,7 @@ test("task defaults the model to gpt-5.5 and reasoning effort to xhigh when unsp
 
   assert.equal(result.status, 0, result.stderr);
   const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  assert.equal(fakeState.lastTurnStart.model, "gpt-5.5");
+  assert.equal(fakeState.lastTurnStart.model, "gpt-5.6-sol");
   assert.equal(fakeState.lastTurnStart.effort, "xhigh");
 });
 
