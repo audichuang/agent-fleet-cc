@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1
+
+Docs cleanup finishing the 5.6 migration. No functional change.
+
+- **`gpt-5-6-prompting` skill** — dropped the leftover GPT-5.5 transition wording; 5.6 is now
+  the baseline. The `terra` variant is described as cheaper than `sol` rather than compared to
+  the retired 5.5. Historical CHANGELOG / spec / plan mentions of 5.5 are kept as-is (they
+  record what was true at the time).
+
 ## 1.1.0
 
 GPT-5.6 support. Codex now defaults to the new frontier model and can dial its new top

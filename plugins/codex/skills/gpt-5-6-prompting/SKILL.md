@@ -6,7 +6,7 @@ user-invocable: false
 
 # GPT-5.6 Prompting
 
-Use this skill when composing a prompt for Codex / GPT-5.6 — both when `codex:codex-rescue` delegates a `task`, and when `/codex:handoff` produces a prompt for the user to paste into Codex. The prompting guidance that applied to GPT-5.5 still applies to GPT-5.6; the notes below fold in what changed with 5.6.
+Use this skill when composing a prompt for Codex / GPT-5.6 — both when `codex:codex-rescue` delegates a `task`, and when `/codex:handoff` produces a prompt for the user to paste into Codex.
 
 GPT-5.6 works best with **outcome-first** prompts: define the target outcome, success criteria, constraints, and available context, then leave the model room to choose the path. Do not carry over process-heavy instruction stacks from older models — they add noise, narrow the search space, and produce mechanical answers.
 
@@ -15,14 +15,14 @@ GPT-5.6 works best with **outcome-first** prompts: define the target outcome, su
 This plugin picks between two variants. Their roles are distinct — **do not treat them as interchangeable "big vs small" of the same thing**:
 
 - **`gpt-5.6-sol`** — the **thinker**. Hard multi-step reasoning, long autonomous work, and **making the detailed plan**. High-stakes review and tricky diagnosis. This is the default (`--model` unset → `gpt-5.6-sol`).
-- **`gpt-5.6-terra`** — the **executor**. Best price/performance (stronger than GPT-5.5, cheaper) for **carrying out an already-clear plan**: routine edits, bounded implementation, mechanical changes where the thinking is already done.
+- **`gpt-5.6-terra`** — the **executor**. Best price/performance (cheaper than `sol`) for **carrying out an already-clear plan**: routine edits, bounded implementation, mechanical changes where the thinking is already done.
 
 **Decision rule (to avoid confusion):** *Sol plans and cracks the hard reasoning; Terra executes a plan that's already clear.* If the task still needs figuring-out → `sol`. If the what-to-do is settled and it's mostly execution/cost matters → `terra`.
 
 | Model | Role | Input / Output ($/1M) | Reach for it when |
 | --- | --- | --- | --- |
 | **gpt-5.6-sol** | Thinker / planner (default) | $5.00 / $30.00 | Complex reasoning, planning, long autonomous work, high-stakes review, hard diagnosis. |
-| **gpt-5.6-terra** | Executor (cost-efficient) | $2.50 / $15.00 | Executing a clear plan, routine edits, bounded implementation — stronger than 5.5 but cheaper. |
+| **gpt-5.6-terra** | Executor (cost-efficient) | $2.50 / $15.00 | Executing a clear plan, routine edits, bounded implementation — cheaper than `sol`. |
 
 Both share a 1.05M-token context window and 128K max output. Always pass an explicit slug. Default to `sol`; switch to `terra` when the work is plan-execution or the user asks to control cost, and say which you chose and why when it isn't the default. (A third variant, `gpt-5.6-luna`, is a fast/cheap lightweight tier for high-volume work — rarely the right fit here.)
 

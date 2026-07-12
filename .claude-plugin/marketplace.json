@@ -12,7 +12,7 @@
       "name": "codex",
       "source": "./plugins/codex",
       "description": "Use Codex from Claude Code to review code or delegate tasks.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": {
         "name": "OpenAI"
       }
@@ -30,7 +30,7 @@
       "name": "cc",
       "source": "./plugins/cc",
       "description": "Run tasks on a headless Claude Code instance, selected by profile — usable from Claude Code or a Codex host via handoff",
-      "version": "0.4.1"
+      "version": "0.4.2"
     },
     {
       "name": "grok",

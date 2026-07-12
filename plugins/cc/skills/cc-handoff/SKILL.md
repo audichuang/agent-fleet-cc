@@ -104,5 +104,5 @@ AFTER="$(cd "$PROJECT_ROOT" && git status --porcelain --untracked-files=all 2>/d
 rm -f "$TMP" /tmp/cc-handoff.err
 ```
 
-> 本 skill 只寫「每個動作怎麼用」,不含「如何替 claude 組 prompt」的方法論(claude 不像 GPT-5.5 需要官方 prompting guide)。profile 怎麼建是 `setup` 的事 —— 找不到 / 0 profile 時指引使用者跑 `"${CC[@]}" setup` 或設 `CC_DEFAULT_PROFILE`,**不**引用 Claude-only 的 `/cc:setup`(因 codex 宿主沒有 slash command)。
-> skill body 是給 codex(GPT-5.5)讀的**操作手冊**,本身不可執行;真正會被執行的是它指引 codex 去跑的 resolver 片段與 cc-companion 呼叫。
+> 本 skill 只寫「每個動作怎麼用」,不含「如何替 claude 組 prompt」的方法論(claude 不像 GPT-5.6 需要官方 prompting guide)。profile 怎麼建是 `setup` 的事 —— 找不到 / 0 profile 時指引使用者跑 `"${CC[@]}" setup` 或設 `CC_DEFAULT_PROFILE`,**不**引用 Claude-only 的 `/cc:setup`(因 codex 宿主沒有 slash command)。
+> skill body 是給 codex(GPT-5.6)讀的**操作手冊**,本身不可執行;真正會被執行的是它指引 codex 去跑的 resolver 片段與 cc-companion 呼叫。
