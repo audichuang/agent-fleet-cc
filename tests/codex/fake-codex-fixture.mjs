@@ -111,6 +111,16 @@ function buildConfigReadResult() {
   }
 }
 
+function buildModelListResult() {
+  if (BEHAVIOR === "model-list-fails") {
+    throw new Error("model/list failed");
+  }
+  const models = BEHAVIOR === "model-unsupported"
+    ? [{ id: "gpt-5.4", hidden: false }, { id: "gpt-5.5", hidden: false }, { id: "gpt-5.6-terra", hidden: false }]
+    : [{ id: "gpt-5.6-sol", hidden: false }, { id: "gpt-5.6-terra", hidden: false }, { id: "gpt-5.4", hidden: false }, { id: "gpt-5.6-luna", hidden: true }];
+  return { data: models, nextCursor: null };
+}
+
 function send(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
 }
@@ -287,6 +297,10 @@ rl.on("line", (line) => {
           throw new Error("config/read failed for cwd");
         }
         send({ id: message.id, result: buildConfigReadResult() });
+        break;
+
+      case "model/list":
+        send({ id: message.id, result: buildModelListResult() });
         break;
 
       case "thread/start": {

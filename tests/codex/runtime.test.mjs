@@ -102,6 +102,61 @@ test("setup is ready when the active provider does not require OpenAI login", ()
   assert.match(payload.auth.detail, /configured and does not require OpenAI authentication/i);
 });
 
+test("setup confirms the default model is supported by the account", () => {
+  const binDir = makeTempDir();
+  installFakeCodex(binDir);
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.model.checked, true);
+  assert.equal(payload.model.defaultModel, "gpt-5.6-sol");
+  assert.equal(payload.model.supported, true);
+  assert.ok(!payload.nextSteps.some((step) => step.includes("does not list the default model")));
+});
+
+test("setup warns when the default model is not in the account catalog", () => {
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "model-unsupported");
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  // ready stays true — a missing model is a warning, not a blocker.
+  assert.equal(payload.ready, true);
+  assert.equal(payload.model.checked, true);
+  assert.equal(payload.model.supported, false);
+  const warning = payload.nextSteps.find((step) => step.includes("does not list the default model"));
+  assert.ok(warning, "expected a model-support warning in nextSteps");
+  assert.match(warning, /gpt-5\.6-sol/);
+  // Surfaces alternatives the account actually has, excluding hidden models.
+  assert.match(warning, /gpt-5\.6-terra/);
+});
+
+test("setup skips the model check when not authenticated", () => {
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "logged-out");
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.model.checked, false);
+  assert.equal(payload.model.supported, null);
+  assert.ok(!payload.nextSteps.some((step) => step.includes("does not list the default model")));
+});
+
 test("setup treats custom providers with app-server-ready config as ready", () => {
   const binDir = makeTempDir();
   installFakeCodex(binDir, "env-key-provider");

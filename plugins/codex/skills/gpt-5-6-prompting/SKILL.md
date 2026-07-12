@@ -26,6 +26,8 @@ This plugin picks between two variants. Their roles are distinct — **do not tr
 
 Both share a 1.05M-token context window and 128K max output. Always pass an explicit slug. Default to `sol`; switch to `terra` when the work is plan-execution or the user asks to control cost, and say which you chose and why when it isn't the default. (A third variant, `gpt-5.6-luna`, is a fast/cheap lightweight tier for high-volume work — rarely the right fit here.)
 
+> Not every Codex version/account is gated into 5.6 yet. `/codex:setup` probes the account's `model/list` and warns (without blocking) when the configured default isn't available, pointing the user to `codex update` or a `CODEX_DEFAULT_MODEL` override.
+
 ## The reviewer role (this plugin's primary use)
 
 Most delegations here cast Codex as an **independent, multi-angle reviewer** — a cross-model second opinion on work Claude just did (code review, plan/spec gate, root-cause check). This is the `sol` "thinker" role above. Its value is catching what the author missed, so position it to disagree, not to agree.

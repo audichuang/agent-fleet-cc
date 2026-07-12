@@ -193,6 +193,18 @@ function appendReasoningSection(lines, reasoningSummary) {
   }
 }
 
+function describeModelStatus(model) {
+  if (!model) {
+    return "not checked";
+  }
+  if (!model.checked) {
+    return `${model.defaultModel}: not checked (${model.detail || "unavailable"})`;
+  }
+  return model.supported
+    ? `${model.defaultModel}: supported`
+    : `${model.defaultModel}: NOT available for this account`;
+}
+
 export function renderSetupReport(report) {
   const lines = [
     "# Codex Setup",
@@ -204,6 +216,7 @@ export function renderSetupReport(report) {
     `- npm: ${report.npm.detail}`,
     `- codex: ${report.codex.detail}`,
     `- auth: ${report.auth.detail}`,
+    `- model: ${describeModelStatus(report.model)}`,
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
     ""

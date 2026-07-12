@@ -35,3 +35,6 @@ Output rules:
 - Present the final setup output to the user.
 - If installation was skipped, present the original setup output.
 - If Codex is installed but not authenticated, preserve the guidance to run `!codex login`.
+- If the report warns the default model is not available for the account (`model` check
+  failed), relay the remediation verbatim: run `codex update`, or set `CODEX_DEFAULT_MODEL`
+  to one of the listed models. This is a warning, not a blocker.

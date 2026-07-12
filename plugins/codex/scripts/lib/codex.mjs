@@ -1281,6 +1281,56 @@ export async function getCodexAuthStatus(cwd, options = {}) {
   }
 }
 
+// Ask the app-server which models THIS account/CLI can actually use, so setup can
+// warn when the configured default model isn't available (an older Codex that
+// predates gpt-5.6, or an account not yet gated into it). Best-effort: returns
+// checked:false on any failure so setup never breaks on a model probe. Needs an
+// authenticated session — callers should gate on login before calling.
+export async function listSupportedModels(cwd, options = {}) {
+  const availability = getCodexAvailability(cwd);
+  if (!availability.available) {
+    return { checked: false, models: [], detail: availability.detail };
+  }
+
+  let client = null;
+  try {
+    client = await CodexAppServerClient.connect(cwd, {
+      env: options.env,
+      reuseExistingBroker: true
+    });
+    const models = [];
+    let cursor = null;
+    // Catalogs are tiny (a handful of models). Cap the page loop so a server that
+    // ignores the cursor can never spin forever. ponytail: 10 pages is far past
+    // any real catalog.
+    for (let page = 0; page < 10; page += 1) {
+      const params = { includeHidden: true };
+      if (cursor) {
+        params.cursor = cursor;
+      }
+      const response = await client.request("model/list", params);
+      for (const model of response?.data ?? []) {
+        models.push(model);
+      }
+      cursor = response?.nextCursor ?? null;
+      if (!cursor) {
+        break;
+      }
+    }
+    return { checked: true, models, detail: null };
+  } catch (error) {
+    return {
+      checked: false,
+      models: [],
+      detail: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    if (client) {
+      await client.close().catch(() => {});
+    }
+  }
+}
+
 export async function interruptAppServerTurn(cwd, { threadId, turnId }) {
   if (!threadId || !turnId) {
     return {

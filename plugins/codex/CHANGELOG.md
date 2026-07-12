@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0
+
+`/codex:setup` now verifies the default model is usable by the account.
+
+- **Model-support check** — setup probes the app-server `model/list` and confirms the
+  effective default model (`resolveDefaultModel()`, honoring `CODEX_DEFAULT_MODEL`) is in
+  the account's catalog. Not every Codex version/account is gated into 5.6 yet, so an older
+  install would otherwise pass setup and only 400 on the first task. When the default is
+  missing, setup adds a **warning** (never blocks `ready`) pointing to `codex update` or a
+  `CODEX_DEFAULT_MODEL` override, and lists models the account actually has.
+- The probe needs an authenticated app-server, so it is skipped when Codex is logged out
+  (the existing login nextStep covers that) and degrades to "not checked" on any app-server
+  error — setup never fails on the model probe.
+
 ## 1.1.1
 
 Docs cleanup finishing the 5.6 migration. No functional change.

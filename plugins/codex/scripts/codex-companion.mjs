@@ -16,6 +16,7 @@ import {
     getCodexAvailability,
     getSessionRuntimeStatus,
     interruptAppServerTurn,
+    listSupportedModels,
     parseStructuredOutput,
     readOutputSchema,
     runAppServerReview,
@@ -216,6 +217,27 @@ function firstMeaningfulLine(text, fallback) {
   return line ?? fallback;
 }
 
+// Confirm the configured default model (respecting CODEX_DEFAULT_MODEL) is one this
+// account/CLI can actually use. model/list needs an authenticated app-server, so skip
+// the probe when Codex is missing or logged out — the auth nextStep covers that case.
+async function resolveDefaultModelSupport(cwd, defaultModel, codexStatus, authStatus) {
+  if (!codexStatus.available || !authStatus.loggedIn) {
+    return { checked: false, defaultModel, supported: null, available: [], detail: "requires codex login" };
+  }
+  const result = await listSupportedModels(cwd);
+  if (!result.checked) {
+    return { checked: false, defaultModel, supported: null, available: [], detail: result.detail };
+  }
+  const ids = result.models.map((model) => model.id);
+  return {
+    checked: true,
+    defaultModel,
+    supported: ids.includes(defaultModel),
+    available: result.models.filter((model) => !model.hidden).map((model) => model.id),
+    detail: null
+  };
+}
+
 async function buildSetupReport(cwd, actionsTaken = []) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const nodeStatus = binaryAvailable("node", ["--version"], { cwd });
@@ -223,6 +245,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const codexStatus = getCodexAvailability(cwd);
   const authStatus = await getCodexAuthStatus(cwd);
   const config = getConfig(workspaceRoot);
+  const modelStatus = await resolveDefaultModelSupport(cwd, resolveDefaultModel(), codexStatus, authStatus);
 
   const nextSteps = [];
   if (!codexStatus.available) {
@@ -236,6 +259,12 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     nextSteps.push("Run `!codex login`.");
     nextSteps.push("If browser login is blocked, retry with `!codex login --device-auth` or `!codex login --with-api-key`.");
   }
+  if (modelStatus.checked && !modelStatus.supported) {
+    const suggestions = modelStatus.available.slice(0, 5).join(", ");
+    nextSteps.push(
+      `Codex does not list the default model \`${modelStatus.defaultModel}\` for your account. Run \`codex update\`, or set \`CODEX_DEFAULT_MODEL\` to one you have${suggestions ? `: ${suggestions}` : ""}.`
+    );
+  }
   if (!config.stopReviewGate) {
     nextSteps.push("Optional: run `/codex:setup --enable-review-gate` to require a fresh review before stop.");
   }
@@ -246,6 +275,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     npm: npmStatus,
     codex: codexStatus,
     auth: authStatus,
+    model: modelStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
     actionsTaken,
