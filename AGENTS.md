@@ -13,7 +13,7 @@ memory — that helps one session on one machine, and users never see it.
 
 ## IRONCLAD — do not touch siblings
 When working on one plugin, do **NOT** modify other plugins or their tests
-(`plugins/{codex,antigravity,cc,grok}/`, `tests/{codex,antigravity,cc,grok}/`).
+(`plugins/{codex,antigravity,cc,grok,fleet}/`, `tests/{codex,antigravity,cc,grok,fleet}/`).
 When **adding** a sibling plugin, the only existing files you may edit are:
 `.claude-plugin/marketplace.json`, `tests/fleet-structure.test.mjs` (the marketplace
 consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-shared.mjs`
@@ -31,8 +31,9 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `npm run bump-version <plugin> <patch|minor|major>` — the one way to bump a version; locks
   `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
   check-version` verifies). It syncs only those two; the per-plugin `.codex-plugin/plugin.json`
-  dual-host manifests (`cc`, `antigravity`), `.agents/plugins/marketplace.json`, and root
-  `package.json` also carry versions and drift silently — sync those by hand.
+  dual-host manifests (`cc`, `antigravity`) also carry a version and drift silently — hand-sync
+  those. (Root `package.json` holds the repo's own version, not a plugin mirror;
+  `.agents/plugins/marketplace.json` carries no version — neither needs touching on a plugin bump.)
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
