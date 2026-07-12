@@ -2,8 +2,10 @@
 import "./helpers.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "./helpers.mjs";
 import { runCompanion } from "../../plugins/grok/scripts/grok-companion.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -82,6 +84,45 @@ test("task accepts --no-subagents (does not reject it as an unknown flag)", asyn
   const json = JSON.parse(lines.at(-1));
   assert.equal(code, 0);
   assert.equal(json.status, "completed");
+});
+
+test("task --schema returns grok's structured JSON as resultText", async () => {
+  const schemaPath = path.join(makeTempDir(), "schema.json");
+  fs.writeFileSync(schemaPath, JSON.stringify({ type: "object", properties: { ok: { type: "boolean" } } }));
+  const { out, lines } = collect();
+  const code = await runCompanion(
+    ["task", "return ok true", "--schema", schemaPath, "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(code, 0);
+  assert.equal(json.status, "completed");
+  assert.match(json.resultText, /"ok":\s*true/);
+});
+
+test("task --schema rejects an unreadable or non-JSON schema file", async () => {
+  const bad = collect();
+  const c1 = await runCompanion(["task", "hi", "--schema", "/no/such/schema.json", "--wait", "--json"], {
+    env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+    cwd: process.env.GROK_PLUGIN_DATA, out: bad.out, binaryArgv: [process.execPath, FAKE_GROK],
+  });
+  assert.equal(c1, 1);
+  assert.match(bad.lines.at(-1), /schema file not readable/);
+
+  const notJson = path.join(makeTempDir(), "bad.json");
+  fs.writeFileSync(notJson, "this is not json");
+  const bad2 = collect();
+  const c2 = await runCompanion(["task", "hi", "--schema", notJson, "--wait", "--json"], {
+    env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+    cwd: process.env.GROK_PLUGIN_DATA, out: bad2.out, binaryArgv: [process.execPath, FAKE_GROK],
+  });
+  assert.equal(c2, 1);
+  assert.match(bad2.lines.at(-1), /not valid JSON/);
 });
 
 test("recursion guard: refuses to run inside a grok job", async () => {

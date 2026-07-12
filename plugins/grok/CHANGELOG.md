@@ -1,5 +1,15 @@
 # grok — changelog
 
+## 0.1.2
+- **Structured output.** `task --schema <path>` takes a JSON Schema file and runs
+  Grok with `--json-schema` (constrains the model to matching JSON). `resultText`
+  comes back as JSON ready to `JSON.parse` — for extraction/classification tasks
+  that want fields, not prose. This runs non-streaming (`--json-schema` implies
+  `--output-format json`), so the adapter buffers the single multi-line result
+  object; there is no live `/grok:logs` and no fan-out sentinel needed for such a
+  job. Bad/malformed schema files fail fast before launch. Verified end-to-end
+  against real grok 0.2.93.
+
 ## 0.1.1
 Hardening pass driven by a Grok self-audit of our invocation/parsing against the
 real `grok` 0.2.93 CLI (each item verified by running it):

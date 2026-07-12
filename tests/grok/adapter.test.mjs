@@ -43,6 +43,44 @@ test("buildInvocation adds --no-subagents only when requested", () => {
   assert.ok(!off.argv.includes("--no-subagents"));
 });
 
+test("json-schema mode: buildInvocation switches to --json-schema (not streaming-json)", () => {
+  const a = makeGrokAdapter();
+  const { argv } = a.buildInvocation({ job: { cwd: "/w", request: { jsonSchema: '{"type":"object"}' } }, prompt: "p" });
+  assert.ok(argv.includes("--json-schema"));
+  assert.equal(argv[argv.indexOf("--json-schema") + 1], '{"type":"object"}');
+  assert.ok(!argv.includes("streaming-json"));
+});
+
+test("json-schema mode: parseEvent buffers the multi-line result object; extractResult returns its JSON", () => {
+  const a = makeGrokAdapter();
+  a.buildInvocation({ job: { cwd: "/w", request: { jsonSchema: "{}" } }, prompt: "p" }); // flips jsonMode
+  const objLines = [
+    "{",
+    '  "text": "{\\"ok\\": true}",',
+    '  "stopReason": "EndTurn",',
+    '  "sessionId": "s1",',
+    '  "structuredOutput": {',
+    '    "ok": true',
+    "  }",
+    "}",
+  ];
+  const events = objLines.map((l) => a.parseEvent(l)).filter(Boolean);
+  assert.equal(events.length, 1); // only the closing line yields the event
+  assert.equal(events[0].kind, "json");
+  assert.equal(events[0].text, '{"ok": true}');
+  assert.equal(events[0].sessionId, "s1");
+  const res = a.extractResult(events, 0);
+  assert.deepEqual(res, { ok: true, resultText: '{"ok": true}', sessionId: "s1", usage: null });
+});
+
+test("json-schema mode: a {type:error} object fails the job", () => {
+  const a = makeGrokAdapter();
+  a.buildInvocation({ job: { request: { jsonSchema: "{}" } }, prompt: "p" });
+  const ev = a.parseEvent('{"type":"error","message":"unknown model id"}');
+  assert.deepEqual(ev, { kind: "error", message: "unknown model id" });
+  assert.equal(a.extractResult([ev], 1).ok, false);
+});
+
 test("parseEvent maps grok events and tolerates junk", () => {
   const a = makeGrokAdapter();
   assert.equal(a.parseEvent("not json"), null);

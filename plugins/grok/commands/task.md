@@ -1,6 +1,6 @@
 ---
 description: Run a headless Grok Build task (grok-4.5) — launch, then wait/poll for the result
-argument-hint: "<prompt> [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 ---
 
 Run the grok companion with the user's arguments and relay its output:
@@ -34,6 +34,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
 - Use `--prompt-file <path>` to pass a prompt stored in a file.
 - Use `--model <id>` (only `grok-4.5` and `grok-composer-2.5-fast` exist — see
   `grok models`) or `--effort` (`none|minimal|low|medium|high|xhigh|max`) to tune the run.
+- **Structured output**: pass `--schema <path>` (a JSON Schema file) to constrain
+  the answer to that shape — `resultText` comes back as JSON matching the schema,
+  ready to `JSON.parse`. This runs Grok non-streaming (no live `/grok:logs` for
+  that job) and needs no fan-out sentinel. Good for extraction/classification
+  tasks where you want fields, not prose.
 - Use `--resume-job <job>` or `--resume-last` to continue a previous Grok session.
 - Never re-run a failed job — it may already have side effects.
 - Report the companion's output back to the user verbatim.

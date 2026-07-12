@@ -34,7 +34,7 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: grok-companion <command> [...]
   setup
-  task <prompt...>|--prompt-file <path> [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
+  task <prompt...>|--prompt-file <path> [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status [--json]
   result [<job-id>|--last] [--json]
   cancel <job-id> [--json]
@@ -42,9 +42,29 @@ const USAGE = `usage: grok-companion <command> [...]
   logs <job-id> [--follow]`;
 
 const TASK_FLAGS = {
-  valueFlags: ["model", "effort", "resume-job", "timeout-ms", "prompt-file"],
+  valueFlags: ["model", "effort", "resume-job", "timeout-ms", "prompt-file", "schema"],
   boolFlags: ["background", "wait", "resume-last", "json", "no-subagents"],
 };
+
+// --schema <path>: read a JSON Schema file and pass it to grok's --json-schema
+// (constrains the model to matching JSON; grok returns the JSON in resultText).
+// A file keeps big schemas out of the shell-quoting minefield. Validate here so
+// a typo fails fast instead of at engine spawn.
+function readSchemaFile(schemaPath, cwd) {
+  if (!schemaPath) return null;
+  let raw;
+  try {
+    raw = fs.readFileSync(path.resolve(cwd, schemaPath), "utf8");
+  } catch {
+    throw new UsageError(`schema file not readable: ${schemaPath}`);
+  }
+  try {
+    JSON.parse(raw);
+  } catch {
+    throw new UsageError(`schema file is not valid JSON: ${schemaPath}`);
+  }
+  return raw;
+}
 
 // Auth is delegated to the grok CLI, but a headless run with NO auth does not
 // fail — it prints a device-code URL and blocks on "Waiting for authorization"
@@ -174,6 +194,7 @@ function resolveResumeSource({ flags, stateDir }) {
 }
 
 async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
+  const jsonSchema = readSchemaFile(flags.schema, cwd); // UsageError on bad file/JSON
   if (authPreflightNeeded(env, deps) && !hasGrokAuth(env)) {
     const msg =
       "not authenticated — run `!grok login` (SuperGrok / X Premium+) or set XAI_API_KEY. " +
@@ -191,6 +212,7 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
       model: flags.model ?? env.GROK_DEFAULT_MODEL ?? "grok-4.5",
       effort: flags.effort ?? env.GROK_DEFAULT_EFFORT ?? null,
       noSubagents: flags["no-subagents"] ?? false,
+      jsonSchema,
       resumeSessionId: source?.sessionId ?? null,
       resumedFrom: source?.id ?? null,
       // test-only injection of a fake binary; undefined in production.

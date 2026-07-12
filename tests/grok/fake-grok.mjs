@@ -23,6 +23,25 @@ function end() {
   out({ type: "end", stopReason: "EndTurn", sessionId: "fake-session-1", requestId: "req-1" });
 }
 
+// --json-schema implies non-streaming --output-format json: emit ONE result
+// object (not a token stream), matching real grok 0.2.93 shape.
+if (process.argv.includes("--json-schema")) {
+  process.stdout.write(
+    JSON.stringify(
+      {
+        text: '{"ok": true}',
+        stopReason: "EndTurn",
+        sessionId: "fake-session-json",
+        requestId: "req-json",
+        structuredOutput: { ok: true },
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  process.exit(0);
+}
+
 // Must exit before emitting anything (conformance scenario 5 asserts exit 7).
 if (mode === "conf-instant-exit") process.exit(7);
 

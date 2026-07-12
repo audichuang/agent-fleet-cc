@@ -42,6 +42,12 @@ export function workspaceStateDir(dataRoot, cwd) {
 }
 
 export function makeGrokAdapter() {
+  // Per-run state. A JSON-schema job runs non-streaming (`--output-format json`,
+  // implied by --json-schema): grok prints ONE multi-line result object instead
+  // of a token stream, so parseEvent buffers lines until that object parses.
+  let jsonMode = false;
+  let jsonBuf = "";
+
   return {
     name: "grok",
     engine: "grok",
@@ -49,18 +55,26 @@ export function makeGrokAdapter() {
     wantsWatchdog: false,
     buildInvocation({ job, prompt }) {
       const r = job.request ?? {};
+      jsonMode = Boolean(r.jsonSchema);
       const head = r.binaryArgv ?? [process.env.GROK_BIN ?? "grok"];
       // ponytail: prompt inline via -p; ceiling is ARG_MAX (~2MB, getconf ARG_MAX).
       // Upgrade path if that ever bites: write prompt to a file, pass --prompt-file.
-      const argv = [
-        ...head,
-        "-p", prompt,
-        "--output-format", "streaming-json",
+      const argv = [...head, "-p", prompt];
+      if (jsonMode) {
+        // --json-schema constrains the model to the schema and IMPLIES
+        // --output-format json (one result object: .text = the JSON string,
+        // .structuredOutput = the parsed object). No token stream → no live
+        // logs and no fan-out sentinel needed for this job.
+        argv.push("--json-schema", r.jsonSchema);
+      } else {
+        argv.push("--output-format", "streaming-json");
+      }
+      argv.push(
         "--always-approve",
         "--no-auto-update",
         "--no-alt-screen",
         "-m", r.model ?? process.env.GROK_DEFAULT_MODEL ?? "grok-4.5",
-      ];
+      );
       const cwd = job.cwd ?? r.cwd;
       if (cwd) argv.push("--cwd", cwd);
       const effort = r.effort ?? process.env.GROK_DEFAULT_EFFORT;
@@ -71,6 +85,25 @@ export function makeGrokAdapter() {
       return { argv, env: r.env ?? {}, stdinPayload: null };
     },
     parseEvent(line) {
+      if (jsonMode) {
+        // Buffer the single non-streaming result object; only attempt a parse on
+        // a line that closes an object (cheap — the final line is a bare `}`).
+        jsonBuf += line + "\n";
+        if (!line.trimEnd().endsWith("}")) return null;
+        let obj;
+        try { obj = JSON.parse(jsonBuf.trim()); } catch { return null; }
+        jsonBuf = "";
+        if (obj?.type === "error") {
+          return { kind: "error", message: typeof obj.message === "string" ? obj.message : "" };
+        }
+        return {
+          kind: "json",
+          text: typeof obj?.text === "string" ? obj.text : "",
+          structured: obj?.structuredOutput ?? null,
+          stopReason: obj?.stopReason ?? null,
+          sessionId: typeof obj?.sessionId === "string" ? obj.sessionId : null,
+        };
+      }
       const trimmed = line.trim();
       if (!trimmed.startsWith("{")) return null;
       let event;
@@ -98,8 +131,22 @@ export function makeGrokAdapter() {
       return null; // thought / tool / anything else → raw line stays in the log
     },
     extractResult(events, exitCode) {
-      const end = events.find((e) => e.kind === "end");
       const errored = events.some((e) => e.kind === "error");
+      const jsonEvent = events.find((e) => e.kind === "json");
+      if (jsonEvent) {
+        // Structured-output mode: prefer grok's JSON string (`.text`); fall back
+        // to serializing the parsed `.structuredOutput`. No sentinel stripping —
+        // the schema already constrains the answer.
+        const structuredText = jsonEvent.text
+          || (jsonEvent.structured != null ? JSON.stringify(jsonEvent.structured, null, 2) : "");
+        return {
+          ok: exitCode === 0 && !errored,
+          resultText: structuredText.length ? structuredText : null,
+          sessionId: jsonEvent.sessionId,
+          usage: null,
+        };
+      }
+      const end = events.find((e) => e.kind === "end");
       const text = events.filter((e) => e.kind === "text").map((e) => e.text).join("");
       // Sentinels present (fan-out with the task.md contract) → keep only the
       // fenced final report, dropping leaked subagent chatter. Absent (single
