@@ -53,6 +53,37 @@ test("task (foreground) runs a job to completion via the fake engine and emits -
   assert.match(json.resultText, /^echo:hello there/);
 });
 
+test("task refuses to launch unauthenticated (guards the 1h OAuth hang)", async () => {
+  const { out, lines } = collect();
+  const code = await runCompanion(["task", "hello", "--json"], {
+    // Real-binary path: no binaryArgv, no GROK_BIN → auth preflight is active.
+    // Hermetic HOME (helpers.mjs) has no ~/.grok/auth.json and no XAI_API_KEY.
+    env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, HOME: process.env.HOME },
+    cwd: process.env.GROK_PLUGIN_DATA,
+    out,
+  });
+  assert.equal(code, 1);
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(json.errorKind, "auth");
+  assert.match(json.error, /not authenticated/);
+});
+
+test("task accepts --no-subagents (does not reject it as an unknown flag)", async () => {
+  const { out, lines } = collect();
+  const code = await runCompanion(
+    ["task", "hi", "--no-subagents", "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(code, 0);
+  assert.equal(json.status, "completed");
+});
+
 test("recursion guard: refuses to run inside a grok job", async () => {
   const { out, lines } = collect();
   const code = await runCompanion(["status"], { env: { GROK_FLEET_ACTIVE: "1" }, out });

@@ -34,7 +34,7 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: grok-companion <command> [...]
   setup
-  task <prompt...>|--prompt-file <path> [--model <id>] [--effort high|medium|low] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
+  task <prompt...>|--prompt-file <path> [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status [--json]
   result [<job-id>|--last] [--json]
   cancel <job-id> [--json]
@@ -43,8 +43,21 @@ const USAGE = `usage: grok-companion <command> [...]
 
 const TASK_FLAGS = {
   valueFlags: ["model", "effort", "resume-job", "timeout-ms", "prompt-file"],
-  boolFlags: ["background", "wait", "resume-last", "json"],
+  boolFlags: ["background", "wait", "resume-last", "json", "no-subagents"],
 };
+
+// Auth is delegated to the grok CLI, but a headless run with NO auth does not
+// fail — it prints a device-code URL and blocks on "Waiting for authorization"
+// until the job timeout (1h). Preflight the same two sources `setup` reports and
+// refuse fast. Skip when a custom binary is injected (tests/e2e fakes own their
+// auth) or when explicitly overridden.
+function hasGrokAuth(env) {
+  if (env.XAI_API_KEY) return true;
+  return Boolean(env.HOME && fs.existsSync(path.join(env.HOME, ".grok", "auth.json")));
+}
+function authPreflightNeeded(env, deps) {
+  return !deps.binaryArgv && !env.GROK_BIN && env.GROK_SKIP_AUTH_PREFLIGHT !== "1";
+}
 
 function safeJobId(value) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value)) {
@@ -161,6 +174,13 @@ function resolveResumeSource({ flags, stateDir }) {
 }
 
 async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
+  if (authPreflightNeeded(env, deps) && !hasGrokAuth(env)) {
+    const msg =
+      "not authenticated — run `!grok login` (SuperGrok / X Premium+) or set XAI_API_KEY. " +
+      "Skipping launch to avoid a headless OAuth hang. (Override: GROK_SKIP_AUTH_PREFLIGHT=1.)";
+    out(flags.json ? JSON.stringify({ engine: "grok", status: "failed", errorKind: "auth", error: msg }) : `grok: ${msg}`);
+    return 1;
+  }
   const source = resolveResumeSource({ flags, stateDir });
   const record = createJobRecord({
     engine: "grok",
@@ -170,6 +190,7 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
     request: {
       model: flags.model ?? env.GROK_DEFAULT_MODEL ?? "grok-4.5",
       effort: flags.effort ?? env.GROK_DEFAULT_EFFORT ?? null,
+      noSubagents: flags["no-subagents"] ?? false,
       resumeSessionId: source?.sessionId ?? null,
       resumedFrom: source?.id ?? null,
       // test-only injection of a fake binary; undefined in production.

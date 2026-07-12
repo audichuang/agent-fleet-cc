@@ -22,6 +22,10 @@ export function renderResult(job, logTail = "") {
   }
   const lines = [job.errorKind ? `${head} [${job.errorKind}]` : head];
   if (job.error) lines.push(`error: ${job.error}`);
+  // A non-completed job (failed / timed-out / cancelled) can still carry usable
+  // text — e.g. a max-turns run that produced a partial answer. Surface it
+  // instead of hiding it behind the error.
+  if (job.resultText) lines.push("", job.resultText);
   if (logTail) lines.push("", "--- log tail ---", logTail);
   if (job.sessionId) {
     lines.push("", `Tip: continue this thread with: task --resume-job ${job.id} "<follow-up>"`);
