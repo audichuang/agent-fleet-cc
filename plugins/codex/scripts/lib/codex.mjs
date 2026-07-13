@@ -31,6 +31,8 @@
  *   messages: Array<{ lifecycle: string, phase: string | null, text: string }>,
  *   fileChanges: ThreadItem[],
  *   commandExecutions: ThreadItem[],
+ *   commandOutputBytes: number,
+ *   lastCommandHeartbeatMs: number,
  *   onProgress: ProgressReporter | null
  * }} TurnCaptureState
  */
