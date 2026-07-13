@@ -48,8 +48,7 @@ not a discovery surface and does not trigger on its own.
 _Avoid_: command (use only for the file type), action.
 
 **Fleet**:
-The umbrella plugin (`plugins/fleet/`): a read-only status board (`status`) and
-health checks (`doctor`) across all engines (codex, antigravity, cc, grok), plus
-guided onboarding (`setup`, which currently covers codex/antigravity/cc). It reads
-each engine; it is not itself an engine.
+The umbrella plugin (`plugins/fleet/`): guided onboarding (`setup`), a read-only
+status board (`status`), and health checks (`doctor`), all across every engine
+(codex, antigravity, cc, grok). It reads each engine; it is not itself an engine.
 _Avoid_: hub, manager.

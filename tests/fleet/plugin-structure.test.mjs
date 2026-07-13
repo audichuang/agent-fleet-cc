@@ -70,14 +70,16 @@ test("setup.md drives the GUIDE-ONLY flow per spec §6", () => {
     /do NOT (run|invoke)[^\n]*fleet-doctor/i,
     "must instruct NOT to run the doctor on zero selections",
   );
-  // lists the three engines
+  // lists the four engines
   assert.match(text, /codex/);
   assert.match(text, /antigravity/);
   assert.match(text, /cc/);
+  assert.match(text, /grok/);
   // GUIDE-ONLY: routes each deep fix to the engine's OWN setup, run by the USER.
   assert.match(text, /\/codex:setup/);
   assert.match(text, /\/antigravity:setup/);
   assert.match(text, /\/cc:setup/);
+  assert.match(text, /\/grok:setup/);
   // §6.3 plugin-not-installed fallback.
   assert.match(text, /\/plugin install <engine>@agent-fleet/);
   // §6.3 confirm-by-re-running guidance (single-line, backtick adjacent to "re-run ").

@@ -45,7 +45,7 @@
       "name": "fleet",
       "source": "./plugins/fleet",
       "description": "Guided onboarding for the agent-fleet engines — pick the ones you want and fix only those.",
-      "version": "0.1.2"
+      "version": "0.1.3"
     }
   ]
 }

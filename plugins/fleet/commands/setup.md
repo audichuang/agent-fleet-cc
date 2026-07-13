@@ -23,6 +23,7 @@ labels with the binary named):
 - `codex` — OpenAI Codex CLI (review / delegate tasks)
 - `antigravity` — Google Antigravity CLI (`agy`)
 - `cc` — a headless Claude Code instance, engine chosen by profile (native / cheap / any model)
+- `grok` — headless xAI Grok Build instance (`grok-4.5`)
 
 Only the chosen engines proceed.
 
@@ -81,6 +82,12 @@ For each `not-ready` engine, in the order they appear in `checkedEngines`:
      (`invalid-name` / `unparseable-json` / `non-scalar-env`) and the offending
      `name` so the user knows which file to fix, then tell them to run
      `/cc:setup`.
+   - **grok** (`binary-missing` / `version-failed`): recommend the user run
+     `/grok:setup` themselves (it checks the `grok` binary and reports auth). If
+     `binary-missing`, tell them to install Grok Build from https://x.ai/cli
+     first. Auth is either `XAI_API_KEY` or `!grok login` (SuperGrok / X
+     Premium+) — `/grok:setup` reports which; never set the key or run
+     `grok login` yourself.
 4. **Plugin-not-installed fallback.** If the engine's plugin may not be installed
    (its `/<engine>:setup` slash command does not exist in this session), tell the
    user to FIRST run `/plugin install <engine>@agent-fleet`, THEN `/<engine>:setup`.
@@ -98,7 +105,9 @@ Print a compact summary: for each chosen engine, either `ready` or
 - codex → `/codex:setup` (guides `codex login`),
 - antigravity → `/antigravity:setup` (runs the OAuth flow),
 - cc → `/cc:setup` (the token lives in each profile's `env`;
-  `fleet-doctor` only checked shape, never the token).
+  `fleet-doctor` only checked shape, never the token),
+- grok → `/grok:setup` (auth is `XAI_API_KEY` or `grok login`; `fleet-doctor`
+  only probed the `grok` binary, never the key).
 
 Do NOT present `ready` as "usable now."
 
