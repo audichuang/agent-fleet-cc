@@ -1,6 +1,6 @@
 ---
 name: delegating-to-fleet
-description: Use when a task could be handed to another AI CLI — deciding whether to delegate and which fleet engine (codex / antigravity / grok / cc) to reach for, then how to invoke it. Fires for substantial or self-contained subtasks, work needing a capability the host lacks (image generation, schema-enforced structured output), or independent chunks worth offloading. Skip for trivial or tightly-coupled work.
+description: Use when a task could be handed to another AI CLI — deciding whether to delegate and which fleet engine (codex / antigravity / grok / cc) to reach for, then how to invoke it. Fires for substantial or self-contained subtasks, work needing a capability the host lacks (raster image generation, schema-enforced structured output), or independent chunks worth offloading. Skip for trivial or tightly-coupled work.
 ---
 
 # Delegating to fleet engines
@@ -14,34 +14,34 @@ each engine's own skills and verb commands; reach for those once you've picked.
 - **Do it yourself** when the task is trivial, tightly coupled to code you're
   already editing, or needs tight interactive back-and-forth.
 - **Delegate** when the task is self-contained *and* either needs a capability
-  you lack, or is an independent chunk worth offloading — offloading spreads
-  usage across the engine's own quota and keeps the subtask out of your context,
-  and independent chunks can run in parallel.
+  you lack, or is an independent chunk worth offloading. Offloading *can* spread
+  usage across another engine's quota (not cc on the native profile — that runs on
+  your own account) and keeps the intermediate work out of your context;
+  independent chunks can also run in parallel.
 
-Delegation is one hop: the engine does the task and returns a result. Engines
-never re-delegate to each other — you are the only orchestrator.
+Keep delegation one hop — don't hand off a task to an engine that will itself
+re-delegate. This is a design guideline, not an enforced guarantee: `/cc:task`
+spawns a full Claude Code that could re-trigger this router, so keep chains flat
+by choosing self-contained subtasks.
 
 ## Pick an engine (by task shape)
 
 Each arrow points to the engine's **model-invocable** entry point — the verb you
 can call yourself. Some verbs (codex/agy `task`, `review`, `image`) are user-run
 (`disable-model-invocation`) and will not fire on their own; where a niche lives
-behind one, ask the user to run it.
+behind one, ask the user to run it. These assume the engine is installed — if a
+fitting engine's verbs aren't available, tell the user to install it (`/fleet:setup`).
 
 - **codex** — implement an existing plan with write access → `/codex:execute-plan`;
   an independent code review / second opinion → `/codex:handoff`; investigate or fix
   → `/codex:rescue`.
-- **antigravity (agy)** — offload a self-contained task, or get a large-context
-  second opinion across many files → `/antigravity:rescue` · `/antigravity:handoff`.
-  Image generation (Imagen) and markup live behind user-run verbs — ask the user to
-  run `/antigravity:image`.
-- **grok** — a self-contained subtask delivered in one shot, especially when you
-  want structured (JSON) output; or an independent chunk of code/tests to
-  offload. → `/grok:task --schema <path>`
+- **antigravity (agy)** — offload a self-contained task (including generating
+  markup / SVG / HTML as text output), or get a large-context second opinion across
+  many files → `/antigravity:rescue` · `/antigravity:handoff`. Raster image
+  generation (Imagen) is a separate user-run verb — ask the user to run
+  `/antigravity:image`.
+- **grok** — a self-contained subtask delivered in one shot, or an independent
+  chunk of code/tests to offload → `/grok:task` (add `--schema <path>` only when
+  you need structured JSON output).
 - **cc** — you want another full Claude Code instance (to run in parallel, or via
-  a cheaper profile/model) on an independent task. → `/cc:task`
-
-## Time-sensitive notes (re-check on model updates)
-
-- agy's markup/SVG strength is tied to its default Gemini 3.5 Flash tier in
-  `--print` mode. If agy's default model changes, re-verify before relying on it.
+  a cheaper profile/model) on an independent task → `/cc:task`.

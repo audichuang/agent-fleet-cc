@@ -19,10 +19,11 @@ _Avoid_: orchestrator (ambiguous), root, master.
 
 **Delegate**:
 The commander's single action of handing a self-contained task to one engine,
-which does it and returns a result. Delegation is one hop only — engines never
-re-delegate. "Offload" is the same act named from the resource side (it spreads
-usage across the engine's own quota and keeps the subtask out of the commander's
-context); it is not a distinct mode.
+which does it and returns a result. Kept to one hop by design — the commander
+does not hand off work that will itself re-delegate (a guideline, not an enforced
+guarantee). "Offload" is the same act named from the resource side (it *can*
+spread usage across another engine's quota, and keeps the intermediate work out
+of the commander's context); it is not a distinct mode.
 _Avoid_: dispatch, subcontract, route (route is choosing *which* engine, not the
 act of handing off).
 
@@ -47,7 +48,8 @@ not a discovery surface and does not trigger on its own.
 _Avoid_: command (use only for the file type), action.
 
 **Fleet**:
-The umbrella plugin (`plugins/fleet/`) that spans all engines — onboarding
-(`setup`), a read-only cross-engine status board (`status`), and health checks
-(`doctor`). It reads each engine; it is not itself an engine.
+The umbrella plugin (`plugins/fleet/`) — onboarding (`setup`), a read-only status
+board (`status`), and health checks (`doctor`) across the engines it knows
+(currently codex, antigravity, cc; grok is not yet wired into its board). It reads
+each engine; it is not itself an engine.
 _Avoid_: hub, manager.

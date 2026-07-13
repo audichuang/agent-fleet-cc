@@ -2,7 +2,8 @@
 
 **Context.** The four engines advertise "when to use me" (their *discovery
 surface*) in four different shapes: agy via a plugin-root `SKILL.md`, cc via a
-`cc-handoff` skill, codex via a subagent plus operating-contract skills, and
+`cc-handoff` skill (Codex-host and user-explicit only — it does not auto-fire for
+a Claude Code commander), codex via a subagent plus operating-contract skills, and
 grok via nothing at all. The commander (host Claude Code) therefore reaches for
 some engines automatically and cannot reach for grok without being told.
 
@@ -32,9 +33,10 @@ decision is actually in play.
 
 ## Consequences
 
-- Minor redundancy: agy and cc keep their own discovery skills (needed for the
+- Minor redundancy: agy keeps its own plugin-root discovery skill (needed for the
   Codex-CLI / agy-native / standalone hosts, and untouchable under IRONCLAD).
-  `delegating-to-fleet` is the *commander's* index; those are the engines'
-  *self-introductions to all hosts*. Different audiences, accepted overlap.
+  `delegating-to-fleet` is the *commander's* index; agy's is the engine's
+  self-introduction to other hosts. cc's `cc-handoff` is Codex-host-only and
+  user-triggered, so it does not overlap here at all. Accepted, minimal overlap.
 - Effectiveness hinges on the skill's `description` triggering on delegatable
   tasks without firing on trivial ones — the next open design question.
