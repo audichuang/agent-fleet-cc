@@ -1,5 +1,5 @@
 // fleet-doctor.mjs — deterministic, network-free readiness checks for the
-// agent-fleet engines (codex, antigravity, cc). Self-contained: it does
+// agent-fleet engines (codex, antigravity, cc, grok). Self-contained: it does
 // NOT import sibling-plugin code and NEVER probes auth or makes a network call.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -335,11 +335,49 @@ function checkCc(deps) {
   };
 }
 
+// Single local probe of the grok binary (honors GROK_BIN, like the engine's own
+// grok-companion does). Auth (XAI_API_KEY / grok login) is NOT checked here —
+// that stays with /grok:setup, keeping fleet-doctor network-free.
+function checkGrok(deps) {
+  const env = deps.env ?? process.env;
+  const binaryName = env.GROK_BIN ?? "grok";
+  const probe = probeBinary(binaryName, deps);
+  if (probe.ok) {
+    return {
+      engine: "grok",
+      status: "ready",
+      authVerified: false,
+      reason: null,
+      summary: `grok CLI ready (${probe.version}) — auth not checked, run /grok:setup to verify XAI_API_KEY or grok login`,
+      deepFixCommand: null,
+      binaryName,
+      onPath: true,
+      version: probe.version,
+    };
+  }
+  const reason = probe.found ? "version-failed" : "binary-missing";
+  const summary = probe.found
+    ? `${binaryName} found but '${binaryName} --version' failed`
+    : "grok not found on PATH — install Grok Build from https://x.ai/cli";
+  return {
+    engine: "grok",
+    status: "not-ready",
+    authVerified: false,
+    reason,
+    summary,
+    deepFixCommand: "/grok:setup",
+    binaryName,
+    onPath: probe.found,
+    version: null,
+  };
+}
+
 // Per-engine checker — routes to the real recipe or stubs for future tasks.
 export function checkEngine(engine, deps) {
   if (engine === "codex") return withActionMetadata(checkCodex(deps));
   if (engine === "antigravity") return withActionMetadata(checkAntigravity(deps));
   if (engine === "cc") return withActionMetadata(checkCc(deps));
+  if (engine === "grok") return withActionMetadata(checkGrok(deps));
   return withActionMetadata({
     engine,
     status: "not-ready",

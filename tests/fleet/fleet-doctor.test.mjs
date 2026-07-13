@@ -54,9 +54,9 @@ test("--only codex,codex dedupes to a single codex", () => {
   assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex"]);
 });
 
-test("no --only checks all three in canonical order", () => {
+test("no --only checks all four in canonical order", () => {
   const r = runDoctor(["--json"], { spawnSyncImpl: readySpawn, env: baseEnv() });
-  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "antigravity", "cc"]);
+  assert.deepEqual(JSON.parse(r.stdout).checkedEngines, ["codex", "antigravity", "cc", "grok"]);
 });
 
 test("unknown engine under --json writes {error} to stdout and exits 2", () => {
@@ -67,7 +67,7 @@ test("unknown engine under --json writes {error} to stdout and exits 2", () => {
   assert.equal(r.exitCode, 2);
   assert.equal(r.stderr, "");
   assert.deepEqual(JSON.parse(r.stdout), {
-    error: "unknown engine: foo; allowed: codex,antigravity,cc",
+    error: "unknown engine: foo; allowed: codex,antigravity,cc,grok",
   });
 });
 
@@ -79,7 +79,7 @@ test("raw quoted slash usage errors still honor --json", () => {
   assert.equal(r.exitCode, 2);
   assert.equal(r.stderr, "");
   assert.deepEqual(JSON.parse(r.stdout), {
-    error: "unknown engine: foo; allowed: codex,antigravity,cc",
+    error: "unknown engine: foo; allowed: codex,antigravity,cc,grok",
   });
 });
 
@@ -92,7 +92,7 @@ test("--raw-args-stdin usage errors still honor --json", () => {
   assert.equal(r.exitCode, 2);
   assert.equal(r.stderr, "");
   assert.deepEqual(JSON.parse(r.stdout), {
-    error: "unknown engine: foo; allowed: codex,antigravity,cc",
+    error: "unknown engine: foo; allowed: codex,antigravity,cc,grok",
   });
 });
 
@@ -499,6 +499,70 @@ test("cc honors CC_CLAUDE_BIN override for binaryName and spawn", () => {
 });
 
 // ---------------------------------------------------------------------------
+// checkGrok — single local probe, honors GROK_BIN, no auth check
+// ---------------------------------------------------------------------------
+
+function onlyGrok(spawnResult, env = {}) {
+  let lastBin = null;
+  const spawn = (bin) => {
+    lastBin = bin;
+    return spawnResult;
+  };
+  return {
+    doc: JSON.parse(
+      runDoctor(["--json", "--only", "grok"], {
+        spawnSyncImpl: spawn,
+        env: { HOME: "/tmp/fleet-noexist-home", ...env },
+      }).stdout,
+    ),
+    lastBin: () => lastBin,
+  };
+}
+
+test("grok ready: grok --version ok (auth not checked)", () => {
+  const { doc, lastBin } = onlyGrok({ status: 0, stdout: "grok 1.2.3\n", stderr: "" });
+  const g = doc.engines.grok;
+  assert.equal(g.engine, "grok");
+  assert.equal(g.status, "ready");
+  assert.equal(g.reason, null);
+  assert.equal(g.binaryName, "grok");
+  assert.equal(g.onPath, true);
+  assert.equal(g.version, "grok 1.2.3");
+  assert.equal(g.authVerified, false);
+  assert.equal(g.deepFixCommand, null);
+  assert.equal(lastBin(), "grok");
+});
+
+test("grok binary-missing (ENOENT) → not-ready, routes /grok:setup", () => {
+  const { doc } = onlyGrok({ error: { code: "ENOENT" }, status: null });
+  const g = doc.engines.grok;
+  assert.equal(g.status, "not-ready");
+  assert.equal(g.reason, "binary-missing");
+  assert.equal(g.onPath, false);
+  assert.equal(g.version, null);
+  assert.equal(g.deepFixCommand, "/grok:setup");
+  assert.equal(g.authVerified, false);
+});
+
+test("grok version-failed (status 1) → not-ready but onPath", () => {
+  const { doc } = onlyGrok({ status: 1, stdout: "", stderr: "x" });
+  const g = doc.engines.grok;
+  assert.equal(g.status, "not-ready");
+  assert.equal(g.reason, "version-failed");
+  assert.equal(g.onPath, true);
+  assert.equal(g.deepFixCommand, "/grok:setup");
+});
+
+test("grok honors GROK_BIN override for binaryName and spawn", () => {
+  const { doc, lastBin } = onlyGrok(
+    { error: { code: "ENOENT" }, status: null },
+    { GROK_BIN: "/opt/bin/grok" },
+  );
+  assert.equal(doc.engines.grok.binaryName, "/opt/bin/grok");
+  assert.equal(lastBin(), "/opt/bin/grok");
+});
+
+// ---------------------------------------------------------------------------
 // Task 7: cc profile discovery + validation + readiness gate
 // ---------------------------------------------------------------------------
 
@@ -633,7 +697,7 @@ function allNotReadyDoc() {
 test("allReady is true only when every checked engine is ready", () => {
   const doc = allReadyDoc();
   assert.equal(doc.allReady, true);
-  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "cc"]);
+  assert.deepEqual(doc.checkedEngines, ["codex", "antigravity", "cc", "grok"]);
 
   // Flip cc to not-ready by withholding profiles.
   const emptyRoot = makeDataRoot();

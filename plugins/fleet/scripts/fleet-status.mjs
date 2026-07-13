@@ -23,6 +23,10 @@ const ENGINE_COMMANDS = {
     script: ["..", "cc", "scripts", "cc-companion.mjs"],
     args: ["status", "--json"],
   },
+  grok: {
+    script: ["..", "grok", "scripts", "grok-companion.mjs"],
+    args: ["status", "--json"],
+  },
 };
 
 function parseArgs(argv) {
@@ -202,6 +206,8 @@ function buildActions(engine, job) {
     actions.push(`/codex:logs ${id}`);
   } else if (engine === "cc") {
     actions.push(`/cc:logs ${id} --follow`);
+  } else if (engine === "grok") {
+    actions.push(`/grok:logs ${id} --follow`);
   } else {
     actions.push(`/antigravity:logs ${id} --follow`);
   }

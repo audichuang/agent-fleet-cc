@@ -34,7 +34,7 @@ test("normalizeArgv splits a single raw argv string", () => {
 });
 
 test("resolveEngines defaults to canonical order", () => {
-  assert.deepEqual(resolveEngines(null), ["codex", "antigravity", "cc"]);
+  assert.deepEqual(resolveEngines(null), ["codex", "antigravity", "cc", "grok"]);
   assert.deepEqual(resolveEngines(null), CANONICAL);
 });
 

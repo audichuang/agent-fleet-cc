@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const CANONICAL = ["codex", "antigravity", "cc"];
+export const CANONICAL = ["codex", "antigravity", "cc", "grok"];
 
 export class UsageError extends Error {}
 
