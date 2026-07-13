@@ -23,11 +23,18 @@ never re-delegate to each other — you are the only orchestrator.
 
 ## Pick an engine (by task shape)
 
-- **codex** — an existing plan to implement with write access, or a rigorous code
-  review. → `/codex:execute-plan` · `/codex:review` · `/codex:rescue`
-- **antigravity (agy)** — generate an image (Imagen → saved file), generate
-  markup/SVG/HTML, or run a large-context investigation / second opinion across
-  many files. → `/antigravity:image` (generates) · `/antigravity:task` · `/antigravity:review`
+Each arrow points to the engine's **model-invocable** entry point — the verb you
+can call yourself. Some verbs (codex/agy `task`, `review`, `image`) are user-run
+(`disable-model-invocation`) and will not fire on their own; where a niche lives
+behind one, ask the user to run it.
+
+- **codex** — implement an existing plan with write access → `/codex:execute-plan`;
+  an independent code review / second opinion → `/codex:handoff`; investigate or fix
+  → `/codex:rescue`.
+- **antigravity (agy)** — offload a self-contained task, or get a large-context
+  second opinion across many files → `/antigravity:rescue` · `/antigravity:handoff`.
+  Image generation (Imagen) and markup live behind user-run verbs — ask the user to
+  run `/antigravity:image`.
 - **grok** — a self-contained subtask delivered in one shot, especially when you
   want structured (JSON) output; or an independent chunk of code/tests to
   offload. → `/grok:task --schema <path>`
