@@ -43,9 +43,12 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
   it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
 - `main` is push-ready: you may commit a feature/behavior change straight to `main`, but only
-  after the full chain (`npm test`) is green **and** an independent diff review (`/codex:handoff`,
-  another model, or a human). Trivial doc/comment edits are exempt; still branch for risky or
-  exploratory work.
+  after the **full CI chain** is green **and** an independent diff review (`/codex:handoff`,
+  another model, or a human). CI (`.github/workflows/ci.yml`) runs more than `npm test`: a
+  `sync-shared` drift check (`npm run sync-shared && git diff --exit-code`), `npm test`, **and**
+  `npm run build:codex` (a `tsc` typecheck — `npm test` does NOT compile it). Run all three
+  locally before you push, or a codex type error will redden CI even when `npm test` passed.
+  Trivial doc/comment edits are exempt; still branch for risky or exploratory work.
 
 ## Gotchas
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
