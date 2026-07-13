@@ -19,6 +19,7 @@ import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 import { getConfig } from "../lib/agy-config.mjs";
 import { stateDirFor, listProjectedJobs, filterJobsForCurrentSession } from "../lib/job-runtime.mjs";
 import { reconcileDeadPids } from "../lib/shared/core/reconcile.mjs";
+import { collectLiveness } from "../lib/shared/core/liveness.mjs";
 import {
   outputCommandResult,
   renderStatusSnapshot,
@@ -39,28 +40,31 @@ export async function run(argv = [], ctx = {}) {
   const cwd = options.cwd ? String(options.cwd) : ctx.cwd ?? process.cwd();
   const reference = positionals[0] ?? null;
   const json = Boolean(options.json);
+  // liveness observation seams (injectable for hermetic tests); collectLiveness
+  // falls back to real isPidAlive / git / Date.now when a seam is undefined.
+  const livenessDeps = ctx.livenessDeps ?? {};
 
   if (reference) {
     if (options.wait) {
-      const finished = await waitForSingleJob(cwd, reference, options);
+      const finished = await waitForSingleJob(cwd, reference, options, livenessDeps);
       const rendered = renderSingleJobStatus(finished);
       outputCommandResult(finished, rendered, json);
       return 0;
     }
-    const snapshot = buildSingleJobSnapshot(cwd, reference);
+    const snapshot = buildSingleJobSnapshot(cwd, reference, process.env, livenessDeps);
     const rendered = renderSingleJobStatus(snapshot);
     outputCommandResult(snapshot, rendered, json);
     return 0;
   }
 
   if (options.wait) {
-    const final = await waitForAllActive(cwd, options);
+    const final = await waitForAllActive(cwd, options, livenessDeps);
     const rendered = renderStatusSnapshot(final);
     outputCommandResult(final, rendered, json);
     return 0;
   }
 
-  const snapshot = buildStatusSnapshot(cwd, { env: process.env });
+  const snapshot = buildStatusSnapshot(cwd, { env: process.env, livenessDeps });
   const rendered = renderStatusSnapshot(snapshot);
   outputCommandResult(snapshot, rendered, json);
   return 0;
@@ -84,7 +88,13 @@ function buildStatusSnapshot(cwd, options = {}) {
   const config = getConfig(stateDir);
   const maxJobs = options.maxJobs ?? DEFAULT_MAX_STATUS_JOBS;
 
-  const running = jobs.filter((j) => ACTIVE.has(j.status));
+  const livenessDeps = options.livenessDeps ?? {};
+  const running = jobs
+    .filter((j) => ACTIVE.has(j.status))
+    .map((j) => {
+      const liveness = collectLiveness(stateDir, j.id, livenessDeps);
+      return liveness ? { ...j, liveness } : j;
+    });
   const recent = jobs.filter((j) => !ACTIVE.has(j.status)).slice(0, maxJobs);
 
   return {
@@ -97,16 +107,19 @@ function buildStatusSnapshot(cwd, options = {}) {
   };
 }
 
-function buildSingleJobSnapshot(cwd, reference, env = process.env) {
+function buildSingleJobSnapshot(cwd, reference, env = process.env, livenessDeps = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
-  const { jobs } = sessionJobsAllForReference(cwd, env);
+  const { stateDir, jobs } = sessionJobsAllForReference(cwd, env);
   const selected = matchJobReference(jobs, reference);
   if (!selected) {
     throw new Error(
       `No job found for "${reference}". Run /antigravity:status to inspect known jobs.`,
     );
   }
-  return { workspaceRoot, job: selected };
+  const liveness = ACTIVE.has(selected.status)
+    ? collectLiveness(stateDir, selected.id, livenessDeps)
+    : null;
+  return { workspaceRoot, job: liveness ? { ...selected, liveness } : selected };
 }
 
 // A single-job lookup by explicit reference is NOT session-scoped (mirrors the
@@ -136,29 +149,29 @@ function matchJobReference(jobs, reference, filter) {
   return null;
 }
 
-async function waitForSingleJob(cwd, reference, options) {
+async function waitForSingleJob(cwd, reference, options, livenessDeps = {}) {
   const timeoutMs = Number(options["timeout-ms"]) || DEFAULT_WAIT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const snap = buildSingleJobSnapshot(cwd, reference);
+    const snap = buildSingleJobSnapshot(cwd, reference, process.env, livenessDeps);
     const status = snap.job?.status;
     if (!ACTIVE.has(status)) {
       return snap; // any terminal status (completed/failed/cancelled/timed-out)
     }
     await sleep(POLL_MS);
   }
-  return buildSingleJobSnapshot(cwd, reference);
+  return buildSingleJobSnapshot(cwd, reference, process.env, livenessDeps);
 }
 
-async function waitForAllActive(cwd, options) {
+async function waitForAllActive(cwd, options, livenessDeps = {}) {
   const timeoutMs = Number(options["timeout-ms"]) || DEFAULT_WAIT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const snap = buildStatusSnapshot(cwd, { env: process.env });
+    const snap = buildStatusSnapshot(cwd, { env: process.env, livenessDeps });
     if (snap.running.length === 0) return snap;
     await sleep(POLL_MS);
   }
-  return buildStatusSnapshot(cwd, { env: process.env });
+  return buildStatusSnapshot(cwd, { env: process.env, livenessDeps });
 }
 
 function sleep(ms) {

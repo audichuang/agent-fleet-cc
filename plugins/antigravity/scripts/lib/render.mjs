@@ -1,6 +1,7 @@
 /**
  * Output rendering — formats reviews, status, results, and reports as markdown.
  */
+import { formatLiveness } from "./shared/core/liveness.mjs";
 
 /**
  * Tolerantly extract the structured review object agy was asked to emit. agy
@@ -133,15 +134,24 @@ export function renderStatusSnapshot(snapshot) {
   if (snapshot.running.length > 0) {
     lines.push("## Active Jobs");
     lines.push("");
-    lines.push("| Job ID | Kind | Status | Phase | Health | Last Progress | Elapsed | Summary |");
-    lines.push("|--------|------|--------|-------|--------|---------------|---------|---------|");
+    lines.push("| Job ID | Kind | Status | Phase | Elapsed | Summary |");
+    lines.push("|--------|------|--------|-------|---------|---------|");
     for (const job of snapshot.running) {
       const elapsed = computeElapsedDisplay(job);
       lines.push(
-        `| ${job.id} | ${job.kind ?? "-"} | ${job.status} | ${job.phase ?? "-"} | ${job.healthStatus ?? "-"} | ${job.lastProgressAt ?? "-"} | ${elapsed} | ${job.summary ?? "-"} |`
+        `| ${job.id} | ${job.kind ?? "-"} | ${job.status} | ${job.phase ?? "-"} | ${elapsed} | ${job.summary ?? "-"} |`
       );
     }
     lines.push("");
+    // Liveness (shared projection, ADR-0002): whether a live worker is
+    // progressing and on what. Only rendered for jobs the collector observed.
+    const live = snapshot.running.filter((j) => j.liveness);
+    if (live.length > 0) {
+      lines.push("## Liveness");
+      lines.push("");
+      for (const job of live) lines.push(`- ${job.id}: ${formatLiveness(job.liveness)}`);
+      lines.push("");
+    }
   }
 
   // Recent completed jobs.
@@ -251,6 +261,9 @@ export function renderSingleJobStatus(snapshotOrJob, options = {}) {
   lines.push(`- **Started:** ${job.startedAt ?? "-"}`);
   lines.push(`- **Updated:** ${job.updatedAt ?? "-"}`);
   lines.push(`- **Completed:** ${job.completedAt ?? "-"}`);
+  if (job.liveness) {
+    lines.push(`- **Liveness:** ${formatLiveness(job.liveness)}`);
+  }
 
   if (job.errorMessage) {
     lines.push("");

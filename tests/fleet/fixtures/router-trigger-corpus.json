@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "purpose": "A/B trigger validation for the delegating-to-fleet router skill (spec 2026-07-14, ticket 06).",
+    "reps": 3,
+    "passDelegateHitRate": 0.9,
+    "maxFalseFireRate": 0.1,
+    "scoring": "Per should-delegate trial: HIT when delegating-to-fleet fires AND routing lands on the prompt's expectedEngine + expectedVerb entry point without mis-routing to a bare verb skill. Per should-NOT trial: HIT when the router does not fire. Run `reps` times/prompt before and after the description change; the after-run must meet passDelegateHitRate on should-delegate and stay <= maxFalseFireRate on should-NOT, without regressing the before-run false-fire rate.",
+    "engines": ["codex", "antigravity", "grok", "cc"],
+    "verbsByEngine": {
+      "codex": ["execute-plan", "handoff", "rescue"],
+      "antigravity": ["rescue", "handoff"],
+      "grok": ["task"],
+      "cc": ["task"]
+    }
+  },
+  "prompts": [
+    { "id": "d01", "shouldDelegate": true, "expectedEngine": "codex", "expectedVerb": "execute-plan", "prompt": "Have codex implement the plan in docs/plan.md with write access." },
+    { "id": "d02", "shouldDelegate": true, "expectedEngine": "codex", "expectedVerb": "handoff", "prompt": "Get an independent second opinion on this diff from another model before I merge." },
+    { "id": "d03", "shouldDelegate": true, "expectedEngine": "codex", "expectedVerb": "rescue", "prompt": "Codex, investigate why the auth integration test is flaky and fix the root cause." },
+    { "id": "d04", "shouldDelegate": true, "expectedEngine": "antigravity", "expectedVerb": "rescue", "prompt": "Offload generating the SVG icon set as markup to agy." },
+    { "id": "d05", "shouldDelegate": true, "expectedEngine": "antigravity", "expectedVerb": "handoff", "prompt": "Get a large-context review across every file in src/ from antigravity." },
+    { "id": "d06", "shouldDelegate": true, "expectedEngine": "grok", "expectedVerb": "task", "prompt": "Delegate writing the exhaustive edge-case tests for the tokenizer to grok." },
+    { "id": "d07", "shouldDelegate": true, "expectedEngine": "grok", "expectedVerb": "task", "prompt": "Extract these 200 log lines into structured JSON matching this schema." },
+    { "id": "d08", "shouldDelegate": true, "expectedEngine": "grok", "expectedVerb": "task", "prompt": "Run a self-contained research sweep on current OAuth device-flow best practices in one shot." },
+    { "id": "d09", "shouldDelegate": true, "expectedEngine": "cc", "expectedVerb": "task", "prompt": "Spin up another Claude Code in parallel to refactor the utils module while I keep working here." },
+    { "id": "d10", "shouldDelegate": true, "expectedEngine": "cc", "expectedVerb": "task", "prompt": "Hand the boilerplate CRUD handlers off to a cheaper CC profile to churn through." },
+    { "id": "d11", "shouldDelegate": true, "expectedEngine": "antigravity", "expectedVerb": "rescue", "prompt": "Have agy debug this 300-frame stack trace with its large context window." },
+    { "id": "d12", "shouldDelegate": true, "expectedEngine": "codex", "expectedVerb": "rescue", "prompt": "Delegate the independent migration of the config module to codex with write access." },
+    { "id": "n01", "shouldDelegate": false, "prompt": "Rename the variable `res` to `response` in this function." },
+    { "id": "n02", "shouldDelegate": false, "prompt": "What does this function return when the input is empty?" },
+    { "id": "n03", "shouldDelegate": false, "prompt": "Fix the typo in this comment." },
+    { "id": "n04", "shouldDelegate": false, "prompt": "Add a null check on line 42 right here in the file we're editing." },
+    { "id": "n05", "shouldDelegate": false, "prompt": "Walk me through this file interactively, section by section." },
+    { "id": "n06", "shouldDelegate": false, "prompt": "Let's pair on designing this API together, step by step." },
+    { "id": "n07", "shouldDelegate": false, "prompt": "Explain the difference between these two approaches." },
+    { "id": "n08", "shouldDelegate": false, "prompt": "Reformat this JSON block so it's readable." }
+  ]
+}

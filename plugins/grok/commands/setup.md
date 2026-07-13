@@ -1,5 +1,6 @@
 ---
 description: Check the grok CLI and report auth status (XAI_API_KEY or grok login)
+disable-model-invocation: true
 ---
 
 Run and relay:

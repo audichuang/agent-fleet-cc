@@ -47,7 +47,8 @@ function runCmdSubprocess(name, args, { cwd, data, agyBody }) {
 }
 
 import { createJobRecord } from '../../plugins/antigravity/scripts/lib/shared/core/job.mjs';
-import { createJob, finalizeJob, writeJob, logFilePath } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
+import { createJob, finalizeJob, writeJob, logFilePath, jobDir } from '../../plugins/antigravity/scripts/lib/shared/core/state-store.mjs';
+import { appendEvent } from '../../plugins/antigravity/scripts/lib/shared/core/events.mjs';
 import { stateDirFor } from '../../plugins/antigravity/scripts/lib/job-runtime.mjs';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -214,6 +215,30 @@ describe('/antigravity:status', () => {
     assert.match(text, new RegExp(id));
     assert.match(text, /Antigravity Job/);
   });
+
+  it('shows a liveness summary for a running job (shared projection)', async () => {
+    const { id, stateDir } = seedSharedJob({ status: 'running', pid: process.pid });
+    appendEvent(jobDir(stateDir, id), 'spawned', { pid: process.pid });
+    appendEvent(jobDir(stateDir, id), 'engine-event', { kind: 'line', text: 'applying patch to server.ts' });
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/status.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([], {
+        cwd: tempDir,
+        livenessDeps: { isAlive: () => true, gitChanges: () => 4, nowMs: Date.now() },
+      });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 0);
+    const text = cap.out.join('');
+    assert.match(text, /## Liveness/);
+    assert.match(text, /alive✓/);
+    assert.match(text, /applying patch to server\.ts/);
+    assert.match(text, /Δwt: 4/);
+  });
 });
 
 // ───────────────────────────── result ─────────────────────────────
@@ -327,6 +352,30 @@ describe('/antigravity:wait', () => {
     assert.equal(payload.jobId, id);
     assert.equal(payload.status, 'running');
     assert.equal(payload.timedOut, true);
+  });
+
+  it('attaches a liveness summary on a wait-deadline return for a running job', async () => {
+    const { id, stateDir } = seedSharedJob({ id: 'waitlive', status: 'running', pid: process.pid });
+    appendEvent(jobDir(stateDir, id), 'spawned', { pid: process.pid });
+    appendEvent(jobDir(stateDir, id), 'engine-event', { kind: 'line', text: 'running the migration' });
+
+    const { run } = await import('../../plugins/antigravity/scripts/commands/wait.mjs');
+    const cap = captureStdio();
+    let exit;
+    try {
+      exit = await run([id, '--timeout-ms', '0', '--json'], {
+        cwd: tempDir,
+        livenessDeps: { isAlive: () => true, gitChanges: () => 4, nowMs: Date.now() },
+      });
+    } finally {
+      cap.restore();
+    }
+    assert.equal(exit, 10);
+    const payload = JSON.parse(cap.out.join(''));
+    assert.ok(payload.liveness, 'wait-deadline payload must carry liveness');
+    assert.equal(payload.liveness.alive, true);
+    assert.equal(payload.liveness.workingTreeChanges, 4);
+    assert.match(payload.liveness.lastActivity.text, /running the migration/);
   });
 
   it('rejects invalid and missing timeout values', async () => {

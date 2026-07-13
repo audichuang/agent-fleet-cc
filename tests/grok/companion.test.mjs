@@ -5,8 +5,28 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeTempDir } from "./helpers.mjs";
+import { makeTempDir, makeDataRoot } from "./helpers.mjs";
 import { runCompanion } from "../../plugins/grok/scripts/grok-companion.mjs";
+import { resolveDataRoot, workspaceStateDir } from "../../plugins/grok/scripts/lib/adapter.mjs";
+import { createJob, markJobRunning, finalizeJob, jobDir } from "../../plugins/grok/scripts/lib/shared/core/state-store.mjs";
+import { createJobRecord } from "../../plugins/grok/scripts/lib/shared/core/job.mjs";
+import { appendEvent } from "../../plugins/grok/scripts/lib/shared/core/events.mjs";
+
+// Seed a job in the exact state dir the companion will resolve for (dataRoot, cwd).
+function seedJob(dataRoot, cwd, { status, resultText, pid, text = "editing src/foo.ts" } = {}) {
+  const stateDir = workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd);
+  const record = createJobRecord({ engine: "grok", title: "watch me", cwd });
+  createJob(stateDir, record, "prompt");
+  if (status === "running") {
+    markJobRunning(stateDir, record.id, { pid });
+    appendEvent(jobDir(stateDir, record.id), "spawned", { pid });
+    if (text) appendEvent(jobDir(stateDir, record.id), "engine-event", { kind: "text", text });
+  } else if (status) {
+    // any terminal status: completed / failed / cancelled / timed-out
+    finalizeJob(stateDir, record.id, { status, resultText });
+  }
+  return record.id;
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FAKE_GROK = path.join(HERE, "fake-grok.mjs");
@@ -130,4 +150,99 @@ test("recursion guard: refuses to run inside a grok job", async () => {
   const code = await runCompanion(["status"], { env: { GROK_FLEET_ACTIVE: "1" }, out });
   assert.equal(code, 0);
   assert.ok(lines.some((l) => /recursion guard/.test(l)));
+});
+
+test("status shows a liveness line for a running job", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  seedJob(dataRoot, cwd, { status: "running", pid: process.pid });
+  const { out, lines } = collect();
+  const code = await runCompanion(["status"], {
+    env: { GROK_PLUGIN_DATA: dataRoot },
+    cwd,
+    out,
+    isAlive: () => true,
+    gitChanges: () => 3,
+    nowMs: Date.now(),
+  });
+  assert.equal(code, 0);
+  const text = lines.join("\n");
+  assert.match(text, /↳/);
+  assert.match(text, /alive✓/);
+  assert.match(text, /editing src\/foo\.ts/);
+  assert.match(text, /Δwt: 3/);
+});
+
+test("wait on a completed job exits 0 and relays the full result once", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const id = seedJob(dataRoot, cwd, { status: "completed", resultText: "the final answer" });
+  const { out, lines } = collect();
+  const code = await runCompanion(["wait", id, "--timeout-s", "5"], {
+    env: { GROK_PLUGIN_DATA: dataRoot },
+    cwd,
+    out,
+  });
+  assert.equal(code, 0);
+  const text = lines.join("\n");
+  assert.match(text, /the final answer/);
+  assert.equal((text.match(/the final answer/g) || []).length, 1, "full result relayed exactly once");
+});
+
+test("wait on a failed job exits 1", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const id = seedJob(dataRoot, cwd, { status: "failed" });
+  const { out } = collect();
+  const code = await runCompanion(["wait", id, "--timeout-s", "5"], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out });
+  assert.equal(code, 1);
+});
+
+test("wait on a cancelled job exits 2", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const id = seedJob(dataRoot, cwd, { status: "cancelled" });
+  const { out } = collect();
+  const code = await runCompanion(["wait", id, "--timeout-s", "5"], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out });
+  assert.equal(code, 2);
+});
+
+test("wait timeout liveness line stays ONE physical line even with multiline engine text", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const id = seedJob(dataRoot, cwd, { status: "running", pid: process.pid, text: "step 1\nstep 2\nstep 3" });
+  const { out, lines } = collect();
+  const code = await runCompanion(["wait", id, "--timeout-s", "0.5"], {
+    env: { GROK_PLUGIN_DATA: dataRoot },
+    cwd,
+    out,
+    isAlive: () => true,
+    gitChanges: () => 0,
+    nowMs: Date.now(),
+  });
+  assert.equal(code, 10);
+  assert.equal(lines.length, 1);
+  assert.doesNotMatch(lines[0], /\n/, "multiline engine text must collapse to one physical line");
+  assert.match(lines[0], /step 1 step 2 step 3/);
+});
+
+test("wait timeout on a running job exits 10 with exactly ONE compact liveness line", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  seedJob(dataRoot, cwd, { status: "running", pid: process.pid });
+  const runningId = seedJob(dataRoot, cwd, { status: "running", pid: process.pid, text: "running tests" });
+  const { out, lines } = collect();
+  const code = await runCompanion(["wait", runningId, "--timeout-s", "0.5"], {
+    env: { GROK_PLUGIN_DATA: dataRoot },
+    cwd,
+    out,
+    isAlive: () => true,
+    gitChanges: () => 2,
+    nowMs: Date.now(),
+  });
+  assert.equal(code, 10);
+  assert.equal(lines.length, 1, `expected one line, got: ${lines.join("\n")}`);
+  assert.match(lines[0], /alive✓/);
+  assert.match(lines[0], /running tests/);
+  assert.doesNotMatch(lines[0], /the final answer/);
 });

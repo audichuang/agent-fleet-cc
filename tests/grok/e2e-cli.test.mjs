@@ -167,3 +167,20 @@ test("engine failure is classified (401 → auth) and surfaced", () => {
     assert.equal(j.errorKind, "auth");
   } finally { w.cleanup(); }
 });
+
+test("wait --timeout-s on a still-running job exits 10 with a compact liveness line", async () => {
+  const w = makeWorkspace();
+  try {
+    const start = jsonOne(cli(w, ["task", "watch job", "--background", "--json"], { mode: "hang" }));
+    assert.equal(start.status, "queued");
+    await pollStatus(w, start.jobId, "running");
+    // The watch-loop's timeout branch: wait returns after the interval with the
+    // job still running → exit 10 and one liveness line (worker pid alive).
+    const res = cli(w, ["wait", start.jobId, "--timeout-s", "1"], { mode: "hang" });
+    assert.equal(res.status, 10, `stdout=${res.stdout} stderr=${res.stderr}`);
+    assert.match(res.stdout, /alive✓/);
+    assert.doesNotMatch(res.stdout, /no result text/); // not the terminal result render
+    cli(w, ["cancel", start.jobId], { mode: "hang" }); // reap the hung engine
+    await pollStatus(w, start.jobId, "cancelled");
+  } finally { w.cleanup(); }
+});

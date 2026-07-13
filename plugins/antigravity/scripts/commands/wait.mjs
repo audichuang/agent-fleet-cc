@@ -27,6 +27,7 @@ import { stateDirFor, projectJob } from "../lib/job-runtime.mjs";
 import { waitForJob } from "../lib/shared/core/wait.mjs";
 import { readJob } from "../lib/shared/core/state-store.mjs";
 import { reconcileDeadPids } from "../lib/shared/core/reconcile.mjs";
+import { collectLiveness } from "../lib/shared/core/liveness.mjs";
 import { outputCommandResult, renderSingleJobStatus } from "../lib/render.mjs";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
@@ -94,7 +95,16 @@ export async function run(argv = [], ctx = {}) {
 
   const projected = projectJob(job);
   const timedOut = !done;
-  const payload = buildWaitPayload(projected, { timedOut });
+  // On a wait-deadline return the job is still active: attach the shared liveness
+  // projection so the output shows whether the worker is alive and what it last
+  // did (same summary as /antigravity:status). Terminal returns render the result
+  // and carry no liveness line.
+  let liveness = null;
+  if (job && timedOut) {
+    liveness = collectLiveness(stateDir, job.id, ctx.livenessDeps ?? {});
+    if (liveness && projected) projected.liveness = liveness;
+  }
+  const payload = buildWaitPayload(projected, { timedOut, liveness });
   const rendered = renderWaitOutput(projected, reference, { timedOut });
   outputCommandResult(payload, rendered, json);
   return exitCodeFor({ done, job });
@@ -112,7 +122,7 @@ function exitCodeFor({ done, job }) {
   return 1; // failed OR timed-out (terminal) → 1
 }
 
-function buildWaitPayload(job, { timedOut }) {
+function buildWaitPayload(job, { timedOut, liveness = null }) {
   if (!job) {
     return {
       engine: "antigravity",
@@ -133,6 +143,8 @@ function buildWaitPayload(job, { timedOut }) {
     threadId: job.threadId ?? null,
     completedAt: job.completedAt ?? null,
     timedOut,
+    // Only present on a still-active (timed-out) return; omitted for terminal.
+    ...(liveness ? { liveness } : {}),
   };
 }
 

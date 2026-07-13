@@ -1,6 +1,7 @@
 ---
 description: List grok jobs in this workspace
 argument-hint: "[--json]"
+disable-model-invocation: true
 ---
 
 Run and relay:

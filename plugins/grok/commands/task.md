@@ -28,8 +28,26 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
   full raw stream stays in the job log (`/grok:logs`). No sentinels emitted →
   you get the full text unchanged. Use `--no-subagents` to force a single agent
   (no fan-out) when you don't want this at all.
-- For long tasks use `--background`, then poll with `/grok:status` (or, for an
-  orchestrator, the companion `wait <id>` verb blocks until completion).
+- **Long-running / watch loop (B1).** For a long task, don't block on a single
+  foreground call — launch in the background and poll so the user sees it stay
+  alive. Drive the loop yourself by SHELLING the companion (the lifecycle verbs
+  are user-run, so do NOT rely on `/grok:*` model-invocation here):
+  1. Launch and capture the job id (JSON):
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task --background --json <args>`
+  2. Wait one interval — the `--timeout-s` value IS the check cadence; pick it
+     for the expected length (short ~60s, long jobs larger) and honour an explicit
+     user cadence ("check every 10 minutes" → `--timeout-s 600`):
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" wait <job> --timeout-s <interval>`
+  3. Branch on the exit code — each `wait` prints exactly ONE line:
+     - **10** — still running: relay the one-line liveness (alive / elapsed / last
+       activity / working-tree changes), then loop back to step 2.
+     - **0** — completed: relay the FULL result once (the liveness line never
+       replaces it). Stop.
+     - **1** — failed / timed-out / job missing: relay the error payload. Stop.
+     - **2** — cancelled: relay cancellation. Stop.
+  A job that finalizes between polls is safe — the next `wait` observes the
+  terminal state and returns the matching non-10 code. `/grok:status` shows the
+  same liveness line for any running job if you want a one-off check.
 - Use `--json` for machine-readable output (job id, status, exit code).
 - Use `--prompt-file <path>` to pass a prompt stored in a file.
 - Use `--model <id>` (only `grok-4.5` and `grok-composer-2.5-fast` exist — see

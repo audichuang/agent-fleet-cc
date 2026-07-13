@@ -12,7 +12,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs, UsageError } from "./lib/shared/args.mjs";
-import { createJobRecord, TERMINAL_STATUSES } from "./lib/shared/core/job.mjs";
+import { createJobRecord, TERMINAL_STATUSES, ACTIVE_STATUSES } from "./lib/shared/core/job.mjs";
 import {
   createJob,
   readJob,
@@ -26,6 +26,7 @@ import { reconcileDeadPids } from "./lib/shared/core/reconcile.mjs";
 import { cancelJob } from "./lib/shared/core/job-control.mjs";
 import { waitForJob } from "./lib/shared/core/wait.mjs";
 import { readEvents } from "./lib/shared/core/events.mjs";
+import { collectLiveness, formatLiveness } from "./lib/shared/core/liveness.mjs";
 import { runWorker, installCancelForwarder } from "./lib/shared/runtime/worker.mjs";
 import { makeGrokAdapter, resolveDataRoot, workspaceStateDir } from "./lib/adapter.mjs";
 import { renderStatus, renderResult } from "./lib/render.mjs";
@@ -130,13 +131,13 @@ export async function runCompanion(argv, deps = {}) {
       case "task":
         return await cmdTask({ argv: rest, env, out, cwd, stateDir, deps });
       case "status":
-        return cmdStatus({ argv: rest, out, stateDir });
+        return cmdStatus({ argv: rest, out, stateDir, deps });
       case "result":
         return cmdResult({ argv: rest, out, stateDir });
       case "cancel":
         return cmdCancel({ argv: rest, out, stateDir });
       case "wait":
-        return await cmdWait({ argv: rest, out, stateDir });
+        return await cmdWait({ argv: rest, out, stateDir, deps });
       case "logs":
         return await cmdLogs({ argv: rest, out, stateDir });
       default:
@@ -300,11 +301,31 @@ function readLogTail(stateDir, jobId, lines = 30) {
   }
 }
 
-function cmdStatus({ argv, out, stateDir }) {
+// liveness observation seams (injectable for hermetic tests); collectLiveness
+// falls back to the real isPidAlive / git / Date.now when a seam is undefined.
+function livenessDeps(deps = {}) {
+  return { isAlive: deps.isAlive, gitChanges: deps.gitChanges, nowMs: deps.nowMs };
+}
+
+function cmdStatus({ argv, out, stateDir, deps = {} }) {
   const { flags } = parseArgs(argv, { boolFlags: ["json"] });
   reconcileDeadPids(stateDir);
   const jobs = listJobs(stateDir);
-  out(flags.json ? JSON.stringify(jobs.map(resultProjection)) : renderStatus(jobs));
+  const livenessById = {};
+  for (const job of jobs) {
+    if (!ACTIVE_STATUSES.has(job.status)) continue; // liveness only meaningful while active
+    const live = collectLiveness(stateDir, job.id, livenessDeps(deps));
+    if (live) livenessById[job.id] = live;
+  }
+  out(
+    flags.json
+      ? JSON.stringify(
+          jobs.map((j) =>
+            livenessById[j.id] ? { ...resultProjection(j), liveness: livenessById[j.id] } : resultProjection(j),
+          ),
+        )
+      : renderStatus(jobs, livenessById),
+  );
   return 0;
 }
 
@@ -335,7 +356,7 @@ function waitExitCode(status) {
   return 1;
 }
 
-async function cmdWait({ argv, out, stateDir }) {
+async function cmdWait({ argv, out, stateDir, deps = {} }) {
   const { flags, positionals } = parseArgs(argv, { valueFlags: ["timeout-s"], boolFlags: ["json"] });
   if (!positionals[0]) throw new UsageError("wait requires a job id");
   const jobId = safeJobId(positionals[0]);
@@ -348,21 +369,44 @@ async function cmdWait({ argv, out, stateDir }) {
     throw new UsageError(`--timeout-s must be a positive number, got: ${flags["timeout-s"]}`);
   }
   reconcileDeadPids(stateDir);
+  // B1 watch loop: no per-event chatter. waitForJob blocks up to the caller's
+  // timeout (the check interval); we emit exactly ONE line when it returns and
+  // the commander loops. See commands/task.md and the design spec.
   const { done, job } = await waitForJob({
     stateDir,
     jobId,
     timeoutMs: timeoutS * 1000,
     reconcile: reconcileDeadPids,
-    onEvent: (e) => {
-      if (!flags.json) out(`[${e.ts}] ${e.type}${e.kind ? ":" + e.kind : ""}`);
-    },
+    onEvent: () => {},
   });
   if (!job) {
     out(flags.json ? JSON.stringify({ error: `job ${jobId} no longer exists` }) : `Job ${jobId} no longer exists.`);
     return 1;
   }
+  if (!done) {
+    const live = collectLiveness(stateDir, jobId, livenessDeps(deps));
+    // Race: waitForJob keys off job.json, but a terminal terminal.lock may
+    // already be claimed while job.json still says running. The projection folds
+    // the lock (authoritative). If it says terminal, relay the result now with
+    // the right exit code instead of a false "still running" + exit 10.
+    if (live && TERMINAL_STATUSES.has(live.status)) {
+      const fresh = readJob(stateDir, jobId) ?? job;
+      out(flags.json ? JSON.stringify(resultProjection(fresh)) : renderResult(fresh, ""));
+      return waitExitCode(live.status);
+    }
+    // Still running: one compact liveness line, then exit 10 so the commander
+    // reports "still alive" and re-invokes wait with the same interval. Uses the
+    // authoritative projected status for the prefix.
+    out(
+      flags.json
+        ? JSON.stringify({ ...resultProjection(job), liveness: live })
+        : `[${jobId}] ${live?.status ?? job.status}  ${live ? formatLiveness(live) : ""}`.trimEnd(),
+    );
+    return WAIT_TIMEOUT_EXIT;
+  }
+  // Terminal: relay the FULL result exactly once (the liveness line never
+  // replaces it). Exit 0 completed / 2 cancelled / 1 failed|timed-out.
   out(flags.json ? JSON.stringify(resultProjection(job)) : renderResult(job, ""));
-  if (!done) return WAIT_TIMEOUT_EXIT;
   return waitExitCode(job.status);
 }
 

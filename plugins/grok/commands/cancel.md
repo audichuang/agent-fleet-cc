@@ -1,6 +1,7 @@
 ---
 description: Cancel a running grok job
 argument-hint: "<job-id> [--json]"
+disable-model-invocation: true
 ---
 
 Run and relay:

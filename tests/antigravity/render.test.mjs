@@ -116,6 +116,36 @@ describe('renderStatusSnapshot', () => {
     // durationMs 5000 → "5s" (fixed); a createdAt→now estimate would show ~60m.
     assert.match(out, /\b5s\b/);
   });
+
+  it('renders a Liveness section for running jobs carrying a shared projection', () => {
+    const out = renderStatusSnapshot({
+      workspaceRoot: '/tmp',
+      config: {},
+      running: [
+        {
+          id: 'r1',
+          kind: 'task',
+          status: 'running',
+          liveness: {
+            status: 'running',
+            alive: true,
+            elapsedMs: 125000,
+            elapsedOrigin: 'spawned',
+            quietMs: 5000,
+            lastActivity: { text: 'editing x.ts', ts: '' },
+            workingTreeChanges: 2,
+          },
+        },
+      ],
+      latestFinished: null,
+      recent: [],
+      needsReview: false,
+    });
+    assert.match(out, /## Liveness/);
+    assert.match(out, /r1:.*alive✓/);
+    assert.match(out, /editing x\.ts/);
+    assert.match(out, /Δwt: 2/);
+  });
 });
 
 describe('renderSingleJobStatus', () => {
@@ -136,6 +166,24 @@ describe('renderSingleJobStatus', () => {
     assert.match(out, /Kind.*task/);
     assert.doesNotMatch(out, /## Health/);
     assert.doesNotMatch(out, /Last Heartbeat/);
+  });
+
+  it('renders a Liveness line when the job carries a shared projection', () => {
+    const out = renderSingleJobStatus({
+      id: 'j',
+      status: 'running',
+      liveness: {
+        status: 'running',
+        alive: true,
+        elapsedMs: 60000,
+        elapsedOrigin: 'spawned',
+        quietMs: 1000,
+        lastActivity: { text: 'running tests', ts: '' },
+        workingTreeChanges: 1,
+      },
+    });
+    assert.match(out, /Liveness:.*alive✓/);
+    assert.match(out, /running tests/);
   });
 
   it('handles a wrapper { job } and includes error + progress + events', () => {

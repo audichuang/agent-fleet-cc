@@ -1,8 +1,13 @@
-export function renderStatus(jobs) {
+import { formatLiveness } from "./shared/core/liveness.mjs";
+
+// livenessById: { [jobId]: projection } for active jobs (see collectLiveness).
+// Active jobs get an indented liveness line so `/grok:status` alone answers
+// "is it still alive and what is it doing?".
+export function renderStatus(jobs, livenessById = {}) {
   if (!jobs.length) return "No grok jobs in this workspace.";
   return jobs
-    .map((job) =>
-      [
+    .map((job) => {
+      const head = [
         job.id,
         (job.status ?? "?").padEnd(9),
         `model=${job.request?.model ?? "grok-4.5"}`,
@@ -10,8 +15,10 @@ export function renderStatus(jobs) {
         job.title ? `"${job.title}"` : "",
       ]
         .filter(Boolean)
-        .join("  "),
-    )
+        .join("  ");
+      const live = livenessById[job.id];
+      return live ? `${head}\n    ↳ ${formatLiveness(live)}` : head;
+    })
     .join("\n");
 }
 
