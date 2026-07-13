@@ -40,14 +40,15 @@ not answer with the first and imply it was real.
 ## Layer 1 — Hermetic E2E suite
 
 ```bash
-npm run test:e2e     # the 4 black-box e2e files (cc + codex + antigravity + fleet)
+npm run test:e2e     # the 5 black-box e2e files (cc + codex + antigravity + fleet + grok)
 npm test             # full chain; test:e2e is the last && leg, so it gates the build
 ```
 
-`test:e2e` runs `tests/{cc,codex,antigravity,fleet}/e2e-cli.test.mjs`.
+`test:e2e` runs `tests/{cc,codex,antigravity,fleet,grok}/e2e-cli.test.mjs`.
 Each spawns the real plugin CLI (`cc-companion.mjs`, `codex-companion.mjs`,
-`antigravity/bin/antigravity.mjs`, `fleet-status.mjs`) as a subprocess against an
-isolated workspace with fake/seeded state. `tests/cc/e2e-cli.test.mjs` is
+`antigravity/bin/antigravity.mjs`, `fleet-status.mjs`/`fleet-doctor.mjs`,
+`grok-companion.mjs`) as a subprocess against an isolated workspace with
+fake/seeded state. `tests/cc/e2e-cli.test.mjs` is
 the canonical template — read it before writing a new one.
 
 ## Layer 2 — Real-engine smoke (manual gate)

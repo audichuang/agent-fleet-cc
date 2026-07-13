@@ -20,7 +20,9 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 (add the plugin to the vendored-runtime target list — CI drift-checks it), and `README.md`.
 
 ## Commands
-- `npm test` — full chain: structure + shared + cc + antigravity + codex + grok + fleet + e2e (Node >= 22.3)
+- `npm test` — full chain: structure + shared + cc + antigravity + codex + grok + fleet + e2e.
+  Run on **Node 24**: codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says
+  `>=22.3`, but CI pins 24 for this reason — see `.github/workflows/ci.yml`).
 - `node --test tests/<plugin>/*.test.mjs` — run one plugin's suite (antigravity also needs
   `--experimental-test-module-mocks`)
 - `npm run test:e2e` — black-box CLI e2e for all 5 plugins (cc + codex + antigravity + fleet + grok;
@@ -42,13 +44,12 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   tests need no real binaries.
 - Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
   it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
-- `main` is push-ready: you may commit a feature/behavior change straight to `main`, but only
-  after the **full CI chain** is green **and** an independent diff review (`/codex:handoff`,
-  another model, or a human). CI (`.github/workflows/ci.yml`) runs more than `npm test`: a
-  `sync-shared` drift check (`npm run sync-shared && git diff --exit-code`), `npm test`, **and**
-  `npm run build:codex` (a `tsc` typecheck — `npm test` does NOT compile it). Run all three
-  locally before you push, or a codex type error will redden CI even when `npm test` passed.
-  Trivial doc/comment edits are exempt; still branch for risky or exploratory work.
+- `main` is push-ready: commit a feature/behavior change straight to `main` only after the
+  **full CI chain** is green **and** an independent diff review (`/codex:handoff`, another model,
+  or a human). CI (`ci.yml`) is more than `npm test` — it also runs a `sync-shared` drift check
+  and `npm run build:codex` (a `tsc` typecheck `npm test` skips), so run those two as well before
+  pushing (a codex type error reddens CI while `npm test` stays green). Trivial doc/comment edits
+  are exempt; still branch for risky or exploratory work.
 
 ## Gotchas
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
@@ -61,6 +62,8 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   shared runtime the same way — check before editing.
 
 ## Where things live
+- Domain glossary (the project's ubiquitous language): `CONTEXT.md`
+- Architecture decisions (why a shape was chosen, not how): `docs/adr/`
 - Specs / plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/specs/`
 - SDD progress ledger (full build history per feature): `.git/sdd/progress.md`
 - Per-plugin requirements (CLI login / OAuth / endpoint profiles): each `plugins/<name>/`
