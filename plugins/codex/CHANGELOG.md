@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.3.0
+
+Long-run health + observability hardening and a protocol-sync pass, from a two-part audit
+against codex HEAD `2b0b37abb7` (2026-07-13), then hardened after an independent Codex
+(GPT-5.6) review. Full details in the source repo's `docs/codex-protocol-sync-audit.md`.
+Full suite green (432 codex + 109 shared).
+
+**Long-running task (~20 min) robustness & observability**
+
+- **Broker tears down when its app-server dies.** If the underlying `codex app-server`
+  crashes/OOMs while the broker Node parent survives, the broker now ends every client
+  socket the moment `appClient.exitPromise` resolves. Previously the worker's socket stayed
+  open and silent, so an in-flight turn hung until the 1-hour hard cap; now its transport
+  watchdog finalizes it in seconds (`app-server-broker.mjs`).
+- **Command-output heartbeat.** A single long command (e.g. a 15-min build/test) used to go
+  dark on `/codex:logs` and `/codex:status` between `item/started` and `item/completed`. The
+  plugin now surfaces a throttled liveness line from `item/commandExecution/outputDelta`
+  (≤1 per 20s, byte count only — never the raw chunks), which also keeps the watchdog's
+  `quietMs` fresh during a long command (`codex.mjs`).
+- **Deadline backstop in dead-PID reconcile.** `reconcileDeadPidJobs` now finalizes a job
+  that blew past its persisted `timeoutAt` (+60s grace) regardless of PID liveness — closing
+  the recycled-PID hole and giving foreground jobs (which never get a watchdog) a wall-clock
+  backstop instead of sticking at "running" (`state.mjs`).
+- **Transport-watchdog regression test.** The mid-turn-disconnect finalizer is now covered by
+  a test that resolves `exitPromise` (previously every test stubbed it to never resolve): the
+  no-final-answer case asserts the turn rejects promptly; the post-final-answer case asserts a
+  success outcome.
+- **Post-review hardening (independent Codex review).** Broker teardown now runs a single
+  shared shutdown promise and ignores the app-server exit that an *intentional* shutdown
+  causes (so idle/SIGTERM close cleanly without a spurious `exit(1)` racing cleanup); the
+  reconcile deadline backstop re-checks the deadline on the *fresh* record inside the CAS
+  guard (closing a TOCTOU where a just-refreshed deadline could false-finalize a healthy job);
+  the heartbeat uses a monotonic clock + real UTF-8 byte length.
+- Audited and confirmed already solid (no change): watchdog false-kill safety, idle-broker
+  reaping vs. an active turn, and live background progress durability to the per-job log.
+
+**Protocol sync**
+
+- **`amazonBedrock` account type** — `account/read` can return `Account::AmazonBedrock
+  { credentialSource }`. `buildAppServerAuthStatus` now reports `Amazon Bedrock login active
+  (awsManaged|codexManaged)` with `authMethod:"amazonBedrock"` instead of the generic
+  "provider does not require OpenAI authentication" fallthrough with `authMethod:null`.
+  Status-label only — login gating was already correct.
+- The rest of the app-server surface (initialize handshake, `turn/completed` terminal errors
+  #32280, notification names, effort values incl. `ultra`, default model, review/guardian
+  flow, server→client declines, thread params, item types) was audited and confirmed in sync.
+
 ## 1.2.0
 
 `/codex:setup` now verifies the default model is usable by the account.

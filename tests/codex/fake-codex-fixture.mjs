@@ -74,6 +74,8 @@ function buildAccountReadResult() {
       return { account: null, requiresOpenaiAuth: false };
     case "api-key-account-only":
       return { account: { type: "apiKey" }, requiresOpenaiAuth: true };
+    case "bedrock-account":
+      return { account: { type: "amazonBedrock", credentialSource: "awsManaged" }, requiresOpenaiAuth: false };
     default:
       return {
         account: { type: "chatgpt", email: "test@example.com", planType: "plus" },
@@ -251,7 +253,7 @@ if (args[0] === "app-server" && args[1] === "--help") {
   process.exit(0);
 }
 if (args[0] === "login" && args[1] === "status") {
-  if (BEHAVIOR === "logged-out" || BEHAVIOR === "refreshable-auth" || BEHAVIOR === "auth-run-fails" || BEHAVIOR === "provider-no-auth" || BEHAVIOR === "env-key-provider" || BEHAVIOR === "api-key-account-only") {
+  if (BEHAVIOR === "logged-out" || BEHAVIOR === "refreshable-auth" || BEHAVIOR === "auth-run-fails" || BEHAVIOR === "provider-no-auth" || BEHAVIOR === "env-key-provider" || BEHAVIOR === "api-key-account-only" || BEHAVIOR === "bedrock-account") {
     console.error("not authenticated");
     process.exit(1);
   }

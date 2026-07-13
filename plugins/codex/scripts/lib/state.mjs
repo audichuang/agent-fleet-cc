@@ -366,6 +366,12 @@ export function applyJobPatchIfActive(cwd, jobId, patchOrBuilder, extraGuard = n
   return { applied: true, stored, patch: persisted };
 }
 
+// Grace margin past a job's persisted deadline before the pull-path reconcile
+// finalizes it regardless of PID liveness (mirrors the watchdog's
+// missedOwnDeadline grace). Covers a recycled worker PID and foreground jobs,
+// which never get a watchdog.
+const DEAD_PID_DEADLINE_GRACE_MS = 60_000;
+
 export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
   const stateDir = resolveStateDir(cwd);
   const nowMs = Date.now();
@@ -418,7 +424,19 @@ export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
     // record with a dead tracked pid would otherwise wedge forever and block future
     // /codex:rescue runs (the active-job guard treats queued as active).
     const pid = normalizeTrackedPid(job.pid);
-    if (pid === null || isProcessAlive(pid)) continue;
+    // Wall-clock backstop (mirrors the watchdog's missedOwnDeadline): a bare
+    // isProcessAlive gate cannot finalize a job whose worker was SIGKILLed and
+    // whose PID the OS then RECYCLED onto a live process, and FOREGROUND jobs
+    // never get a watchdog at all — either could sit "running" forever. If the
+    // job blew past its own persisted deadline (+ grace), reconcile it
+    // regardless of PID liveness.
+    const deadlineMs = Date.parse(job.timeoutAt);
+    const missedDeadline = Number.isFinite(deadlineMs) && nowMs > deadlineMs + DEAD_PID_DEADLINE_GRACE_MS;
+    if (!missedDeadline && (pid === null || isProcessAlive(pid))) continue;
+
+    const reason = missedDeadline
+      ? "Job exceeded its execution deadline without reporting a terminal status; auto-reconciled as failed."
+      : `Worker process PID ${pid} exited without reporting a terminal status; auto-reconciled as failed.`;
 
     const result = applyJobPatchIfActive(
       cwd,
@@ -427,15 +445,28 @@ export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
         status: "failed",
         phase: "failed",
         pid: null,
-        errorMessage: `Worker process PID ${pid} exited without reporting a terminal status; auto-reconciled as failed.`,
+        errorMessage: reason,
         completedAt,
         autoReconciled: true,
         reconciledDeadPid: pid
       }),
-      // The PID-identity guard runs again on the FRESH record inside finalizeJob (see the
-      // adapter): if the persisted PID no longer matches the one we observed as dead (job
-      // re-spawned, or the OS recycled the PID), the finalize is rejected.
-      (stored) => normalizeTrackedPid(stored.pid) === pid
+      // Guard against the fresh record inside finalizeJob (first-terminal-writer-wins).
+      (stored) => {
+        // Identity: reject if the job re-spawned with a different pid (or the OS recycled
+        // the PID onto a new record) — original dead-pid defense, unchanged.
+        if (normalizeTrackedPid(stored.pid) !== pid) return false;
+        // TOCTOU close for the deadline backstop: the missedDeadline decision above was
+        // taken on the STALE listJobs snapshot. If this finalize was triggered ONLY by the
+        // deadline (the pid still reads alive here), the worker may have refreshed timeoutAt
+        // (queued→running promotion / resume) between the snapshot and now — re-verify the
+        // deadline on the FRESH record so a job that just got a new lease is never killed.
+        // A genuinely dead pid still finalizes regardless of deadline (skips this block).
+        if (missedDeadline && (pid === null || isProcessAlive(pid))) {
+          const freshDeadlineMs = Date.parse(stored.timeoutAt);
+          return Number.isFinite(freshDeadlineMs) && nowMs > freshDeadlineMs + DEAD_PID_DEADLINE_GRACE_MS;
+        }
+        return true;
+      }
     );
 
     if (!result.applied) continue;
@@ -447,7 +478,7 @@ export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
     // leaving the signal unwritten.
     writeCompletionSignalFile(cwd, id, {
       status: "failed",
-      reason: `Worker process PID ${pid} exited without reporting a terminal status; auto-reconciled as failed.`
+      reason
     });
 
     // Human-visible marker in the job log so the next /codex:status renders
@@ -457,7 +488,7 @@ export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
       try {
         fs.appendFileSync(
           logTarget,
-          `[${completedAt}] Auto-reconciled: worker process PID ${pid} exited without reporting a terminal status. Job marked failed.\n`,
+          `[${completedAt}] Auto-reconciled: ${reason}\n`,
           "utf8"
         );
       } catch {

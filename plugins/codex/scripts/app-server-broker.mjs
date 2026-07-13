@@ -107,18 +107,34 @@ async function main() {
     }
   }
 
-  async function shutdown(server) {
-    for (const socket of sockets) {
-      socket.end();
+  let shuttingDown = false;
+  let shutdownPromise = null;
+  // Idempotent AND shared: the app-server-death, idle-reaper, SIGTERM and
+  // broker/shutdown paths can race. Return ONE cached teardown promise so every
+  // caller awaits the SAME teardown to completion — a second caller must not
+  // return early and let its process.exit() preempt the first caller's
+  // server.close()/unlink (leaking the endpoint/pid files). Sockets are
+  // destroyed (not end()) so a backpressured / non-reading peer cannot make
+  // server.close() hang; the worker's client sees the reset as a socket close.
+  function shutdown(server) {
+    if (shutdownPromise) {
+      return shutdownPromise;
     }
-    await appClient.close().catch(() => {});
-    await new Promise((resolve) => server.close(resolve));
-    if (listenTarget.kind === "unix" && fs.existsSync(listenTarget.path)) {
-      fs.unlinkSync(listenTarget.path);
-    }
-    if (pidFile && fs.existsSync(pidFile)) {
-      fs.unlinkSync(pidFile);
-    }
+    shuttingDown = true;
+    shutdownPromise = (async () => {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+      await appClient.close().catch(() => {});
+      await new Promise((resolve) => server.close(resolve));
+      if (listenTarget.kind === "unix" && fs.existsSync(listenTarget.path)) {
+        fs.unlinkSync(listenTarget.path);
+      }
+      if (pidFile && fs.existsSync(pidFile)) {
+        fs.unlinkSync(pidFile);
+      }
+    })();
+    return shutdownPromise;
   }
 
   appClient.setNotificationHandler(routeNotification);
@@ -257,6 +273,29 @@ async function main() {
     });
   });
 
+  // If the underlying codex app-server process dies (crash / OOM / panic) while
+  // the broker Node parent survives, the broker can no longer serve any turn —
+  // yet its listen socket and every client socket stay open and silent. An
+  // in-flight worker blocked on `await state.completion` would then hang until
+  // the 1-hour job hard cap, because its transport watchdog only fires on a
+  // socket close (a live-but-silent socket triggers neither 'error' nor
+  // 'close'). Tear the broker down the moment the app-server exits: shutdown()
+  // ends every client socket, so each worker's BrokerCodexAppServerClient sees
+  // 'close' -> its exitPromise resolves -> captureTurn's transportWatchdog
+  // reaches a terminal state in seconds instead of ~48 minutes. Exit nonzero to
+  // mark the abnormal death.
+  wireAppServerDeathTeardown(appClient, async () => {
+    // An INTENTIONAL shutdown (idle reaper / SIGTERM / broker/shutdown) closes
+    // appClient itself, which ALSO resolves appClient.exitPromise — that is not an
+    // app-server *death*, and that path already owns teardown + exit. Only act when
+    // no shutdown is already in progress, i.e. the app-server exited on its own.
+    if (shuttingDown) {
+      return;
+    }
+    await shutdown(server).catch(() => {});
+    process.exit(1);
+  });
+
   // Auto-exit when no client has been connected for the idle window, so stale
   // brokers (and the Codex app-server they own, killed by appClient.close in
   // shutdown) do not accumulate across sessions.
@@ -295,6 +334,15 @@ export function shouldRefuseBrokerShutdown(activeStreamSocket, activeRequestSock
     (activeStreamSocket && activeStreamSocket !== requestingSocket) ||
       (activeRequestSocket && activeRequestSocket !== requestingSocket)
   );
+}
+
+// Run `onDeath` when the broker's underlying codex app-server exits. Extracted as
+// a seam so the "app-server death -> broker teardown" wiring (which unblocks any
+// worker wedged on an in-flight turn) has a regression test — the broker main()
+// loop is otherwise only reachable by spawning a real app-server. Returns the
+// promise so tests can await it.
+export function wireAppServerDeathTeardown(appClient, onDeath) {
+  return appClient.exitPromise.then(onDeath);
 }
 
 const invokedDirectly =

@@ -8,6 +8,7 @@ import { makeTempDir } from "./helpers.mjs";
 import {
   applyJobPatchIfActive,
   listJobs,
+  reconcileDeadPidJobs,
   readJobFile,
   resolveJobFile,
   resolveJobLockFile,
@@ -332,6 +333,59 @@ test("listJobs leaves running jobs alone when the tracked pid is alive", () => {
   const [job] = listJobs(workspace);
   assert.equal(job.status, "running");
   assert.equal(job.pid, process.pid);
+});
+
+test("listJobs reconciles a job past its deadline even when the tracked pid reads alive (recycled-pid / foreground backstop)", () => {
+  const workspace = makeTempDir();
+  // pid is ALIVE (this test process) — models a SIGKILLed worker whose pid the OS
+  // recycled onto a live process, OR a foreground job (which never gets a watchdog).
+  // A bare isProcessAlive gate would leave this stuck "running" forever; the persisted
+  // deadline backstop must finalize it.
+  seedActiveJob(workspace, {
+    id: "task-past-deadline",
+    pid: process.pid,
+    timeoutAt: "2020-01-01T00:00:00.000Z" // well past + grace
+  });
+
+  const [reconciled] = listJobs(workspace);
+  assert.equal(reconciled.status, "failed");
+  assert.equal(reconciled.autoReconciled, true);
+  assert.match(reconciled.errorMessage ?? "", /exceeded its execution deadline/);
+});
+
+test("listJobs leaves a live job with a future deadline running (no premature deadline finalize)", () => {
+  const workspace = makeTempDir();
+  seedActiveJob(workspace, {
+    id: "task-future-deadline",
+    pid: process.pid,
+    timeoutAt: "2999-01-01T00:00:00.000Z"
+  });
+
+  const [job] = listJobs(workspace);
+  assert.equal(job.status, "running");
+});
+
+test("reconcile does not false-finalize a job whose deadline was refreshed since the stale snapshot (TOCTOU guard)", () => {
+  const workspace = makeTempDir();
+  // FRESH on-disk record: alive pid + FUTURE deadline — a healthy job that just got a new
+  // lease (queued->running promotion / resume) after the reconcile snapshot was taken.
+  seedActiveJob(workspace, {
+    id: "task-refreshed",
+    pid: process.pid,
+    timeoutAt: "2999-01-01T00:00:00.000Z"
+  });
+  // STALE snapshot the reconcile loop iterates: SAME live pid, but an already-expired
+  // deadline. The finalize decision is missedDeadline=true from this snapshot; the fresh-record
+  // guard must re-check the deadline and REFUSE to kill the healthy job.
+  const staleSnapshot = [
+    { id: "task-refreshed", status: "running", pid: process.pid, timeoutAt: "2020-01-01T00:00:00.000Z" }
+  ];
+
+  const reconciled = reconcileDeadPidJobs(workspace, staleSnapshot);
+  assert.equal(reconciled[0].status, "running", "must not finalize: the fresh record's deadline is in the future");
+
+  const persisted = JSON.parse(fs.readFileSync(resolveJobFile(workspace, "task-refreshed"), "utf8"));
+  assert.equal(persisted.status, "running", "a healthy job whose deadline was refreshed must stay running");
 });
 
 test("listJobs reconciliation: a terminal per-job record is never downgraded, even carrying a dead pid", () => {

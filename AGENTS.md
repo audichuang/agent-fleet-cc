@@ -59,3 +59,5 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - SDD progress ledger (full build history per feature): `.git/sdd/progress.md`
 - Per-plugin requirements (CLI login / OAuth / endpoint profiles): each `plugins/<name>/`
   directory and `README.md`
+- Codex ↔ CLI protocol/health sync audit (+ how to re-run it when Codex ships new commits):
+  `docs/codex-protocol-sync-audit.md`

@@ -222,6 +222,15 @@ function emitProgress(onProgress, message, phase = null, extra = {}) {
 // verbose server message cannot flood the job log / progress line. Returns null for
 // empty/non-string input so callers can fall back cleanly.
 const MAX_NOTIFICATION_TEXT = 200;
+
+// Throttle window for the command-output heartbeat (see the
+// item/commandExecution/outputDelta handler). A single long command (e.g. a
+// 15-min build/test) streams output continuously with no other handled
+// notification between item/started and item/completed; we surface at most one
+// liveness line per this window so /codex:logs and /codex:status are not dark
+// for minutes while the command is actually alive.
+const COMMAND_HEARTBEAT_INTERVAL_MS = 20_000;
+
 function boundedNotificationText(value) {
   if (typeof value !== "string" || value.length === 0) {
     return null;
@@ -362,6 +371,11 @@ function createTurnCaptureState(threadId, options = {}) {
     messages: [],
     fileChanges: [],
     commandExecutions: [],
+    // Command-output heartbeat throttle state (see the outputDelta handler).
+    // -Infinity so the first delta always fires immediately under a monotonic
+    // clock (performance.now() starts near 0, unlike Date.now()).
+    commandOutputBytes: 0,
+    lastCommandHeartbeatMs: -Infinity,
     onProgress: options.onProgress ?? null
   };
 }
@@ -584,6 +598,31 @@ function applyTurnNotification(state, message) {
         emitProgress(state.onProgress, update?.message, update?.phase ?? null);
       }
       break;
+    case "item/commandExecution/outputDelta": {
+      // A single long command (e.g. a 15-min build/test) emits no other handled
+      // notification between item/started and item/completed, so /codex:logs and
+      // /codex:status would go dark for minutes even though output is streaming
+      // live on the wire. Surface a THROTTLED liveness heartbeat — never the raw
+      // chunks (up to ~10KB/call; they would flood the log), only a running byte
+      // count, mirroring the turn/diff handler which signals "it changed + size".
+      // The emit also advances the job .log mtime, keeping the watchdog's quietMs
+      // fresh so a long command cannot drift toward the hang threshold.
+      const delta = typeof message.params?.delta === "string" ? message.params.delta : "";
+      state.commandOutputBytes += Buffer.byteLength(delta, "utf8");
+      // Monotonic clock: elapsed-time throttling must not be fooled by an NTP/VM
+      // wall-clock rollback (Date.now() could then suppress heartbeats for the
+      // rollback's duration). performance.now() only moves forward.
+      const nowMs = performance.now();
+      if (nowMs - state.lastCommandHeartbeatMs >= COMMAND_HEARTBEAT_INTERVAL_MS) {
+        state.lastCommandHeartbeatMs = nowMs;
+        emitProgress(
+          state.onProgress,
+          `Command output streaming (~${Math.round(state.commandOutputBytes / 1024)} KB so far).`,
+          null
+        );
+      }
+      break;
+    }
     case "error": {
       // Guard every dereference: a protocol-malformed `error` notification can
       // arrive with params present but no `error` object. The handler runs inside
@@ -1165,6 +1204,27 @@ function buildAppServerAuthStatus(accountResponse, configResponse) {
       source: "app-server",
       authMethod: "apiKey",
       verified: false,
+      requiresOpenaiAuth,
+      provider: providerId
+    });
+  }
+
+  // Amazon Bedrock managed login (account/read `Account::AmazonBedrock`, added
+  // to the v2 protocol upstream). Without this branch a Bedrock-authenticated
+  // account falls through to the generic requiresOpenaiAuth===false message
+  // below with authMethod:null — loggedIn is still correct, but the status text
+  // is mislabeled. credentialSource is "awsManaged" | "codexManaged".
+  if (account?.type === "amazonBedrock") {
+    const credentialSource =
+      typeof account.credentialSource === "string" && account.credentialSource.trim()
+        ? account.credentialSource.trim()
+        : null;
+    return buildAuthStatus({
+      loggedIn: true,
+      detail: credentialSource ? `Amazon Bedrock login active (${credentialSource})` : "Amazon Bedrock login active",
+      source: "app-server",
+      authMethod: "amazonBedrock",
+      verified: true,
       requiresOpenaiAuth,
       provider: providerId
     });

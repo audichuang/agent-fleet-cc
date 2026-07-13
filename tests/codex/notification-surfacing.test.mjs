@@ -186,3 +186,49 @@ test("turn/plan/updated bounds a very long explanation (no flooding the log)", a
   assert.ok(planLine, JSON.stringify(lines));
   assert.ok(planLine.length < 400, `plan explanation must be bounded, got length ${planLine.length}`);
 });
+
+// Observability for a single long command (e.g. a 15-min build/test): the app-server
+// streams item/commandExecution/outputDelta continuously, but there is no other handled
+// notification between item/started and item/completed. The plugin surfaces a THROTTLED
+// byte-count heartbeat so /codex:logs and /codex:status are not dark for minutes — without
+// dumping the raw output (which can be ~10KB per call).
+test("item/commandExecution/outputDelta surfaces a throttled byte-count heartbeat (not raw output)", async () => {
+  const lines = await progressFor("item/commandExecution/outputDelta", {
+    threadId: "thread1",
+    turnId: "turn1",
+    itemId: "item1",
+    delta: "A".repeat(2048)
+  });
+  assert.ok(
+    lines.some((m) => /output streaming/i.test(m) && /2 KB/.test(m)),
+    `expected a command-output heartbeat, got ${JSON.stringify(lines)}`
+  );
+  assert.ok(!lines.some((m) => m.includes("AAAA")), "must not dump the raw command output into progress");
+});
+
+test("rapid command-output deltas within the throttle window collapse to a single heartbeat", async () => {
+  const client = makeFakeClient();
+  const progress = [];
+  let resolveAck;
+  const promise = captureTurn(client, "thread1", () => new Promise((r) => (resolveAck = r)), {
+    idleTimeoutMs: 0,
+    onProgress: (event) => progress.push(typeof event === "string" ? event : event?.message)
+  });
+  promise.catch(() => {});
+  await tick();
+  resolveAck({ turn: { id: "turn1", status: "inProgress" } });
+  await tick();
+
+  for (let i = 0; i < 5; i += 1) {
+    client.notificationHandler({
+      method: "item/commandExecution/outputDelta",
+      params: { threadId: "thread1", turnId: "turn1", itemId: "item1", delta: "x".repeat(1024) }
+    });
+  }
+
+  client.notificationHandler({ method: "turn/completed", params: { threadId: "thread1", turn: { id: "turn1", status: "completed" } } });
+  await promise;
+
+  const heartbeats = progress.filter((m) => typeof m === "string" && /output streaming/i.test(m));
+  assert.equal(heartbeats.length, 1, `5 deltas inside the 20s window should yield exactly one heartbeat, got ${JSON.stringify(heartbeats)}`);
+});
