@@ -42,7 +42,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   tests need no real binaries.
 - Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
   it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
-- Branch from `main` for new feature work; don't commit features straight to `main`.
+- `main` is push-ready: you may commit a feature/behavior change straight to `main`, but only
+  after the full chain (`npm test`) is green **and** an independent diff review (`/codex:handoff`,
+  another model, or a human). Trivial doc/comment edits are exempt; still branch for risky or
+  exploratory work.
 
 ## Gotchas
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
