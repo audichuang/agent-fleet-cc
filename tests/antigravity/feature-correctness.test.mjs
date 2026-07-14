@@ -92,6 +92,33 @@ describe('Phase B — feature correctness', () => {
     }
   });
 
+  it('B6: rescue --apply forwards write-mode flags; plain rescue does not', () => {
+    const env = makeEnv();
+    try {
+      const plain = runCmd('rescue', ['do a thing'], env);
+      assert.equal(plain.status, 0, plain.stderr);
+      assert.doesNotMatch(plain.stdout, /--new-project/);
+      assert.doesNotMatch(plain.stdout, /accept-edits/);
+
+      const write = runCmd('rescue', ['--apply', 'edit the file'], env);
+      assert.equal(write.status, 0, write.stderr);
+      assert.match(write.stdout, /--new-project/);
+      assert.match(write.stdout, /--mode\naccept-edits/);
+      assert.doesNotMatch(write.stdout, /--dangerously-skip-permissions/);
+
+      const yolo = runCmd('rescue', ['--apply', '--dangerously-skip-permissions', 'go'], env);
+      assert.equal(yolo.status, 0, yolo.stderr);
+      assert.match(yolo.stdout, /--dangerously-skip-permissions/);
+
+      // skip-permissions without --apply is ignored (gated behind write).
+      const bare = runCmd('rescue', ['--dangerously-skip-permissions', 'go'], env);
+      assert.equal(bare.status, 0, bare.stderr);
+      assert.doesNotMatch(bare.stdout, /--dangerously-skip-permissions/);
+    } finally {
+      cleanup(env);
+    }
+  });
+
   it('B4: resume hint uses --continue when no conversation id is known', () => {
     const out = renderResultOutput('/tmp/x', { id: 'j1', status: 'completed' }, {
       result: { rawOutput: 'done' },

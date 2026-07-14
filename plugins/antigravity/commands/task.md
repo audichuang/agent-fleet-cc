@@ -1,6 +1,6 @@
 ---
 description: Free-form Antigravity task with state tracking (background by default)
-argument-hint: '[--wait] [--foreground] [--continue] [--conversation <id>] [--add-dir <path>] [--json] <prompt>'
+argument-hint: '[--wait] [--foreground] [--continue] [--conversation <id>] [--add-dir <path>] [--json] [--apply] [--dangerously-skip-permissions] <prompt>'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
@@ -17,6 +17,8 @@ Flags:
 - `--conversation <id>` resume a specific conversation.
 - `--add-dir <path>` extra workspace directory (repeatable).
 - `--json` emit structured JSON.
+- `--apply` let agy edit files in the repo (binds the cwd as the project and auto-applies edits). Off by default: without it agy runs read-only and returns text/a proposed patch.
+- `--dangerously-skip-permissions` auto-approve every tool call, not just edits. Only takes effect with `--apply`.
 
 Auth note:
 - If output mentions an OAuth URL or "not authenticated", run `/antigravity:setup` to complete the OAuth flow, then retry.

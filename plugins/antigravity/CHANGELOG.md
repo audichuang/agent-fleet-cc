@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Opt-in write mode for `/antigravity:rescue` and `/antigravity:task`.** `--apply` binds
+  the job cwd as an agy project (`--new-project`) and auto-applies edits (`--mode accept-edits`)
+  so agy 1.1's `--print` actually edits files in the repo instead of only printing a plan or
+  writing to `~/.gemini` scratch. Off by default — the plain text-out contract is unchanged.
+  `--dangerously-skip-permissions` (auto-approve every tool, not just edits) is a further opt-in
+  and only takes effect together with `--apply`.
+  Real-engine (non-hermetic) behavior still needs a smoke run to confirm end-to-end.
+
 ## [0.3.1] — 2026-07-02
 
 ### Documentation

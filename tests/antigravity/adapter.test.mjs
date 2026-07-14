@@ -82,6 +82,28 @@ test("buildInvocation: continue / conversation / model / sandbox / add-dir wirin
   assert.deepEqual(dirs, ["/a", "/b"]);
 });
 
+test("buildInvocation: write mode is opt-in — off by default, on emits --new-project + --mode accept-edits", () => {
+  const a = makeAntigravityAdapter({ env: {} });
+
+  // Default (text-out contract): none of the write-mode flags leak in.
+  const plain = a.buildInvocation({ job: { request: { mode: "print" } }, prompt: "x" });
+  assert.ok(!plain.argv.includes("--new-project"));
+  assert.ok(!plain.argv.includes("--mode"));
+  assert.ok(!plain.argv.includes("--dangerously-skip-permissions"));
+
+  // write:true binds the project and auto-applies edits.
+  const write = a.buildInvocation({ job: { request: { write: true } }, prompt: "x" });
+  assert.ok(write.argv.includes("--new-project"));
+  assert.equal(write.argv[write.argv.indexOf("--mode") + 1], "accept-edits");
+  assert.ok(!write.argv.includes("--dangerously-skip-permissions"));
+  // --print stays LAST (D-1) even with the extra flags.
+  assert.equal(write.argv[write.argv.length - 2], "--print");
+
+  // skipPermissions:true adds the escape hatch on top.
+  const yolo = a.buildInvocation({ job: { request: { write: true, skipPermissions: true } }, prompt: "x" });
+  assert.ok(yolo.argv.includes("--dangerously-skip-permissions"));
+});
+
 test("buildInvocation: binaryArgv replaces the bin head", () => {
   const a = makeAntigravityAdapter({ env: {} });
   const { argv } = a.buildInvocation({ job: { request: { binaryArgv: ["node", "/x/fake.mjs"] } }, prompt: "p" });

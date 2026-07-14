@@ -35,7 +35,10 @@ const DEFAULT_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 export async function run(argv = [], ctx = {}) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["conversation", "model", "cwd", "add-dir", "prompt-file"],
-    booleanOptions: ["background", "wait", "resume", "continue", "fresh", "json"],
+    booleanOptions: [
+      "background", "wait", "resume", "continue", "fresh", "json",
+      "apply", "dangerously-skip-permissions",
+    ],
   });
 
   const cwd = options.cwd ? String(options.cwd) : ctx.cwd ?? process.cwd();
@@ -80,9 +83,14 @@ export async function run(argv = [], ctx = {}) {
   const prompt = buildRescuePrompt(userPrompt || "(continue)");
   const title = userPrompt ? truncate(userPrompt, 80) : `resume ${conversationId ?? "last"}`;
 
+  // Write mode is opt-in (default: text-out). skipPermissions is gated behind
+  // --apply — it is meaningless (and unsafe) without write access.
+  const write = Boolean(options.apply);
+  const skipPermissions = write && Boolean(options["dangerously-skip-permissions"]);
+
   // M8: conversationId (?? null) flows into request so --continue/--conversation
   // resume survives the rewiring (the adapter reads only job.request.conversationId).
-  const request = { mode, conversationId: conversationId ?? null, model, addDirs };
+  const request = { mode, conversationId: conversationId ?? null, model, addDirs, write, skipPermissions };
 
   if (options.background) {
     const { stateDir, job } = startBackground({

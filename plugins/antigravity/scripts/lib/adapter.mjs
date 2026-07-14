@@ -102,6 +102,16 @@ export function makeAntigravityAdapter({ env = process.env } = {}) {
       }
       if (r.model) argv.push("--model", String(r.model));
       if (r.sandbox) argv.push("--sandbox");
+      // Write mode (opt-in): agy 1.1's --print defaults to review — a headless
+      // run without a bound project + accept-edits either only prints a plan
+      // (exit 0) or writes to ~/.gemini scratch, NOT the job cwd. --new-project
+      // binds job.cwd as the workspace; --mode accept-edits auto-applies edits.
+      // Off by default → the plain text-out contract is unchanged.
+      if (r.write) argv.push("--new-project", "--mode", "accept-edits");
+      // Separate opt-in: accept-edits auto-approves EDITS only; a task that also
+      // runs commands still prompts (and stalls headless). This lifts all tool
+      // permission gates. Command layer gates it behind r.write.
+      if (r.skipPermissions) argv.push("--dangerously-skip-permissions");
       argv.push("--print-timeout", toGoDuration(r.printTimeoutMs ?? printMs));
       for (const d of r.addDirs ?? []) argv.push("--add-dir", String(d));
       argv.push("--print", prompt);

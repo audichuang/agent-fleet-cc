@@ -1,6 +1,6 @@
 ---
-description: Delegate a task to Google Antigravity (agy) for debugging, implementation, or deeper investigation
-argument-hint: '[--background|--wait] [--resume|--fresh] [--continue] [--conversation <id>] [--add-dir <path>] [--model <id>] [what Antigravity should investigate, solve, or continue]'
+description: Delegate a task to Google Antigravity (agy) for debugging, investigation, or (with --apply) editing files in the repo
+argument-hint: '[--background|--wait] [--resume|--fresh] [--continue] [--conversation <id>] [--add-dir <path>] [--model <id>] [--apply] [--dangerously-skip-permissions] [what Antigravity should investigate, solve, or continue]'
 context: fork
 allowed-tools: Bash(node:*), AskUserQuestion
 ---
@@ -28,6 +28,7 @@ Invocation:
 - Strip `--background` and `--wait` from the task text — they are Claude Code execution flags.
 - Everything remaining after stripping flags is the task text — pass it through as the trailing positional.
 - `--model <id>` is forwarded to agy verbatim (agy has a native `--model`); pass it through unchanged. `--prompt-file <path>` reads the prompt from a file (used by `/antigravity:handoff`).
+- `--apply` and `--dangerously-skip-permissions` are write-mode flags — forward them to `rescue.mjs` unchanged, do NOT treat them as task text. By default (no `--apply`) Antigravity runs read-only and returns text/a proposed patch for you to apply; pass `--apply` only when the user wants agy to edit files in the repo directly. `--dangerously-skip-permissions` (auto-approve every tool, not just edits) only takes effect together with `--apply`.
 
 Auth note:
 - If the helper output says Antigravity is missing or not authenticated, stop and ask the user to run `/antigravity:setup`.
