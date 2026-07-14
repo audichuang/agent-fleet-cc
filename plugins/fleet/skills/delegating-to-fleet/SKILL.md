@@ -43,11 +43,11 @@ fitting engine's verbs aren't available, tell the user to install it (`/fleet:se
   generation (Imagen) is a separate user-run verb — ask the user to run
   `/antigravity:image`.
 - **grok** — a self-contained subtask delivered in one shot, or an independent
-  chunk of code/tests to offload → `/grok:task` (add `--schema <path>` only when
-  you need structured JSON output). Only `task` is model-invocable. For a long
-  job, launch `--background` and watch it with the poll loop `/grok:task`
-  documents — each `wait` interval returns one compact liveness line (alive /
-  elapsed / last activity / working-tree changes) instead of a silent block.
+  chunk of code/tests to offload → `/grok:task` for a quick foreground answer, or
+  `/grok:live` when you want to **watch it run** (a background streaming shell —
+  the visible default for anything long-running; see below). Add `--schema <path>`
+  only when you need structured JSON output. `task` and `live` are the
+  model-invocable entries.
 - **cc** — you want another full Claude Code instance (to run in parallel, or via
   a cheaper profile/model) on an independent task → `/cc:task`.
 
@@ -63,12 +63,14 @@ today (a uniform live shell is the target, not yet reality — see the ADR):
   Claude Code background shell (`run_in_background`), so the user watches it stream
   and sees a failure the moment it happens. Prefer this over a bare
   `/codex:task --background`, which detaches into a silent job.
-- **grok** — launch `--background` and run the watch loop that `/grok:task`
-  documents: each interval relays one liveness line (alive / elapsed / last
-  activity) and surfaces failure on the next tick. grok's lifecycle verbs are
-  user-run, so that loop is driven by shelling grok's own companion — use the
-  command `/grok:task` hands you (it already carries grok's resolved path); never
-  reconstruct a companion path from here.
+- **grok** — prefer `/grok:live`: it runs the task in a Claude Code background
+  shell, streaming grok's output as it works and turning red the moment it fails —
+  the same live-shell experience as codex's handoff. Prefer it over a bare
+  `/grok:task --background`, which detaches into a silent job. (If you instead want
+  a durable detached job that outlives the session, `/grok:task --background` plus
+  the watch loop `/grok:task` documents still works — each `wait` interval relays
+  one liveness line; drive it by shelling grok's own companion via the command
+  `/grok:task` hands you, never a reconstructed path.)
 - **cc** — `/cc:status` and `/cc:wait` are model-invocable, so after a
   `--background` launch poll them directly; they report running / done / failed, so
   a death surfaces. (cc does *not* emit the alive/elapsed liveness line — that is a
@@ -82,6 +84,7 @@ today (a uniform live shell is the target, not yet reality — see the ADR):
 Skip the watch — a truly detached, unwatched job — only when the user explicitly
 asks for fire-and-forget ("just launch it, I'll check later").
 
-A true live streaming shell for grok and cc (matching codex's) is planned; until
-it lands the above is the interim. Full rationale + trade-off:
+grok and codex now have a true live streaming shell (`/grok:live` and
+`/codex:handoff --background`); cc's is still planned — until it lands, cc uses the
+`--background` + `/cc:status` / `/cc:wait` poll above. Full rationale + trade-off:
 https://github.com/audichuang/agent-fleet-cc/blob/main/docs/adr/0003-visible-by-default-delegation.md
