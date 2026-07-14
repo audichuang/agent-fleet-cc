@@ -11,6 +11,10 @@ Use this skill only inside the `codex:codex-rescue` subagent.
 Primary helper:
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "<raw arguments>"`
 
+Invocation invariants (whenever you build this command line yourself):
+- Always spell the path `${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs`. Never hardcode a cache/versioned path like `.../cache/agent-fleet/codex/<version>/scripts/codex-companion.mjs` — it goes stale the instant the plugin updates and dies with "Cannot find module".
+- Multi-line or large prompt → write it to a file and pass `--prompt-file <path>`. Never `"$(cat file)"` as the positional prompt: a missing/mis-written file silently collapses to an empty prompt (the run does nothing), and shell-quoting mangles multi-line text.
+
 Execution rules:
 - The rescue subagent is a forwarder, not an orchestrator. Its only job is to invoke `task` once and return that stdout unchanged.
 - Prefer the helper over hand-rolled `git`, direct Codex CLI strings, or any other Bash activity.

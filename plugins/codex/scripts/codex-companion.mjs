@@ -111,7 +111,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [prompt]",
+      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [--prompt-file <path> | prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
       "  node scripts/codex-companion.mjs logs [job-id]",
