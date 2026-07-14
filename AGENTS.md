@@ -48,8 +48,27 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   **full CI chain** is green **and** an independent diff review (`/codex:handoff`, another model,
   or a human). CI (`ci.yml`) is more than `npm test` — it also runs a `sync-shared` drift check
   and `npm run build:codex` (a `tsc` typecheck `npm test` skips), so run those two as well before
-  pushing (a codex type error reddens CI while `npm test` stays green). Trivial doc/comment edits
-  are exempt; still branch for risky or exploratory work.
+  pushing (a codex type error reddens CI while `npm test` stays green). To automate that,
+  `.claude/hooks/pre-push-ci-gate.sh` blocks a push that would fail either check — opt in per
+  machine via a `PreToolUse` hook in `.claude/settings.local.json` (not repo-wide: build:codex
+  needs the codex CLI on PATH). Trivial doc/comment edits are exempt; still branch for risky or
+  exploratory work.
+
+## Autonomy & approval boundaries
+- **Do without asking:** read/search the repo; run tests (`npm test`, per-plugin suites,
+  the hermetic e2e — all offline, no API key); `npm run sync-shared` / `build:codex` /
+  `check-version`; create a branch and commit to it; edit files inside the current
+  work-stream's scope.
+- **Confirm first** (outward, destructive, or scope-expanding):
+  - **`git push`** to any remote — outward and effectively permanent; confirm every time.
+  - **Landing on `main`** — only after the full CI chain is green *and* an independent
+    review (per the bullet above); branch for anything risky or exploratory.
+  - **Adding a dependency / installing packages** — this repo is deliberately
+    zero-dependency ESM; a new dep needs a reason and sign-off.
+  - **Deleting or `rm -rf`-ing files you didn't create**, or rewriting git history.
+  - **Editing CI** (`.github/workflows/`) or repo-wide config.
+  - **Touching a sibling plugin** while in a single-plugin work-stream (see IRONCLAD).
+  - **Real-engine (non-hermetic) runs** that spend another engine's quota or hit the network.
 
 ## Gotchas
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
