@@ -1,5 +1,18 @@
 # grok — changelog
 
+## 0.3.0
+- **Visible live-shell verb (`/grok:live`).** A new model-invocable verb that runs a
+  grok task as a *visible* shell instead of a silent detached job: the commander
+  launches `task --live` inside a Claude Code `run_in_background` shell, grok's raw
+  progress streams to stderr as it works, the final report lands on stdout, and a
+  job failure exits non-zero so the shell turns red *at the moment it dies*. This is
+  Phase 2 of the visible-by-default delegation design — death-visibility over
+  durability (`docs/adr/0003`). `--live` is foreground-only (mutually exclusive with
+  `--background`, which stays the durable detached path). Fleet routing still points
+  at `/grok:task`; wiring the default route to `/grok:live` is a separate follow-up.
+  Verified end-to-end: success streams events to stderr with a clean stdout result;
+  failure returns a non-zero exit.
+
 ## 0.1.2
 - **Structured output.** `task --schema <path>` takes a JSON Schema file and runs
   Grok with `--json-schema` (constrains the model to matching JSON). `resultText`

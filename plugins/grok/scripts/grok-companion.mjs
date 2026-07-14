@@ -35,7 +35,7 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: grok-companion <command> [...]
   setup
-  task <prompt...>|--prompt-file <path> [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
+  task <prompt...>|--prompt-file <path> [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status [--json]
   result [<job-id>|--last] [--json]
   cancel <job-id> [--json]
@@ -44,7 +44,7 @@ const USAGE = `usage: grok-companion <command> [...]
 
 const TASK_FLAGS = {
   valueFlags: ["model", "effort", "resume-job", "timeout-ms", "prompt-file", "schema"],
-  boolFlags: ["background", "wait", "resume-last", "json", "no-subagents"],
+  boolFlags: ["background", "wait", "live", "resume-last", "json", "no-subagents"],
 };
 
 // --schema <path>: read a JSON Schema file and pass it to grok's --json-schema
@@ -254,6 +254,12 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
   }
 
   const forwarder = installCancelForwarder({});
+  // --live: while the foreground worker runs, tail its raw log to stderr so a
+  // run_in_background Claude Code shell shows progress AND surfaces a non-zero
+  // exit the moment the job dies (parity with codex's stderr progress). The
+  // authoritative result still lands on stdout via renderResult below.
+  const err = deps.err ?? ((line) => process.stderr.write(line + "\n"));
+  const liveTail = flags.live ? startLiveTail({ stateDir, jobId: record.id, err, deps }) : null;
   try {
     await runWorker({
       stateDir,
@@ -267,6 +273,7 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
     });
   } finally {
     forwarder.dispose();
+    await liveTail?.stop();
   }
   const finished = readJob(stateDir, record.id);
   out(flags.json ? JSON.stringify(resultProjection(finished)) : renderResult(finished, readLogTail(stateDir, record.id)));
@@ -289,6 +296,12 @@ async function cmdTask({ argv, env, out, cwd, stateDir, deps }) {
   if (flags.wait && flags.background) {
     throw new UsageError("--wait and --background are mutually exclusive");
   }
+  if (flags.live && flags.background) {
+    throw new UsageError("--live and --background are mutually exclusive");
+  }
+  if (flags.live && flags.wait) {
+    throw new UsageError("--live and --wait are mutually exclusive (--live is already foreground)");
+  }
   return startJob({ prompt, flags, env, out, cwd, stateDir, deps });
 }
 
@@ -299,6 +312,66 @@ function readLogTail(stateDir, jobId, lines = 30) {
   } catch {
     return "";
   }
+}
+
+// --live: poll the job's raw log file and emit each new complete line to `err`
+// while the foreground worker runs. Same drain shape as `logs --follow`. This is
+// best-effort progress: the authoritative result is built from the worker's
+// in-memory events and printed to stdout regardless of what this stream captured.
+function startLiveTail({ stateDir, jobId, err, deps = {} }) {
+  const logPath = logFilePath(stateDir, jobId);
+  let offset = 0;
+  const drain = () => {
+    let buf;
+    try {
+      buf = fs.readFileSync(logPath, "utf8");
+    } catch {
+      return;
+    }
+    if (buf.length <= offset) return;
+    const fresh = buf.slice(offset);
+    const lastNl = fresh.lastIndexOf("\n");
+    if (lastNl < 0) return; // no complete line yet — keep the partial tail for next drain
+    offset += lastNl + 1;
+    for (const line of fresh.slice(0, lastNl).split("\n")) if (line) err(line);
+  };
+  const setInt = deps.setIntervalImpl ?? setInterval;
+  const clearInt = deps.clearIntervalImpl ?? clearInterval;
+  const settle = deps.sleepImpl ?? ((ms) => sleep(ms));
+  const timer = setInt(drain, 100);
+  timer?.unref?.();
+  return {
+    async stop() {
+      clearInt(timer);
+      // runWorker calls logStream.end() but does NOT await its flush before
+      // returning, so the tail (incl. the terminal event) may not be on disk yet
+      // when we land here. Wait (bounded) until the file size holds steady across
+      // two consecutive samples, THEN do the final drain, so we don't declare
+      // "done" on a mid-flush pause. The engine is already dead by now, so the size
+      // is monotonic and converges fast.
+      //
+      // ponytail: best-effort file-tail — a size heuristic, not a proof, so a
+      // pathological flush could still drop the last line off the *live* stream.
+      // Acceptable because it's cosmetic: the authoritative, complete output is
+      // rebuilt from in-memory events and printed to stdout regardless. A hard
+      // guarantee needs a logStream 'finish' / per-line hook inside the shared
+      // runWorker — a separate shared-runtime work-stream, out of this grok-only change.
+      let prev = -1;
+      let stable = 0;
+      for (let i = 0; i < 40 && stable < 2; i += 1) {
+        let size;
+        try {
+          size = fs.statSync(logPath).size;
+        } catch {
+          size = 0;
+        }
+        stable = size === prev ? stable + 1 : 0;
+        prev = size;
+        await settle(10);
+      }
+      drain();
+    },
+  };
 }
 
 // liveness observation seams (injectable for hermetic tests); collectLiveness

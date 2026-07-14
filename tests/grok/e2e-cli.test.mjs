@@ -168,6 +168,32 @@ test("engine failure is classified (401 → auth) and surfaced", () => {
   } finally { w.cleanup(); }
 });
 
+test("task --live splits streams at the real process boundary: raw events on stderr, one clean result on stdout", () => {
+  const w = makeWorkspace();
+  try {
+    const res = cli(w, ["task", "live me", "--live", "--json"]);
+    // stdout carries ONLY the one-line JSON projection (jsonOne asserts exactly one line)
+    const j = jsonOne(res);
+    assert.equal(res.status, 0);
+    assert.equal(j.status, "completed");
+    assert.match(j.resultText, /^echo:live me/);
+    // the live progress is the raw grok stream, on fd 2, kept out of stdout
+    assert.match(res.stderr, /"type":"text"/, "raw grok events must stream to stderr");
+    assert.match(res.stderr, /echo:live me/);
+    assert.doesNotMatch(res.stdout, /"type":"(thought|text|end)"/, "raw events must NOT leak into stdout");
+  } finally { w.cleanup(); }
+});
+
+test("task --live exits non-zero through the real CLI when the job fails (death-visibility)", () => {
+  const w = makeWorkspace();
+  try {
+    const res = cli(w, ["task", "will fail", "--live", "--json"], { mode: "fail" });
+    // the real companion process exits non-zero → a run_in_background shell turns red
+    assert.equal(res.status, 1, `stdout=${res.stdout} stderr=${res.stderr}`);
+    assert.equal(jsonOne(res).status, "failed");
+  } finally { w.cleanup(); }
+});
+
 test("wait --timeout-s on a still-running job exits 10 with a compact liveness line", async () => {
   const w = makeWorkspace();
   try {

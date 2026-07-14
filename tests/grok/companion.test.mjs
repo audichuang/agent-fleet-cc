@@ -75,6 +75,83 @@ test("task (foreground) runs a job to completion via the fake engine and emits -
   assert.match(json.resultText, /^echo:hello there/);
 });
 
+test("task --live streams the raw engine log (incl. the terminal event) to stderr, with a clean one-line stdout result", async () => {
+  const outc = collect();
+  const errc = collect();
+  const code = await runCompanion(
+    ["task", "hello live", "--live", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out: outc.out,
+      err: errc.out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  assert.equal(code, 0);
+  // stdout is EXACTLY the one-line JSON projection — no raw event JSON leaks in
+  assert.equal(outc.lines.length, 1, `stdout must be one line, got:\n${outc.lines.join("\n")}`);
+  const json = JSON.parse(outc.lines[0]);
+  assert.equal(json.status, "completed");
+  assert.match(json.resultText, /^echo:hello live/);
+  // the live stream (raw grok events) lands on stderr. The stop() quiescence
+  // barrier means the FINAL drain reaches the terminal event here (small output
+  // flushes within the settle window) — a regression guard for the drain: if
+  // stop()'s final drain is dropped, the `end` line disappears and this fails.
+  // (The live stream is best-effort by design; the authoritative result is the
+  // stdout projection asserted above.)
+  const errText = errc.lines.join("\n");
+  assert.match(errText, /"type":\s*"text"/);
+  assert.match(errText, /echo:hello live/);
+  assert.match(errText, /"type":\s*"end"/, "final drain must capture the terminal event");
+});
+
+test("task --live exits non-zero when the job fails (death-visibility)", async () => {
+  const outc = collect();
+  const errc = collect();
+  const code = await runCompanion(
+    ["task", "will fail", "--live", "--json"],
+    {
+      env: {
+        GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA,
+        GROK_BIN: `${process.execPath}`,
+        FAKE_GROK_MODE: "fail", // survives buildEngineEnv (only ANTHROPIC_/CLAUDE_ are stripped)
+      },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out: outc.out,
+      err: errc.out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  assert.equal(code, 1, "a failed --live job must exit non-zero so the run_in_background shell turns red");
+  const json = JSON.parse(outc.lines.at(-1));
+  assert.notEqual(json.status, "completed");
+});
+
+test("task rejects --live together with --background", async () => {
+  const { out, lines } = collect();
+  const code = await runCompanion(["task", "hi", "--live", "--background"], {
+    env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+    cwd: process.env.GROK_PLUGIN_DATA,
+    out,
+    binaryArgv: [process.execPath, FAKE_GROK],
+  });
+  assert.equal(code, 1);
+  assert.match(lines.join("\n"), /--live and --background are mutually exclusive/);
+});
+
+test("task rejects --live together with --wait (--live is already foreground)", async () => {
+  const { out, lines } = collect();
+  const code = await runCompanion(["task", "hi", "--live", "--wait"], {
+    env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+    cwd: process.env.GROK_PLUGIN_DATA,
+    out,
+    binaryArgv: [process.execPath, FAKE_GROK],
+  });
+  assert.equal(code, 1);
+  assert.match(lines.join("\n"), /--live and --wait are mutually exclusive/);
+});
+
 test("task refuses to launch unauthenticated (guards the 1h OAuth hang)", async () => {
   const { out, lines } = collect();
   const code = await runCompanion(["task", "hello", "--json"], {

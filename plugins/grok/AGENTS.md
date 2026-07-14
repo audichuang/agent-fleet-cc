@@ -19,9 +19,9 @@
 ## 進來改要遵守
 - **auth 委派給 grok CLI**(`XAI_API_KEY` 或 `~/.grok/auth.json`);companion **絕不碰 secrets、
   無 profile**。無 auth 的 headless run 會卡在裝置碼授權 → `startJob` 有 preflight 直接擋掉。
-- **只有 `task` 是 model-invocable**;`cancel/logs/result/status/wait/setup` 是 user-run
-  (`disable-model-invocation`)。長任務 watch loop 靠**直接 shell companion** 跑 `wait`,不靠
-  model 觸發那些 verb。
+- **`task` 和 `live` 是 model-invocable**(兩支 delegation entry);`cancel/logs/result/status/wait/setup`
+  是 user-run(`disable-model-invocation`)。長任務 watch loop 靠**直接 shell companion** 跑 `wait`,
+  不靠 model 觸發那些 verb。
 - **`--json-schema` 走非串流**(單一結果物件、無 live `/grok:logs`);一般模式是 `streaming-json`
   (text / end / error 事件;thought / tool 只留在 raw log,不進正規化事件)。
 - **`wantsWatchdog: false`**。
@@ -34,3 +34,7 @@
 ## 細節指向
 - 長任務 watch loop(B1:`--background` + `wait` 輪詢 + exit-code 狀態機 10/0/1/2):
   `commands/task.md`;liveness observability 見 `docs/adr/0002`。
+- **live-shell verb**(`/grok:live` → `task --live`):前景 worker 跑的同時把 raw log tail 到
+  **stderr**、最終結果到 stdout、失敗時 non-zero exit(死亡可見)。`commands/live.md` 照抄 codex
+  `handoff.md` 的 `run_in_background` 模式。設計理由/分階 見 `docs/adr/0003`(Phase 2)。
+  ⚠ fleet 尚未把預設路由改指 `live`(那是後續獨立 work-stream,別在 grok work-stream 動 fleet)。
