@@ -11,11 +11,11 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
 ## 結構角色(判斷,不是清單)
 - `SKILL.md` — 引擎對**其他 host** 的自我推薦 discovery surface。commander(host Claude Code)
   的路由入口不在這,在 fleet 的 `delegating-to-fleet`(見 `docs/adr/0001`)。
-- `bin/antigravity.mjs` — dual-host CLI 入口;`lib/host-detect.mjs` 判斷跑在哪個 host。
+- `bin/antigravity.mjs` — dual-host CLI 入口;`scripts/lib/host-detect.mjs` 判斷跑在哪個 host。
 - `commands/*.md` — slash verb 的薄殼,只 shell 同名 `scripts/commands/*.mjs`(那才是邏輯,
   `runAsMain` 自呼叫)。
-- `lib/adapter.mjs` — **所有 agy 引擎知識**(argv / parseEvent / classifyError);job 生命週期
-  是 vendored shared runtime,不在這。
+- `scripts/lib/adapter.mjs` — **所有 agy 引擎知識**(argv / parseEvent / classifyError);job 生命
+  週期是 vendored shared runtime,不在這。
 - `agents/openai.yaml` — subagent 宣告。
 
 ## 進來改要遵守
