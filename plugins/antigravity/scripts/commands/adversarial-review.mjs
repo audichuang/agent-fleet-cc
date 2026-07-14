@@ -3,8 +3,9 @@
  *
  * Asks agy to return a JSON review, parses it, and renders it structurally.
  * Falls back to the raw text if agy does not return parseable JSON. Read-only
- * is enforced by the PROMPT ("Do NOT modify files"); --sandbox only fences the
- * terminal, it does not block file writes (see review.mjs / AGENTS.md 踩雷).
+ * is best-effort — the PROMPT ("Do NOT modify files") is the only lever; there
+ * is no hard write guard in headless --print. --sandbox only fences the
+ * terminal, not file writes (see review.mjs / AGENTS.md 踩雷).
  *
  * Runs on the shared runtime (Phase 4e): runForeground drives the shared worker
  * lifecycle; the launch seam lives in lib/job-runtime.mjs. The prompt building

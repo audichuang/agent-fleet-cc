@@ -78,8 +78,9 @@ export function buildReviewPrompt(contextEnvelope) {
  *
  * Unlike the free-form review, this asks agy to return a STRICT JSON object so
  * the result can be rendered structurally (renderReviewResult). The output is
- * read-only by instruction — this prompt is the actual write-guard (agy runs
- * under --sandbox too, but that only fences the terminal, not file writes).
+ * read-only by instruction — this prompt is the only (best-effort) read-only
+ * lever; there is no hard write-guard (agy also runs under --sandbox, but that
+ * fences only the terminal, not file writes).
  *
  * @param {{ scope: string, context: any }} contextEnvelope
  * @returns {string}

@@ -17,7 +17,7 @@ Flags:
 - `--conversation <id>` resume a specific conversation.
 - `--add-dir <path>` extra workspace directory (repeatable).
 - `--json` emit structured JSON.
-- `--apply` let agy edit files in the repo (binds the cwd as the project and auto-applies edits). Off by default: without it agy runs read-only and returns text/a proposed patch.
+- `--apply` let agy edit files in the repo (binds the cwd as the project and auto-applies edits). Off by default: without it agy does not edit your repo and returns text/a proposed patch (not a hard read-only guard — agy may still write to its own `~/.gemini` scratch).
 - `--dangerously-skip-permissions` auto-approve every tool call, not just edits. Only takes effect with `--apply`.
 
 Auth note:

@@ -5,7 +5,7 @@
  * process isolation and no monkey-patching of process.stdout.
  *
  *  - B1: --model is forwarded verbatim (agy 1.0.7 has a native --model).
- *  - B2: review enforces read-only by passing --sandbox.
+ *  - B2: review passes --sandbox (terminal containment only — NOT a write-block).
  *  - B5: rescue accepts --prompt-file (so /antigravity:handoff can pass a long
  *        composed prompt without an unwieldy argv).
  *  - B4: the resume hint points at the working `--continue`.
@@ -58,7 +58,7 @@ describe('Phase B — feature correctness', () => {
     }
   });
 
-  it('B2: review enforces read-only with --sandbox', () => {
+  it('B2: review passes --sandbox for terminal containment', () => {
     const env = makeEnv();
     try {
       const genv = {
@@ -112,6 +112,34 @@ describe('Phase B — feature correctness', () => {
 
       // skip-permissions without --apply is ignored (gated behind write).
       const bare = runCmd('rescue', ['--dangerously-skip-permissions', 'go'], env);
+      assert.equal(bare.status, 0, bare.stderr);
+      assert.doesNotMatch(bare.stdout, /--dangerously-skip-permissions/);
+    } finally {
+      cleanup(env);
+    }
+  });
+
+  it('B7: task --apply forwards write-mode flags; plain task does not; skip gated behind apply', () => {
+    const env = makeEnv();
+    try {
+      // task defaults to background; use --foreground so the argv-echo reaches stdout.
+      const plain = runCmd('task', ['--foreground', 'do a thing'], env);
+      assert.equal(plain.status, 0, plain.stderr);
+      assert.doesNotMatch(plain.stdout, /--new-project/);
+      assert.doesNotMatch(plain.stdout, /accept-edits/);
+
+      const write = runCmd('task', ['--foreground', '--apply', 'edit the file'], env);
+      assert.equal(write.status, 0, write.stderr);
+      assert.match(write.stdout, /--new-project/);
+      assert.match(write.stdout, /--mode\naccept-edits/);
+      assert.doesNotMatch(write.stdout, /--dangerously-skip-permissions/);
+
+      const yolo = runCmd('task', ['--foreground', '--apply', '--dangerously-skip-permissions', 'go'], env);
+      assert.equal(yolo.status, 0, yolo.stderr);
+      assert.match(yolo.stdout, /--dangerously-skip-permissions/);
+
+      // skip-permissions without --apply is ignored (gated behind write).
+      const bare = runCmd('task', ['--foreground', '--dangerously-skip-permissions', 'go'], env);
       assert.equal(bare.status, 0, bare.stderr);
       assert.doesNotMatch(bare.stdout, /--dangerously-skip-permissions/);
     } finally {
