@@ -75,7 +75,8 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.
 - `shared/lib/` is the source of truth. `cc`, `antigravity`, and `grok` run the full shared
-  runtime (ProcessAdapter + runWorker); `codex` **uses** the shared **state-store only** — note
+  runtime (ProcessAdapter + runWorker); `codex` **uses** only the shared **state core**
+  (state-store / events / job / reconcile), **not** the worker — note
   `sync-shared` still vendors the whole runtime (incl. `worker.mjs`) into codex, it just never
   calls `runWorker` (its app-server broker stays engine-specific). Don't assume a plugin uses the
   shared runtime the same way — check before editing.
