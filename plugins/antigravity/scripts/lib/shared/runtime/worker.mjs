@@ -140,6 +140,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     mode: 0o600,
   });
   const events = [];
+  let child;
   const outcome = await new Promise((resolve) => {
     const state = {
       exitCode: null,
@@ -149,7 +150,6 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       spawnError: null,
       timedOut: false,
     };
-    let child;
     try {
       child = spawnEngine({
         argv: invocation.argv,
@@ -201,6 +201,21 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
 
     const rl = readline.createInterface({ input: child.stdout });
     rl.on("line", (line) => {
+      // Live-streaming hook: hand the raw line to the caller the instant it arrives
+      // (before parse/log), so a foreground caller can stream progress with no
+      // file-tail race. Contract: the sink MUST be synchronous and non-blocking —
+      // it is called inline on the readline 'line' event and its return value is
+      // ignored, so this applies NO backpressure. A slow sink slows stdout
+      // consumption (and could bloat a downstream buffer); a throwing sink is
+      // isolated here and never breaks the job (streaming is cosmetic; the
+      // authoritative result is rebuilt from in-memory events).
+      if (deps.onLine) {
+        try {
+          deps.onLine(line);
+        } catch {
+          // swallow: job integrity outranks a broken progress sink
+        }
+      }
       logStream.write(line + "\n");
       let parsed;
       try {
@@ -231,7 +246,26 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       finish();
     });
   });
-  logStream.end();
+  // Release engine stdio held open after we settle — chiefly the timeout path, where
+  // a grandchild can still hold the child's stdout so 'close' never fires and the
+  // pipe keeps the event loop alive. A FOREGROUND caller now exits via
+  // process.exitCode (natural drain, not process.exit()), so a lingering read handle
+  // would hang it forever; destroy the streams so the loop can drain. No-op once the
+  // child has already closed normally.
+  try {
+    child?.stdout?.destroy();
+  } catch {}
+  try {
+    child?.stderr?.destroy();
+  } catch {}
+  // Await the log flush before returning: logStream.write() is async, so without
+  // this a caller that reads logFilePath right after runWorker (e.g. renderResult's
+  // readLogTail, or a detached worker about to process.exit) can miss the tail.
+  // Resolve on 'finish' or 'error' so a stream error can never hang the job.
+  await new Promise((resolve) => {
+    logStream.on("error", resolve);
+    logStream.end(resolve);
+  });
 
   let result = { ok: false, resultText: null, sessionId: null, usage: null };
   try {

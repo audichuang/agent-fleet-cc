@@ -118,6 +118,70 @@ test("happy path: completed with resultText, sessionId, events, log", async () =
   assert.match(fs.readFileSync(logFilePath(stateDir, record.id), "utf8"), /junk/);
 });
 
+// ─── Live-streaming hook: deps.onLine ────────────────────────────────────────
+// The foreground live-shell path (e.g. grok's `task --live`) needs each raw engine
+// stdout line as it arrives, with no file-tail race. runWorker must hand every raw
+// line to deps.onLine (when provided), in order, before parsing — and a throwing
+// sink must never break the job (streaming is best-effort, job integrity is not).
+test("deps.onLine receives every raw engine stdout line in order (live streaming hook)", async () => {
+  const { stateDir, record, spawnImpl, adapter } = setup({
+    lines: ['{"type":"text","data":"a"}', "plain noise", '{"type":"end"}'],
+  });
+  const seen = [];
+  await runWorker({
+    stateDir,
+    jobId: record.id,
+    adapter,
+    deps: { spawnImpl, onLine: (line) => seen.push(line) },
+  });
+  // every raw line, in order, including the non-parseable "plain noise" (mirrors the log)
+  assert.deepEqual(seen, ['{"type":"text","data":"a"}', "plain noise", '{"type":"end"}']);
+});
+
+test("deps.onLine fires BEFORE parseEvent for each line (hook precedes parse/log)", async () => {
+  const seenByOnLine = [];
+  const adapter = makeAdapter({
+    parseEvent: (line) => {
+      // contract: by the time a line is parsed, onLine has already been handed it
+      assert.ok(seenByOnLine.includes(line), `onLine must run before parseEvent for: ${line}`);
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    },
+  });
+  const { stateDir, record, spawnImpl } = setup({ lines: ['{"type":"a"}', '{"type":"b"}'], adapter });
+  await runWorker({
+    stateDir,
+    jobId: record.id,
+    adapter,
+    deps: { spawnImpl, onLine: (l) => seenByOnLine.push(l) },
+  });
+  assert.deepEqual(seenByOnLine, ['{"type":"a"}', '{"type":"b"}']);
+});
+
+test("a throwing deps.onLine never breaks the job (streaming is best-effort, not fatal)", async () => {
+  const { stateDir, record, spawnImpl, adapter } = setup({
+    lines: ['{"type":"result","kind":"result","text":"ok","session":"s"}'],
+  });
+  adapter.parseEvent = (line) => {
+    try { const e = JSON.parse(line); return e.kind === "result" ? e : null; } catch { return null; }
+  };
+  adapter.extractResult = (events) => {
+    const r = events.find((e) => e.type === "engine-event" && e.kind === "result");
+    return r ? { ok: true, resultText: r.text, sessionId: r.session } : { ok: false };
+  };
+  const code = await runWorker({
+    stateDir,
+    jobId: record.id,
+    adapter,
+    deps: { spawnImpl, onLine: () => { throw new Error("bad sink"); } },
+  });
+  assert.equal(code, 0);
+  assert.equal(readJob(stateDir, record.id).status, "completed");
+});
+
 test("nonzero exit → failed with classifyError kind and stderr tail", async () => {
   const adapter = makeAdapter({ classifyError: () => "auth" });
   const { stateDir, record, spawnImpl } = setup({ lines: [], exitCode: 1, stderr: "401 unauthorized", adapter });
@@ -728,6 +792,16 @@ test("timeout with stdout-holding grandchild: job must reach timed-out terminal 
   const finalizedEvent = events.find((e) => e.type === "finalized");
   assert.ok(finalizedEvent, "finalized event must be written");
   assert.equal(finalizedEvent.status, "timed-out");
+  // The held-open stdout must be RELEASED before runWorker returns. A foreground
+  // caller now exits via process.exitCode (natural drain, not process.exit()), so a
+  // still-open read handle would hang it forever. Destroying it lets the loop drain.
+  // mutation criterion: remove the `child.stdout.destroy()` in worker.mjs → this
+  // stays false → a real foreground caller would hang after this sequence.
+  assert.equal(
+    child.stdout.destroyed,
+    true,
+    "runWorker must release the held stdout so a process.exitCode caller can exit, not hang",
+  );
 });
 
 // ─── Issue 2 (Round-2): early-finalize lost-CAS prompt-missing — assert lost-cas + status ──

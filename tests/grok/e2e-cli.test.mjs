@@ -44,6 +44,7 @@ function makeWorkspace() {
     ok: writeShim(bin, "grok-ok", "success"),
     hang: writeShim(bin, "grok-hang", "hang", pidfile),
     fail: writeShim(bin, "grok-fail", "fail"),
+    huge: writeShim(bin, "grok-huge", "conf-huge-output"), // ~256KB stream (> pipe buffer)
   };
   return {
     ws, data, pidfile, shims,
@@ -181,6 +182,23 @@ test("task --live splits streams at the real process boundary: raw events on std
     assert.match(res.stderr, /"type":"text"/, "raw grok events must stream to stderr");
     assert.match(res.stderr, /echo:live me/);
     assert.doesNotMatch(res.stdout, /"type":"(thought|text|end)"/, "raw events must NOT leak into stdout");
+  } finally { w.cleanup(); }
+});
+
+test("task --live streams a large payload intact through the real pipe (long lines, full delivery, exit 0)", () => {
+  const w = makeWorkspace();
+  try {
+    // conf-huge-output emits ~256KB (4×64KB single-line thoughts) then a text line
+    // then `end`. Verifies onLine streams long lines through the real process
+    // boundary without corruption/crash and the consumer receives the whole thing
+    // incl. the terminal event. (This is delivery-under-an-eager-consumer; the
+    // process.exit()-truncation risk is locked separately by the source-level guard
+    // in plugin-structure — it cannot be reproduced reliably with an eager spawnSync
+    // reader, since the pipe drains before exit.)
+    const res = cli(w, ["task", "big", "--live", "--json"], { mode: "huge" });
+    assert.equal(res.status, 0, `stdout=${res.stdout.slice(0, 200)} stderr(len)=${res.stderr.length}`);
+    assert.ok(res.stderr.length > 200000, `stderr must carry the full large stream, got ${res.stderr.length} bytes`);
+    assert.match(res.stderr, /"type":"end"/, "the whole stream incl. the terminal event must arrive");
   } finally { w.cleanup(); }
 });
 

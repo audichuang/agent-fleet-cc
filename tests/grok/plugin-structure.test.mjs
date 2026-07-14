@@ -85,6 +85,25 @@ test("live's path guard survives ${CLAUDE_PLUGIN_ROOT} substitution without cont
   assert.match(rendered, /<version>/, "guard must still warn against reconstructing the <version> segment");
 });
 
+test("CLI entry drains stdio via process.exitCode, never process.exit() (F1: no pipe truncation)", () => {
+  // process.exit() drops buffered pipe writes on exit — under run_in_background
+  // stdout/stderr are pipes, so a large --live stream or result would lose its tail
+  // (incl. the terminal event). The entry must set process.exitCode and let stdio
+  // drain naturally. This is a structural guard: the truncation itself can't be
+  // reproduced hermetically (an eager reader drains the pipe before exit).
+  const body = fs.readFileSync(path.join(ROOT, "scripts", "grok-companion.mjs"), "utf8");
+  // strip line comments so the anti-pattern check sees CODE, not the explanation of it
+  const entry = body
+    .slice(body.indexOf("isCliEntry"))
+    .split("\n")
+    .map((l) => l.replace(/\/\/.*$/, ""))
+    .join("\n");
+  assert.match(entry, /process\.exitCode\s*=/, "CLI entry must set process.exitCode");
+  assert.doesNotMatch(entry, /process\.exit\(/, "CLI entry must NOT call process.exit() (truncates buffered pipe output)");
+  // and it must tolerate a consumer that closes the pipe early (EPIPE) instead of crashing
+  assert.match(entry, /EPIPE/, "CLI entry must swallow EPIPE so a closed consumer isn't a false failure");
+});
+
 test("bin launcher is executable", () => {
   const st = fs.statSync(path.join(ROOT, "bin", "grok-companion"));
   assert.ok(st.mode & 0o111, "bin/grok-companion must be executable");

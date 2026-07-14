@@ -8,10 +8,20 @@
   job failure exits non-zero so the shell turns red *at the moment it dies*. This is
   Phase 2 of the visible-by-default delegation design — death-visibility over
   durability (`docs/adr/0003`). `--live` is foreground-only (mutually exclusive with
-  `--background`, which stays the durable detached path). Fleet routing still points
-  at `/grok:task`; wiring the default route to `/grok:live` is a separate follow-up.
-  Verified end-to-end: success streams events to stderr with a clean stdout result;
-  failure returns a non-zero exit.
+  `--background`, which stays the durable detached path, and with `--wait`). Fleet
+  routing still points at `/grok:task`; wiring the default route to `/grok:live` is a
+  separate follow-up.
+  - **Streaming is exact, not best-effort.** Each raw engine line is streamed to
+    stderr the instant the worker reads it, via the shared `runWorker` `onLine` hook
+    — no log-file tail, no flush race. The CLI entry sets `process.exitCode` and lets
+    stdio drain naturally (not `process.exit()`, which would truncate buffered pipe
+    output), so a large stream keeps its tail incl. the terminal event. (`onLine` is
+    an additive, backward-compatible seam in the shared runtime; engines that don't
+    pass it are unaffected, and cc's future live verb gets streaming for free.)
+    Applies to normal streaming; `--schema` is non-streaming (one JSON object at
+    completion), so it stays death-visible only.
+  - Verified end-to-end (real subprocess): success streams events to stderr with a
+    clean one-line stdout result; failure exits non-zero.
 
 ## 0.1.2
 - **Structured output.** `task --schema <path>` takes a JSON Schema file and runs

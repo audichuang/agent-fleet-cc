@@ -34,7 +34,9 @@
 ## 細節指向
 - 長任務 watch loop(B1:`--background` + `wait` 輪詢 + exit-code 狀態機 10/0/1/2):
   `commands/task.md`;liveness observability 見 `docs/adr/0002`。
-- **live-shell verb**(`/grok:live` → `task --live`):前景 worker 跑的同時把 raw log tail 到
-  **stderr**、最終結果到 stdout、失敗時 non-zero exit(死亡可見)。`commands/live.md` 照抄 codex
-  `handoff.md` 的 `run_in_background` 模式。設計理由/分階 見 `docs/adr/0003`(Phase 2)。
+- **live-shell verb**(`/grok:live` → `task --live`):前景 worker 跑的同時,透過 shared `runWorker`
+  的 `onLine` hook 把每一行**即時**串到 **stderr**(無 file-tail、無 flush race);最終結果到 stdout、
+  失敗時 non-zero exit(死亡可見)。CLI entry 用 `process.exitCode`(非 `process.exit()`)讓 pipe
+  自然 flush,否則大量輸出會被截斷。`commands/live.md` 照抄 codex `handoff.md` 的 `run_in_background`
+  模式。設計理由/分階 見 `docs/adr/0003`(Phase 2)。
   ⚠ fleet 尚未把預設路由改指 `live`(那是後續獨立 work-stream,別在 grok work-stream 動 fleet)。

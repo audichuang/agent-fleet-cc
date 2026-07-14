@@ -94,16 +94,14 @@ test("task --live streams the raw engine log (incl. the terminal event) to stder
   const json = JSON.parse(outc.lines[0]);
   assert.equal(json.status, "completed");
   assert.match(json.resultText, /^echo:hello live/);
-  // the live stream (raw grok events) lands on stderr. The stop() quiescence
-  // barrier means the FINAL drain reaches the terminal event here (small output
-  // flushes within the settle window) — a regression guard for the drain: if
-  // stop()'s final drain is dropped, the `end` line disappears and this fails.
-  // (The live stream is best-effort by design; the authoritative result is the
-  // stdout projection asserted above.)
+  // the live stream (raw grok events) lands on stderr via runWorker's onLine hook —
+  // each line the instant the worker reads it, so the terminal event is guaranteed,
+  // not raced against a file flush. The authoritative result is the stdout
+  // projection asserted above.
   const errText = errc.lines.join("\n");
   assert.match(errText, /"type":\s*"text"/);
   assert.match(errText, /echo:hello live/);
-  assert.match(errText, /"type":\s*"end"/, "final drain must capture the terminal event");
+  assert.match(errText, /"type":\s*"end"/, "onLine must stream the terminal event to stderr");
 });
 
 test("task --live exits non-zero when the job fails (death-visibility)", async () => {
@@ -126,6 +124,24 @@ test("task --live exits non-zero when the job fails (death-visibility)", async (
   assert.equal(code, 1, "a failed --live job must exit non-zero so the run_in_background shell turns red");
   const json = JSON.parse(outc.lines.at(-1));
   assert.notEqual(json.status, "completed");
+});
+
+test("task WITHOUT --live never streams to the err seam (onLine wired only for --live)", async () => {
+  const outc = collect();
+  const errc = collect();
+  const code = await runCompanion(
+    ["task", "quiet please", "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out: outc.out,
+      err: errc.out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(outc.lines.at(-1)).status, "completed");
+  assert.equal(errc.lines.length, 0, "a non-live task must not write to the live stream seam");
 });
 
 test("task rejects --live together with --background", async () => {

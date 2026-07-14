@@ -254,12 +254,12 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
   }
 
   const forwarder = installCancelForwarder({});
-  // --live: while the foreground worker runs, tail its raw log to stderr so a
-  // run_in_background Claude Code shell shows progress AND surfaces a non-zero
-  // exit the moment the job dies (parity with codex's stderr progress). The
-  // authoritative result still lands on stdout via renderResult below.
+  // --live: stream each raw engine line to stderr the instant the worker sees it
+  // (runWorker's onLine hook — no file tail, no flush race), so a run_in_background
+  // Claude Code shell shows live progress AND surfaces a non-zero exit the moment
+  // the job dies (parity with codex's stderr progress). The authoritative result
+  // still lands on stdout via renderResult below.
   const err = deps.err ?? ((line) => process.stderr.write(line + "\n"));
-  const liveTail = flags.live ? startLiveTail({ stateDir, jobId: record.id, err, deps }) : null;
   try {
     await runWorker({
       stateDir,
@@ -269,11 +269,11 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
         spawnImpl: deps.grokSpawnImpl,
         baseEnv: env,
         onChild: forwarder.onChild,
+        ...(flags.live ? { onLine: (line) => err(line) } : {}),
       },
     });
   } finally {
     forwarder.dispose();
-    await liveTail?.stop();
   }
   const finished = readJob(stateDir, record.id);
   out(flags.json ? JSON.stringify(resultProjection(finished)) : renderResult(finished, readLogTail(stateDir, record.id)));
@@ -312,66 +312,6 @@ function readLogTail(stateDir, jobId, lines = 30) {
   } catch {
     return "";
   }
-}
-
-// --live: poll the job's raw log file and emit each new complete line to `err`
-// while the foreground worker runs. Same drain shape as `logs --follow`. This is
-// best-effort progress: the authoritative result is built from the worker's
-// in-memory events and printed to stdout regardless of what this stream captured.
-function startLiveTail({ stateDir, jobId, err, deps = {} }) {
-  const logPath = logFilePath(stateDir, jobId);
-  let offset = 0;
-  const drain = () => {
-    let buf;
-    try {
-      buf = fs.readFileSync(logPath, "utf8");
-    } catch {
-      return;
-    }
-    if (buf.length <= offset) return;
-    const fresh = buf.slice(offset);
-    const lastNl = fresh.lastIndexOf("\n");
-    if (lastNl < 0) return; // no complete line yet — keep the partial tail for next drain
-    offset += lastNl + 1;
-    for (const line of fresh.slice(0, lastNl).split("\n")) if (line) err(line);
-  };
-  const setInt = deps.setIntervalImpl ?? setInterval;
-  const clearInt = deps.clearIntervalImpl ?? clearInterval;
-  const settle = deps.sleepImpl ?? ((ms) => sleep(ms));
-  const timer = setInt(drain, 100);
-  timer?.unref?.();
-  return {
-    async stop() {
-      clearInt(timer);
-      // runWorker calls logStream.end() but does NOT await its flush before
-      // returning, so the tail (incl. the terminal event) may not be on disk yet
-      // when we land here. Wait (bounded) until the file size holds steady across
-      // two consecutive samples, THEN do the final drain, so we don't declare
-      // "done" on a mid-flush pause. The engine is already dead by now, so the size
-      // is monotonic and converges fast.
-      //
-      // ponytail: best-effort file-tail — a size heuristic, not a proof, so a
-      // pathological flush could still drop the last line off the *live* stream.
-      // Acceptable because it's cosmetic: the authoritative, complete output is
-      // rebuilt from in-memory events and printed to stdout regardless. A hard
-      // guarantee needs a logStream 'finish' / per-line hook inside the shared
-      // runWorker — a separate shared-runtime work-stream, out of this grok-only change.
-      let prev = -1;
-      let stable = 0;
-      for (let i = 0; i < 40 && stable < 2; i += 1) {
-        let size;
-        try {
-          size = fs.statSync(logPath).size;
-        } catch {
-          size = 0;
-        }
-        stable = size === prev ? stable + 1 : 0;
-        prev = size;
-        await settle(10);
-      }
-      drain();
-    },
-  };
 }
 
 // liveness observation seams (injectable for hermetic tests); collectLiveness
@@ -542,11 +482,25 @@ async function cmdLogs({ argv, out, stateDir }) {
 
 const isCliEntry = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isCliEntry) {
+  // Tolerate a consumer that closes the pipe early (e.g. `/grok:live … | head`):
+  // stdout/stderr then emit an async EPIPE 'error' that would otherwise crash the
+  // process mid-job and report a FALSE failure. Swallow EPIPE; surface anything else.
+  for (const s of [process.stdout, process.stderr]) {
+    s.on("error", (e) => {
+      if (e?.code !== "EPIPE") throw e;
+    });
+  }
+  // Set exitCode and let stdio drain naturally — NOT process.exit(), which drops
+  // buffered pipe writes on exit. Under run_in_background stdout/stderr are pipes,
+  // so process.exit() would truncate a large live stream or result (losing the tail,
+  // incl. the terminal event). Natural exit flushes first, then exits with the code.
   runCompanion(process.argv.slice(2)).then(
-    (code) => process.exit(code),
+    (code) => {
+      process.exitCode = code;
+    },
     (error) => {
       process.stderr.write(`grok: ${error?.stack ?? error}\n`);
-      process.exit(1);
+      process.exitCode = 1;
     },
   );
 }
