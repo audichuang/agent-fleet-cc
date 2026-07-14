@@ -9,7 +9,8 @@
 
 ## 結構角色(判斷,不是清單)
 - **無 `SKILL.md` / `README`** —— grok 沒有自我推薦 surface;commander 靠 fleet 的
-  `delegating-to-fleet` 路由 + model-invocable `/grok:task` 才找得到它(見 `docs/adr/0001`)。
+  `delegating-to-fleet` 路由 + model-invocable `/grok:task` / `/grok:live` 才找得到它
+  (見 `docs/adr/0001`)。
 - `commands/*.md` — slash verb 的薄殼,每支 shell `scripts/grok-companion.mjs <verb>`。
 - `scripts/grok-companion.mjs` — CLI 入口(`runCompanion(argv, deps)`,deps 可注入 seam 測);
   `bin/grok-companion` 是啟動器。
@@ -38,5 +39,7 @@
   的 `onLine` hook 把每一行**即時**串到 **stderr**(無 file-tail、無 flush race);最終結果到 stdout、
   失敗時 non-zero exit(死亡可見)。CLI entry 用 `process.exitCode`(非 `process.exit()`)讓 pipe
   自然 flush,否則大量輸出會被截斷。`commands/live.md` 照抄 codex `handoff.md` 的 `run_in_background`
-  模式。設計理由/分階 見 `docs/adr/0003`(Phase 2)。
-  ⚠ fleet 尚未把預設路由改指 `live`(那是後續獨立 work-stream,別在 grok work-stream 動 fleet)。
+  模式。設計理由/分階 見 `docs/adr/0003`(Phase 2)。fleet 的
+  `delegating-to-fleet` 已把可見 / 長任務預設指到 `/grok:live`(durable 仍走
+  `/grok:task --background`);再改 fleet 路由仍屬 fleet work-stream,別在 grok
+  work-stream 動 fleet。

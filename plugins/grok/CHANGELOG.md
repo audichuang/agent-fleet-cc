@@ -9,8 +9,9 @@
   Phase 2 of the visible-by-default delegation design — death-visibility over
   durability (`docs/adr/0003`). `--live` is foreground-only (mutually exclusive with
   `--background`, which stays the durable detached path, and with `--wait`). Fleet
-  routing still points at `/grok:task`; wiring the default route to `/grok:live` is a
-  separate follow-up.
+  routing prefers `/grok:live` for visible / long-running delegation
+  (`delegating-to-fleet`); durable `/grok:task --background` remains the explicit
+  fire-and-forget opt-in.
   - **Streaming is exact, not best-effort.** Each raw engine line is streamed to
     stderr the instant the worker reads it, via the shared `runWorker` `onLine` hook
     — no log-file tail, no flush race. The CLI entry sets `process.exitCode` and lets

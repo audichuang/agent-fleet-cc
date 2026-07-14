@@ -138,7 +138,7 @@ test("deps.onLine receives every raw engine stdout line in order (live streaming
   assert.deepEqual(seen, ['{"type":"text","data":"a"}', "plain noise", '{"type":"end"}']);
 });
 
-test("deps.onLine fires BEFORE parseEvent for each line (hook precedes parse/log)", async () => {
+test("deps.onLine fires BEFORE parseEvent for each line (hook precedes parse)", async () => {
   const seenByOnLine = [];
   const adapter = makeAdapter({
     parseEvent: (line) => {
