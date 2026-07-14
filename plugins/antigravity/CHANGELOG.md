@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-14
+
 ### Added
 - **Opt-in write mode for `/antigravity:rescue` and `/antigravity:task`.** `--apply` binds
   the job cwd as an agy project (`--new-project`) and auto-applies edits (`--mode accept-edits`)
@@ -16,6 +18,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and only takes effect together with `--apply`.
   Verified end-to-end against real agy 1.1.2: `--apply` writes into the job cwd; the default
   (no `--apply`) writes to agy's `~/.gemini` scratch instead — the pathology this fixes.
+
+### Changed
+- **Corrected `review` / `adversarial-review` read-only claims.** The code claimed `--sandbox`
+  prevents a misbehaving model from mutating the tree. Verified false on agy 1.1.2: in headless
+  `--print` mode neither `--sandbox` (terminal/nsjail containment only; the model can
+  `BypassSandbox`) nor the fine-grained permission `deny`/`ask` lists are enforced against file
+  writes — even a global `deny: write_file(*)` still wrote. The read-only guarantee rests solely
+  on the prompt. Comments in `review.mjs` / `adversarial-review.mjs` / `prompt-templates.mjs`
+  and the plugin `AGENTS.md` now say so; no behavior change.
+
+### Fixed
+- **Version drift across the plugin's manifests.** `plugin.json` (the `--version` source),
+  `package.json`, `.codex-plugin/plugin.json`, and `.agents/plugins/marketplace.json` had lagged
+  behind the marketplace-authoritative version since the 0.3.0/0.4.0 bumps only touched the
+  Claude-side pair. All six version locations are now in lockstep at 0.5.0.
+
+## [0.4.0] — 2026-07-14
+
+### Added
+- **Passive liveness observability** for antigravity jobs on the fleet status/doctor board
+  (shipped as part of the fleet-wide liveness work). Released without a CHANGELOG entry at the
+  time; recorded here retroactively.
 
 ## [0.3.1] — 2026-07-02
 
