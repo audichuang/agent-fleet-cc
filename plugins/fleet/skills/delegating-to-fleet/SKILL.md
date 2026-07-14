@@ -50,3 +50,38 @@ fitting engine's verbs aren't available, tell the user to install it (`/fleet:se
   elapsed / last activity / working-tree changes) instead of a silent block.
 - **cc** — you want another full Claude Code instance (to run in parallel, or via
   a cheaper profile/model) on an independent task → `/cc:task`.
+
+## Keep every delegation visible — never dispatch-and-forget
+
+When you hand off a background or long-running task, do **not** fire a detached
+job and walk away: the user is then blind to whether it is running, and a silent
+death only surfaces after a long, wasted wait. Default to keeping it visible — the
+user should see it run *and* see it die. What "visible" means differs per engine
+today (a uniform live shell is the target, not yet reality — see the ADR):
+
+- **codex** — prefer `/codex:handoff --background`: it runs the companion in a
+  Claude Code background shell (`run_in_background`), so the user watches it stream
+  and sees a failure the moment it happens. Prefer this over a bare
+  `/codex:task --background`, which detaches into a silent job.
+- **grok** — launch `--background` and run the watch loop that `/grok:task`
+  documents: each interval relays one liveness line (alive / elapsed / last
+  activity) and surfaces failure on the next tick. grok's lifecycle verbs are
+  user-run, so that loop is driven by shelling grok's own companion — use the
+  command `/grok:task` hands you (it already carries grok's resolved path); never
+  reconstruct a companion path from here.
+- **cc** — `/cc:status` and `/cc:wait` are model-invocable, so after a
+  `--background` launch poll them directly; they report running / done / failed, so
+  a death surfaces. (cc does *not* emit the alive/elapsed liveness line — that is a
+  grok/agy-only projection.)
+- **antigravity (agy)** — launch `--background`; agy cannot stream (it returns only
+  on completion) and its `status`/`wait` are user-run (you cannot fire them
+  yourself), so ask the user to watch with `/antigravity:status`, or relay agy's
+  terminal result when it lands. Its visibility is the coarsest — set that
+  expectation rather than promising a live stream.
+
+Skip the watch — a truly detached, unwatched job — only when the user explicitly
+asks for fire-and-forget ("just launch it, I'll check later").
+
+A true live streaming shell for grok and cc (matching codex's) is planned; until
+it lands the above is the interim. Full rationale + trade-off:
+https://github.com/audichuang/agent-fleet-cc/blob/main/docs/adr/0003-visible-by-default-delegation.md
