@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing to `~/.gemini` scratch. Off by default — the plain text-out contract is unchanged.
   `--dangerously-skip-permissions` (auto-approve every tool, not just edits) is a further opt-in
   and only takes effect together with `--apply`.
-  Real-engine (non-hermetic) behavior still needs a smoke run to confirm end-to-end.
+  Verified end-to-end against real agy 1.1.2: `--apply` writes into the job cwd; the default
+  (no `--apply`) writes to agy's `~/.gemini` scratch instead — the pathology this fixes.
 
 ## [0.3.1] — 2026-07-02
 
