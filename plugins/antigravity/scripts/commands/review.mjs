@@ -41,8 +41,13 @@ export async function run(argv = [], ctx = {}) {
   const base = options.base ? String(options.base) : undefined;
   const model = options.model ? String(options.model) : undefined;
   const json = Boolean(options.json);
-  // Review is read-only: run agy under --sandbox so a misbehaving model cannot
-  // mutate the tree. Escape hatch: --no-sandbox.
+  // Review's read-only guarantee is the PROMPT ("Do NOT modify files") — and
+  // ONLY the prompt. In agy's headless --print mode nothing else hard-blocks a
+  // write: --sandbox is OS terminal containment (nsjail) for shell commands only
+  // (and the model can self-select BypassSandbox), and the fine-grained
+  // permission deny/ask lists are NOT enforced in --print — they are TUI-only
+  // (verified live 1.1.2: `deny: write_file(*)` in global settings STILL wrote).
+  // We still pass --sandbox to add terminal friction. Escape hatch: --no-sandbox.
   const sandbox = !options["no-sandbox"];
 
   let envelope;

@@ -23,12 +23,22 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   不是 session id(spec D-2)。
 - **foreground 不即時串流**,結果在 job 完成後一次呈現(D-18);agy `--print` 本就是一次性回應。
 - **`wantsWatchdog: false`** —— 靠 shared reconcile 收死 pid,不自跑 watchdog。
+- **寫檔是 opt-in**:rescue/task 預設「文字進、文字出」(adapter 不送寫檔 flag)。`--apply` 才送
+  `--new-project --mode accept-edits`,把 job cwd 綁成 agy project 並自動套用編輯 —— 沒它,agy 1.1
+  的 `--print` 會把檔案寫到 `~/.gemini/.../scratch`(不是你的 repo)還回 exit 0(假成功,已真機驗證)。
+  `--dangerously-skip-permissions` 是第二層 opt-in,gated 在 `--apply` 之後。
 
 ## 踩雷
 - **有兩個 wait 表面**:`/antigravity:status --wait`(`commands/status.mjs`)**和**獨立的
   `/antigravity:wait`(`commands/wait.mjs`)。改 wait 行為、或加一個 status/wait 欄位(例如
   liveness),**兩支都要動** —— 只改一支必漏(已被 review 抓過一次)。
 - 測試種 active job 的「假 pid → 被 reconcile 判 failed」陷阱:見 `e2e-testing` skill,別在這重抄。
+- **headless `--print` 沒有硬防寫;review 的唯讀只剩 prompt**:agy 的細粒度權限(allow/ask/deny)和
+  `--sandbox` 都是**互動 TUI** 的東西,`--print` 模式下**都不硬擋 file write**。實測(1.1.2)全部打臉:
+  ① `--sandbox` 只是 OS terminal 容器(nsjail,key `enableTerminalSandbox`)擋 shell 命令,不擋 `write_file`,
+  且模型會自選 `BypassSandbox:true` 繞;② 連真實全域 settings 加 `deny: write_file(*)` 都**照寫**(deny/ask
+  清單在 `--print` 不生效)。所以 review / adversarial-review 的唯讀**100% 靠 prompt「Do NOT modify files」**——
+  別把 `--sandbox` 或 settings deny 當硬護欄(舊註解錯過,已修)。真要硬擋只能靠上游給 per-run 權限,agy 目前沒有。
 
 ## 細節指向
 - 引擎行為決策 / §7 行為變更 / D-* :`docs/adr/`、
