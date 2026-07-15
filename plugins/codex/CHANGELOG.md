@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.1
+
+Docs-only: realign the `gpt-5-6-prompting` skill with the latest official GPT-5.6 prompting
+guide. Adds a tool-routing rule (parallelise independent reads, keep dependent ones
+sequential, try one or two fallbacks before concluding a search/read is empty), a `Tools`
+section in the suggested prompt structure, a matching reusable Tool-routing block, and a note
+that the user's-language handoff convention is a deliberate product choice — not the blanket
+"always respond in the user's language" rule the guide warns against. Guide additions that
+this plugin can't action from the prompt layer (Programmatic Tool Calling, `text.verbosity`,
+prompt caching / persisted state, frontend-visual guidance) were deliberately omitted.
+
 ## 1.3.0
 
 Long-run health + observability hardening and a protocol-sync pass, from a two-part audit
