@@ -21,6 +21,15 @@ fact/date/ID/source is missing; the user asked for exhaustive coverage; or the
 answer would otherwise contain an unsupported factual claim.
 ```
 
+## Tool routing (multi-read / search tasks)
+
+```text
+Expose only the tools this task needs. Run independent reads in parallel; when one
+result determines the next, keep them sequential and synthesise before acting. If a
+search or read returns empty, partial, or suspiciously narrow results, try one or
+two meaningful fallbacks before concluding nothing exists.
+```
+
 ## Verification loop (coding tasks)
 
 ```text

@@ -50,6 +50,7 @@ Most delegations here cast Codex as an **independent, multi-angle reviewer** —
 - **Always include stop rules.** GPT-5.6 will loop; tell it when to stop. Example: "After each result, ask: can I answer the user's core request now with cited evidence? If yes, answer."
 - **Reasoning effort: default `xhigh`, floor `high`.** The companion defaults `--effort` to `xhigh` when unset. For the substantial coding / review / diagnosis work this plugin delegates, keep effort in the **`high` → `xhigh` → `max`** band — don't drop to `low` / `minimal` / `none`, they buy nothing for these tasks. **`max`** is GPT-5.6's top reasoning tier (above `xhigh`); reserve it for the hardest quality-first tasks and compare it against `xhigh` before making it the default rather than reaching for it by reflex.
 - **Give it a way to check its work** when validation is possible — targeted unit tests for changed behavior, type/lint checks, build checks, or a minimal smoke test. If validation can't run, say why and give the next best check.
+- **Tool routing: parallelise independent reads, keep dependent ones sequential, and don't stop at the first empty result.** Expose only task-relevant tools, and say what each is for when the route depends on context. If a search / read returns empty, partial, or suspiciously narrow results, try one or two meaningful fallbacks before concluding nothing exists.
 - **Ground factual claims.** Define what needs support, what counts as enough evidence, and what to do when evidence is missing (absence of evidence is not a factual "no"). Add a retrieval budget for search-capable tasks.
 - **Files: give absolute paths.** If the target can read files (Codex, Claude Code), list absolute paths and have it read them itself — never ask anyone to paste code.
 
@@ -78,6 +79,7 @@ Role: [1-2 sentences: the model's function, context, and job]
 # Goal               [the user-visible outcome]
 # Success criteria   [what must be true before the final answer]
 # Constraints        [policy, safety, evidence, and side-effect limits]
+# Tools              [which tools to use, when, and what not to use — when routing depends on context]
 # Output             [sections, length, tone]
 # Stop rules         [when to retry, fall back, abstain, ask, or stop]
 ```
@@ -88,6 +90,8 @@ Role: [1-2 sentences: the model's function, context, and job]
 - Structural headers (`Role` / `Goal` / `Success criteria` / …), field names, and technical directives in **English** — GPT is most stable on English headers and it matches the official examples.
 - Keep technical identifiers in their original form.
 - Output the finished prompt inside a fenced ` ```text ` block so the user can copy-paste it directly into Codex / ChatGPT.
+
+> The user's-language rule here is a **deliberate product choice** — the handoff prompt is read by the human user. It is not the blanket "always respond in the user's language" the official guide warns against; that concerns the model's *answer* language, decided per task.
 
 Reusable blocks live in [references/prompt-blocks.md](references/prompt-blocks.md).
 Concrete end-to-end templates live in [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md).
