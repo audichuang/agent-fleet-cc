@@ -41,10 +41,16 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 
 | | |
 |---|---|
-| Codex CLI HEAD | `2b0b37abb7` (`codex-zsh-v0.1.0-281`) |
-| Audit date | 2026-07-13 |
-| Plugin version at audit | `codex@1.3.0` |
+| Codex CLI HEAD | `800715d201` (`codex-zsh-v0.1.0-393` / `rust-v0.144.5`) |
+| Audit date | 2026-07-16 |
+| Plugin version at audit | `codex@1.3.1` |
 | Codex repo checked | `/home/audichuang/research/codex` |
+
+> Last re-audit (2026-07-16) re-verified all 11 protocol dimensions clean against
+> `800715d201` (112 commits past the prior baseline). No fixes needed — see the
+> latest Audit-log row for the additive-only evidence. The result tables below
+> still describe the deeper 2026-07-13 pass; their `file:line` anchors are from
+> that commit unless the log row notes a newer one.
 
 ---
 
@@ -178,3 +184,4 @@ that Codex diff-review before considering the pass done.
 | Date | Codex HEAD | Plugin | Outcome |
 |---|---|---|---|
 | 2026-07-13 | `2b0b37abb7` | 1.2.0 → **1.3.0** | No breaking protocol drift. 4 health/observability improvements + 1 auth-label fix applied, then 2 follow-on races (broker intentional-close, reconcile deadline TOCTOU) + 2 nits (monotonic clock, UTF-8 byte count) hardened after an independent Codex (GPT-5.6) diff review. 432 codex + 109 shared green. |
+| 2026-07-16 | `800715d201` (rust-v0.144.5) | 1.3.1 (**unchanged**) | **No breaking drift — record-only, no plugin change.** Re-audited all 5 dependency dimensions (requests sent · notifications · item types · account/auth · initialize+server-requests) against 112 commits since `2b0b37abb7`, each finding adversarially refuted against current Rust. Every change touching the plugin's read surface is additive/cosmetic and ignored: `emittedAtMs` (notification timestamp — additive **top-level sibling** of `method`/`params`, not an envelope wrapper; `common.rs:1731-1742`), `cacheWriteInputTokens` (`thread/tokenUsage/updated`; `v2/thread.rs:1458`), `spendControlReached` (`account/rateLimits/updated`; `v2/account.rs:536`), pagination `next_cursor` (responses only — **`thread/list` still does NOT require cursor/limit**, both `Option`, no `deny_unknown_fields`). The two removed fields (`mcpToolCall.appContext.templateId`, `ThreadItemsListResponse.data`) are outside the plugin's read set. `server_request_definitions!` + `InitializeCapabilities` byte-identical since baseline. Launch path (bare `codex app-server` → stdio; `cli/src/main.rs:516`) and hard default model `gpt-5.6-sol` (`codex-companion.mjs:96`) both still valid. |
