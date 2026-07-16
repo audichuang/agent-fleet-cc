@@ -1,6 +1,6 @@
 ---
 description: Run a headless Grok Build task (grok-4.5) — launch, then wait/poll for the result
-argument-hint: "<prompt> [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--read-only] [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 ---
 
 Run the grok companion with the user's arguments and relay its output:
@@ -12,6 +12,17 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
 - The prompt must be a complete, self-contained instruction — spell out files,
   constraints, and the definition of done. It runs headlessly with tool
   execution auto-approved, against `grok-4.5` by default.
+- **`--read-only` for a hardened run (opt-in).** By default Grok can read, write, and
+  reach the network — the normal posture for delegated work. Pass `--read-only` to run
+  under Grok's `read-only` sandbox when reviewing/auditing code you don't want touched:
+  it blocks file writes (only `~/.grok` + temp stay writable). Web research is **not**
+  affected — `web_search`/`web_fetch` run in Grok's own process and stay online; only
+  network from commands Grok *spawns* in a terminal (a `curl` in bash) is blocked.
+  **Best-effort, not a hard jail:** a managed `requirements.toml` profile can override
+  it, and where no OS sandbox backend is available Grok *warns and runs writable* rather
+  than failing — so treat it as hardening, not a guarantee. **Resume:** `--read-only`
+  can't be added to a session already created writable (Grok exits 1 rather than
+  silently granting writes) — launch a fresh `--read-only` job instead.
 - **Grok is cheap (grok-4.5) — fan out, but fence the final report.** For
   research or broad sweeps, tell Grok to spawn parallel subagents (it has
   first-class subagent support); a wide fan-out costs little here. The catch:

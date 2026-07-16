@@ -24,6 +24,30 @@ test("buildInvocation composes the headless streaming-json invocation", () => {
   ]);
 });
 
+test("buildInvocation: --sandbox read-only only on opt-in readOnly (default omits it)", () => {
+  const a = makeGrokAdapter();
+  const sandboxOf = (argv) => {
+    const i = argv.indexOf("--sandbox");
+    return i >= 0 ? argv[i + 1] : null;
+  };
+  // default (no readOnly) → NO sandbox flag (grok's `off` default: full access, incl. network)
+  assert.equal(
+    sandboxOf(a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" }).argv),
+    null,
+  );
+  // opt-in readOnly → --sandbox read-only
+  assert.equal(
+    sandboxOf(a.buildInvocation({ job: { cwd: "/w", request: { readOnly: true } }, prompt: "p" }).argv),
+    "read-only",
+  );
+  // readOnly + resume → still emitted (fail-closed: grok exit(1)s on a conflicting saved
+  // profile rather than silently granting writes; a matching read-only session is fine)
+  assert.equal(
+    sandboxOf(a.buildInvocation({ job: { cwd: "/w", request: { readOnly: true, resumeSessionId: "s1" } }, prompt: "p" }).argv),
+    "read-only",
+  );
+});
+
 test("buildInvocation adds effort and resume when present, honors binaryArgv", () => {
   const a = makeGrokAdapter();
   const { argv } = a.buildInvocation({

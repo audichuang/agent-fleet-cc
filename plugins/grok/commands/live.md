@@ -1,6 +1,6 @@
 ---
 description: Run a Grok Build task (grok-4.5) as a VISIBLE live shell — a background streaming shell you watch run and see fail, instead of a silent detached job
-argument-hint: "<prompt> [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--read-only] [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 allowed-tools: Bash(node:*)
 ---
 
@@ -50,9 +50,12 @@ memory or another context (it drifts every release), and do not paste an unexpan
   relay grok's streamed progress, and when it exits report the final result. A
   non-zero exit is a failure — surface it. Never silently re-run a failed job; it may
   already have side effects.
-- **Flags** pass through to `task` unchanged (`--model`, `--effort`,
+- **Flags** pass through to `task` unchanged (`--read-only`, `--model`, `--effort`,
   `--no-subagents`, `--resume-job` / `--resume-last`, `--timeout-ms`, `--json`).
   `--live` is foreground-only — it cannot combine with `--background` or `--wait`.
+- **`--read-only` for a hardened run** (same as `/grok:task`) — opt-in no-write sandbox
+  (best-effort, not a hard jail). Web research still works (in-process web tools stay
+  online; only spawned-command network is blocked).
 - **`--schema` runs non-streaming.** grok's structured-output mode emits one JSON
   object only at completion, so `/grok:live --schema` has *no* live progress — the
   shell stays quiet until it finishes, giving death-visibility (red on failure) but

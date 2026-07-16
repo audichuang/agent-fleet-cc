@@ -94,6 +94,23 @@ export function makeGrokAdapter() {
       const effort = r.effort ?? process.env.GROK_DEFAULT_EFFORT;
       if (effort) argv.push("--reasoning-effort", effort);
       if (r.noSubagents) argv.push("--no-subagents"); // disable fan-out (deterministic single agent)
+      // Opt-in read-only (r.readOnly). Default is unchanged: no --sandbox → grok's
+      // `off` profile — no sandbox, full read+write+network (config.rs:1132).
+      // `--sandbox read-only` is BEST-EFFORT, not a hard guarantee — which is why it's
+      // opt-in, NOT a codex/antigravity-style read-only default: (a) a managed
+      // requirements.toml profile overrides it (resolve_profile precedence
+      // requirement > CLI, config.rs:1123); (b) where no OS backend applies (Linux
+      // Landlock / macOS Seatbelt — read-only has no bwrap deny-plan, so bwrap is
+      // skipped) it WARNS and runs fully writable rather than failing
+      // (requires_read_deny(ReadOnly)=false, lib.rs:359 → no hard exit). Defaulting to
+      // a guarantee that can silently not hold would give false confidence. It blocks
+      // FS writes + CHILD-process network only; grok's in-process web_search/web_fetch
+      // stay online (lib.rs:10), so read-only does NOT break web research.
+      // --always-approve still auto-answers read prompts. On resume grok exit(1)s only
+      // if this conflicts with a session's *persisted* profile (SandboxStartup::Conflict,
+      // cli.rs:883); a legacy session with no saved profile just applies read-only.
+      // Fail-closed on a real conflict beats silently granting writes.
+      if (r.readOnly) argv.push("--sandbox", "read-only");
       if (r.resumeSessionId) argv.push("-r", r.resumeSessionId);
       // env: conformance/e2e can inject via request.env; secrets are NOT set here.
       return { argv, env: r.env ?? {}, stdinPayload: null };

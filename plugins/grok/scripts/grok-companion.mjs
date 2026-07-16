@@ -35,7 +35,7 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: grok-companion <command> [...]
   setup
-  task <prompt...>|--prompt-file <path> [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
+  task <prompt...>|--prompt-file <path> [--read-only] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status [--json]
   result [<job-id>|--last] [--json]
   cancel <job-id> [--json]
@@ -44,7 +44,7 @@ const USAGE = `usage: grok-companion <command> [...]
 
 const TASK_FLAGS = {
   valueFlags: ["model", "effort", "resume-job", "timeout-ms", "prompt-file", "schema"],
-  boolFlags: ["background", "wait", "live", "resume-last", "json", "no-subagents"],
+  boolFlags: ["background", "wait", "live", "resume-last", "json", "no-subagents", "read-only"],
 };
 
 // --schema <path>: read a JSON Schema file and pass it to grok's --json-schema
@@ -213,6 +213,7 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
       model: flags.model ?? env.GROK_DEFAULT_MODEL ?? "grok-4.5",
       effort: flags.effort ?? env.GROK_DEFAULT_EFFORT ?? null,
       noSubagents: flags["no-subagents"] ?? false,
+      readOnly: flags["read-only"] ?? false, // opt-in --sandbox read-only (OS-enforced no-write; also no network)
       jsonSchema,
       resumeSessionId: source?.sessionId ?? null,
       resumedFrom: source?.id ?? null,

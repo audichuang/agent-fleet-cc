@@ -199,6 +199,22 @@ test("task accepts --no-subagents (does not reject it as an unknown flag)", asyn
   assert.equal(json.status, "completed");
 });
 
+test("task accepts --read-only (does not reject it as an unknown flag)", async () => {
+  const { out, lines } = collect();
+  const code = await runCompanion(
+    ["task", "audit the code", "--read-only", "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(code, 0);
+  assert.equal(json.status, "completed");
+});
+
 test("task --schema returns grok's structured JSON as resultText", async () => {
   const schemaPath = path.join(makeTempDir(), "schema.json");
   fs.writeFileSync(schemaPath, JSON.stringify({ type: "object", properties: { ok: { type: "boolean" } } }));

@@ -1,5 +1,26 @@
 # grok — changelog
 
+## 0.4.0
+- **`--read-only` flag for a hardened run (opt-in; non-breaking).** Both `/grok:task`
+  and `/grok:live` now accept `--read-only`, which runs Grok under its `read-only`
+  sandbox — file writes are blocked (only `~/.grok` + temp stay writable, the whole
+  workspace is readable). Use it to review/audit local code you don't want touched. The
+  **default is unchanged** (full read + write + network), so nothing breaks; `--read-only`
+  is strictly additive.
+  - **Web research still works.** `web_search`/`web_fetch` run in Grok's own process,
+    which stays online; only network from commands Grok *spawns* in a terminal (e.g. a
+    `curl` in bash) is blocked.
+  - **Best-effort, not a hard jail.** A managed `requirements.toml` profile can override
+    `--sandbox` (Grok's precedence is requirement > CLI), and where no OS sandbox backend
+    applies Grok *warns and runs writable* rather than failing the job. Treat `--read-only`
+    as hardening, not a guarantee. This is why it's opt-in rather than a codex/antigravity-
+    style default — a default guarantee that can silently not hold gives false confidence.
+  - **Resume is fail-closed.** `--read-only` on a resume of a session with a persisted
+    writable profile makes Grok exit 1 (a session's sandbox is fixed at creation) rather
+    than silently granting writes — start a fresh `--read-only` job.
+  - Verified by an independent Codex review against the Grok Build source; wiring + source
+    anchors in `docs/grok-cli-contract-audit.md` Part 3.
+
 ## 0.3.1
 - **Capture usage/cost telemetry.** `extractResult` now reads grok's `usage` object
   (`{inputTokens, outputTokens}`) off the streaming-json `end` event and the

@@ -58,7 +58,7 @@ breaks) → `cosmetic` (additive upstream, we ignore it fine) → `none`.
 
 | What | Value |
 | --- | --- |
-| Plugin | `plugins/grok/` @ `0.3.1` |
+| Plugin | `plugins/grok/` @ `0.4.0` |
 | Released binary we invoke | `grok 0.2.93` (adapter buckets verified by running it) |
 | Open-source tree audited | commit `c68e39f` ("Publish harness and TUI open-source", 2026-07-16), `xai-grok-pager-bin 0.1.220-alpha.4` |
 | Contract files | `crates/codegen/xai-grok-pager/src/app/cli.rs`, `.../src/headless.rs`, `.../xai-grok-sandbox/src/profiles.rs` |
@@ -80,8 +80,9 @@ Built by `adapter.mjs → buildInvocation`. Each row is pinned to its `cli.rs` a
 | `--no-alt-screen` | `long="no-alt-screen"` (709) | Run inline, no alternate screen | ✓ |
 | `-m <MODEL>` | `short='m', long="model"` (521) | Model id | ✓ |
 | `--cwd <DIR>` | `#[arg(long)] pub cwd` (238 / 436) | Workspace root (long auto-derived from field name) | ✓ |
-| `--reasoning-effort <LVL>` | `long="reasoning-effort", visible_alias="effort"` (265) | `none`..`max`; also per-model menu ids | ✓ |
+| `--reasoning-effort <LVL>` | `long="reasoning-effort", visible_alias="effort"` (headless `PagerArgs` 525; the 265 hit is `AgentArgs`) | `none`..`max`; also per-model menu ids | ✓ |
 | `--no-subagents` | `long="no-subagents"` (602) | Disable fan-out (deterministic single agent) | ✓ |
+| `--sandbox read-only` | `#[arg(long, env="GROK_SANDBOX")] pub sandbox` (decl 674; 673 is its doc comment) | Emitted only on opt-in `--read-only` — see Part 3 | ✓ |
 | `-r <ID>` | `short='r', long="resume"` (554) | Resume an existing session | ✓ |
 
 ## Part 2 — Output we read (durable checklist)
@@ -95,7 +96,7 @@ Parsed by `adapter.mjs → parseEvent` / `extractResult`. Pinned to `headless.rs
 | `{"type":"end","stopReason","sessionId","usage",…}` | `on_end` (441-457) | Terminal event; we trust exit-code + presence of `end`, not a specific `stopReason` | ✓ |
 | `{"type":"error","message",…}` | `on_error` (469-480) | grok emits errors on **stdout** in json modes; we capture so the message survives | ✓ |
 | json result: `text`/`stopReason`/`sessionId`/`structuredOutput` | `build_json_result` (419-439), `attach_structured_output` | `--json-schema` mode: one pretty-printed object; `.text` = JSON string, `.structuredOutput` = parsed | ✓ |
-| `usage.{input_tokens,output_tokens}` | `attach_result_usage` → `notification::attach_result_usage_fail_closed` | On `end`, the json result, **and** error events. We normalize to `{inputTokens, outputTokens}` for the job record. *(Available but not read: `cache_read_input_tokens`, `total_tokens`, `num_turns`, `modelUsage`, `total_cost_usd`/`_ticks`.)* | ✓ |
+| `usage.{input_tokens,output_tokens}` | `attach_result_usage` → `notification::attach_result_usage_fail_closed` | Captured from the `end` event and the json result; normalized to `{inputTokens, outputTokens}` for the job record. *(Upstream also stamps usage on error events, but our error branch keeps only `message` — a failed job's cost is low-value, so error-usage is not surfaced. Also available-but-unread: `cache_read_input_tokens`, `total_tokens`, `num_turns`, `modelUsage`, `total_cost_usd`/`_ticks`.)* | ✓ |
 
 **Tolerance guarantees we rely on:** the event list is documented non-exhaustive
 ("switch on `type`") — `parseEvent` returns `null` for unknown/junk lines and never throws, so
@@ -104,24 +105,64 @@ line protocol *more* stable to track than a versioned wire protocol.
 
 ---
 
-## Part 3 — Read-only / sandboxing (available upstream; not yet wired)
+## Part 3 — Read-only / sandboxing (WIRED — opt-in `--read-only`)
 
-Grok Build ships first-class read-only enforcement. Recorded here so it's a known lever, not a
-rediscovery. **Not currently emitted by `buildInvocation`.**
+Grok Build ships first-class sandbox enforcement. As of `grok@0.4.0` the plugin exposes it as an
+**opt-in** `--read-only` flag. The default is **unchanged** — see the design note below for why
+this is opt-in rather than a codex/antigravity-style read-only default.
 
-| Mechanism | How | Strength | Source anchor |
-| --- | --- | --- | --- |
-| **`--sandbox read-only`** (alias `readonly`, or `GROK_SANDBOX=read-only`) | OS/kernel-enforced FS sandbox; only `~/.grok` + temp writable, whole workspace readable | **Strongest** — the agent physically cannot write, regardless of tools | `profiles.rs:1,109`; writable paths `paths.rs:91`; flag `cli.rs:673` |
-| `--disallowed-tools "search_replace,write,run_terminal_cmd,…"` | Removes write/exec tools from the toolset | Medium — model can't call them, but not OS-enforced | `cli.rs:623` |
-| `--deny "Write(**)" --deny "Edit(**)"` | Permission-layer denial (tools exist, execution gated) | Weakest — cooperative | `cli.rs:476` |
+**Wiring** (`grok-companion.mjs` `--read-only` bool → `request.readOnly` → `adapter.mjs`):
+```js
+if (r.readOnly) argv.push("--sandbox", "read-only");
+```
+- **Default (no `--read-only`)**: no `--sandbox` flag → grok resolves to the **`off`** profile —
+  *no sandbox at all*, full read + write + network (`config.rs:1132`: `resolve_profile` falls back
+  to `"off"` when no flag / `GROK_SANDBOX` / config profile is set). This is the pre-0.4.0
+  behavior, preserved.
+- **`--read-only`** → `--sandbox read-only`: **best-effort** no-write (only `~/.grok` + temp
+  writable, whole workspace readable) — see the caveats below; it is *not* an absolute guarantee.
+- `--always-approve` stays on in both modes — orthogonal layer: it auto-answers read-tool prompts;
+  the sandbox is what actually blocks writes underneath (when it applies).
+- **Resume**: `--read-only` on a resume of a session with a *persisted, differing* profile makes
+  grok **`exit(1)`** (`SandboxStartup::Conflict`, constructed `cli.rs:883`, handled `main.rs:1694`)
+  — a session's profile is fixed at creation. A legacy/unresolved session with **no** saved
+  profile returns `None` (`persistence.rs:739`) and grok just applies the requested read-only
+  (`cli.rs:888`). Fail-closed on a real conflict beats silently ignoring the request; for the
+  common case start a fresh `--read-only` job. (Resuming a read-only session *with* `--read-only`
+  matches → fine.)
 
-Built-in sandbox profiles: `workspace` (default), `devbox`, `read-only`, `strict`
-(`profiles.rs:1`). Resume refuses to change a session's saved sandbox (safety).
+**⚠️ `--read-only` is BEST-EFFORT, not a hard guarantee** (this is why it's opt-in, not a
+codex/antigravity-style default — defaulting to a guarantee that can silently not hold would give
+false confidence):
+1. **A managed `requirements.toml` overrides it.** `resolve_profile` precedence is
+   `requirement > CLI > env > config > "off"` (`config.rs:1123`); upstream test
+   `sandbox_requirements_pin.rs` pins that `--sandbox read-only` *loses* to a requirement. So a
+   managed `workspace`/`off` profile can permit writes despite the flag.
+2. **It fails OPEN, not closed.** Where no OS backend applies (Linux Landlock unavailable / macOS
+   Seatbelt) grok *warns and runs unsandboxed* rather than exiting (`lib.rs:143,181`). The hard
+   `exit(1)` refusal fires only for read-*deny* profiles (custom with a non-empty deny list) —
+   `requires_read_deny(ReadOnly)` is `false` (`lib.rs:359`); `strict` is **not** in that set
+   either. Read-only has no bwrap deny-plan, so on Linux it skips bwrap and goes straight to
+   Landlock. Combined with `--always-approve`, an un-enforced fallback is fully writable with tools
+   auto-approved — so treat `--read-only` as hardening, not a hermetic jail.
+3. **Network scope is child-process only.** grok leaves its **main** process online (it needs the
+   LLM API), so in-process `web_search`/`web_fetch` **keep working** under `--read-only`
+   (`lib.rs:10`). Only network from terminal-spawned **child** processes is blocked, via seccomp on
+   Linux (`streaming_local_terminal.rs:916`). So `--read-only` does NOT break web research; it does
+   stop a spawned `curl`/`wget` in a bash command.
 
-**To wire a read-only job:** add a `readOnly` request flag that appends `--sandbox read-only`
-in `buildInvocation` — mirrors the existing `noSubagents` seam (one `if (r.readOnly)`
-`argv.push`). `--sandbox` is the recommended single lever; the tool/permission layers are
-belt-and-suspenders. (Not done in this pass — no request asked for it.)
+The three upstream levers (strongest first):
+
+| Mechanism | How | Strength | Source anchor | Used? |
+| --- | --- | --- | --- | --- |
+| **`--sandbox read-only`** (alias `readonly`, or `GROK_SANDBOX=read-only`) | Best-effort FS sandbox; only `~/.grok` + temp writable, whole workspace readable; blocks **child-process** network (not in-process web tools) | **Strong where a backend applies & no requirement overrides**; warns + runs writable otherwise | `profiles.rs:1,109`; writable paths `paths.rs:91`; flag decl `cli.rs:674`; enforce path `config.rs` `apply_sandbox`, `lib.rs:143` | ✅ what `--read-only` emits |
+| `--disallowed-tools "search_replace,write,run_terminal_cmd,…"` | Removes write/exec tools from the toolset (keeps network + reads) | Medium — model can't call them, but not OS-enforced | `cli.rs:623` | available escalation |
+| `--deny "Write(**)" --deny "Edit(**)"` | Permission-layer denial (tools exist, execution gated) | Weakest — cooperative | `cli.rs:476` | — |
+
+Built-in sandbox profiles: `workspace`, `devbox`, `read-only`, `strict`, `off` (`profiles.rs`);
+the resolved default when nothing is set is **`off`**, not `workspace` (`config.rs:1132`). For a
+niche profile, set `GROK_SANDBOX=<profile>` — grok reads it natively (`cli.rs:674`), and the
+plugin only injects `--sandbox` for `--read-only`, so it won't clobber your env otherwise.
 
 ---
 
@@ -130,3 +171,4 @@ belt-and-suspenders. (Not done in this pass — no request asked for it.)
 | Date | Grok tree | Verdict | Notes |
 | --- | --- | --- | --- |
 | 2026-07-16 | `c68e39f` / bin `0.1.220-alpha.4` (released `grok 0.2.93`) | **none** | First source-grounded audit after open-sourcing. All 11 flags + all read fields pinned to anchors, zero drift. Same pass added `usage` capture (`{inputTokens,outputTokens}`) — the old "grok emits no token counts" assumption was stale; `attach_result_usage` now stamps usage on `end`/json/error. Documented read-only sandbox levers (Part 3). |
+| 2026-07-16 | (same tree) | **none** | `grok@0.4.0`: wired an **opt-in `--read-only`** (`--sandbox read-only`). NON-breaking — default unchanged (`off`, full access). Opt-in (not a codex/antigravity-style default) because read-only is **best-effort**: a managed `requirements.toml` overrides it (`config.rs:1123`) and it fails *open* to writable when no OS backend applies (`lib.rs:143`) — a false-confidence default. Independent Codex review (session `019f6b69`) corrected several prior-draft errors, all verified against source: (1) read-only does **not** disable web tools — network restriction is **child-process only**, grok's in-process `web_search`/`web_fetch` stay online (`lib.rs:10`, `streaming_local_terminal.rs:916`); (2) default is `off` not `workspace` (`config.rs:1132`); (3) enum is `SandboxStartup::Conflict`+`exit(1)`, constructed `cli.rs:883` (not `Refused`), and only on a *persisted* differing profile — a no-saved-profile session applies read-only (`persistence.rs:739`, `cli.rs:888`); (4) read-only skips bwrap (no deny-plan) → Landlock directly, `strict` not in the read-deny set (`lib.rs:359`); (5) usage is captured from `end`/json only, not error events; (6) anchors: reasoning-effort `525`, `--sandbox` decl `674`. |
