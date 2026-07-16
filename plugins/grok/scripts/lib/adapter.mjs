@@ -28,6 +28,20 @@ function extractFinalReport(text) {
     : text;
 }
 
+// grok now stamps a usage object on the streaming-json `end` event, the
+// `--output-format json` result, AND error events (verified against the CLI
+// source: headless.rs attach_result_usage). It is snake_case; the shared job
+// record wants { inputTokens, outputTokens } (see core/job.mjs) — same shape
+// the cc adapter fills. Absent/partial usage → null (no fake zero telemetry).
+function normalizeUsage(u) {
+  if (!u || typeof u !== "object") return null;
+  const inputTokens = typeof u.input_tokens === "number" ? u.input_tokens : null;
+  const outputTokens = typeof u.output_tokens === "number" ? u.output_tokens : null;
+  return inputTokens === null && outputTokens === null
+    ? null
+    : { inputTokens, outputTokens };
+}
+
 export function resolveDataRoot(env = process.env) {
   if (env.GROK_PLUGIN_DATA) return env.GROK_PLUGIN_DATA;
   if (env.CLAUDE_PLUGIN_DATA) return env.CLAUDE_PLUGIN_DATA;
@@ -102,6 +116,7 @@ export function makeGrokAdapter() {
           structured: obj?.structuredOutput ?? null,
           stopReason: obj?.stopReason ?? null,
           sessionId: typeof obj?.sessionId === "string" ? obj.sessionId : null,
+          usage: normalizeUsage(obj?.usage),
         };
       }
       const trimmed = line.trim();
@@ -120,6 +135,7 @@ export function makeGrokAdapter() {
           kind: "end",
           sessionId: typeof event.sessionId === "string" ? event.sessionId : null,
           stopReason: event.stopReason ?? null,
+          usage: normalizeUsage(event.usage),
         };
       }
       // grok emits {type:"error",message} on stdout for bad model / bad effort /
@@ -143,7 +159,7 @@ export function makeGrokAdapter() {
           ok: exitCode === 0 && !errored,
           resultText: structuredText.length ? structuredText : null,
           sessionId: jsonEvent.sessionId,
-          usage: null,
+          usage: jsonEvent.usage ?? null,
         };
       }
       const end = events.find((e) => e.kind === "end");
@@ -163,7 +179,7 @@ export function makeGrokAdapter() {
         ok: exitCode === 0 && Boolean(end) && !errored,
         resultText: clean.length ? clean : null,
         sessionId: end?.sessionId ?? null,
-        usage: null, // grok streaming-json emits no token counts
+        usage: end?.usage ?? null, // {inputTokens, outputTokens} from the `end` event
       };
     },
     classifyError(stderrTail, exitCode) {

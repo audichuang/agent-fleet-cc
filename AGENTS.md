@@ -90,3 +90,6 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   directory and `README.md`
 - Codex ↔ CLI protocol/health sync audit (+ how to re-run it when Codex ships new commits):
   `docs/codex-protocol-sync-audit.md`
+- Grok plugin ↔ Grok Build CLI contract audit (every flag/output field we depend on, pinned
+  to a source anchor + re-run recipe; also why CLI over ACP, and read-only sandbox levers):
+  `docs/grok-cli-contract-audit.md`

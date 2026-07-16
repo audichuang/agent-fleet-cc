@@ -1,5 +1,18 @@
 # grok — changelog
 
+## 0.3.1
+- **Capture usage/cost telemetry.** `extractResult` now reads grok's `usage` object
+  (`{inputTokens, outputTokens}`) off the streaming-json `end` event and the
+  `--output-format json` result, landing it in the job record's `usage` slot (same shape
+  `cc` fills). The old `usage: null` rested on a stale "grok emits no token counts"
+  assumption — grok's `headless.rs attach_result_usage` now stamps usage on `end`, the json
+  result, and error events.
+- **Source-grounded CLI contract audit** (`docs/grok-cli-contract-audit.md`). Now that Grok
+  Build is open source, every flag we send and every output field we read is pinned to a
+  `cli.rs`/`headless.rs` anchor with a re-run recipe — the invocation is verified against the
+  source, not guessed. Zero drift found. Also documents why we drive the CLI rather than ACP
+  (the CLI *is* the maintained ACP client), and the available `--sandbox read-only` lever.
+
 ## 0.3.0
 - **Visible live-shell verb (`/grok:live`).** A new model-invocable verb that runs a
   grok task as a *visible* shell instead of a silent detached job: the commander

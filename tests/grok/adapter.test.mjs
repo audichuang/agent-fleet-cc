@@ -88,7 +88,7 @@ test("parseEvent maps grok events and tolerates junk", () => {
   assert.deepEqual(a.parseEvent('{"type":"text","data":"pong"}'), { kind: "text", text: "pong" });
   assert.deepEqual(
     a.parseEvent('{"type":"end","stopReason":"EndTurn","sessionId":"abc","requestId":"r"}'),
-    { kind: "end", sessionId: "abc", stopReason: "EndTurn" },
+    { kind: "end", sessionId: "abc", stopReason: "EndTurn", usage: null },
   );
   // grok emits {type:error,message} on stdout for bad model / bad effort / no-auth
   assert.deepEqual(a.parseEvent('{"type":"error","message":"unknown model id"}'), { kind: "error", message: "unknown model id" });
@@ -120,6 +120,26 @@ test("extractResult joins text deltas; ok = exit 0 + terminal end (not a specifi
   );
   // no text at all → null resultText
   assert.equal(a.extractResult([{ kind: "end", sessionId: "x", stopReason: "EndTurn" }], 0).resultText, null);
+});
+
+test("usage: captured from the end event (streaming) and the json result", () => {
+  const a = makeGrokAdapter();
+  // streaming-json: grok now stamps usage on `end` (snake_case) → normalized shape
+  const end = a.parseEvent(
+    '{"type":"end","stopReason":"EndTurn","sessionId":"abc","usage":{"input_tokens":7210,"output_tokens":1893,"total_tokens":50103}}',
+  );
+  assert.deepEqual(end.usage, { inputTokens: 7210, outputTokens: 1893 });
+  assert.deepEqual(
+    a.extractResult([{ kind: "text", text: "hi" }, end], 0).usage,
+    { inputTokens: 7210, outputTokens: 1893 },
+  );
+  // json-schema mode: usage rides on the single result object too
+  const b = makeGrokAdapter();
+  b.buildInvocation({ job: { request: { jsonSchema: "{}" } }, prompt: "p" });
+  const jsonEvents = ['{"text":"{}","sessionId":"s1","usage":{"input_tokens":10,"output_tokens":2},"structuredOutput":{}}']
+    .map((l) => b.parseEvent(l))
+    .filter(Boolean);
+  assert.deepEqual(b.extractResult(jsonEvents, 0).usage, { inputTokens: 10, outputTokens: 2 });
 });
 
 test("extractResult fences the final report on the sentinels (fan-out cleanup)", () => {
