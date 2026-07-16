@@ -25,17 +25,11 @@
   不靠 model 觸發那些 verb。
 - **`--json-schema` 走非串流**(單一結果物件、無 live `/grok:logs`);一般模式是 `streaming-json`
   (text / end / error 事件;thought / tool 只留在 raw log,不進正規化事件)。
-- **`--read-only` 是 opt-in,不是預設**。預設不塞 `--sandbox` → grok 解析成 `off`(完全無沙箱、
-  可讀寫可連網,`config.rs:1132`),維持 0.4.0 前行為。`--read-only` 才送 `--sandbox read-only`。
-  **為何 opt-in 而非對齊 codex/antigravity 的預設唯讀**:read-only 是 **best-effort、非硬保證** ——
-  (a) 受管 `requirements.toml` profile 會蓋過它(`resolve_profile` 優先序 requirement > CLI,
-  `config.rs:1123`);(b) 沒有 OS 後端可套時**降級成可寫並 warn**,不硬失敗(`lib.rs:143`;只有
-  read-deny profile 才 exit,`requires_read_deny(ReadOnly)`=false,`lib.rs:359`)。把可能靜默失效的
-  保證設成預設會給假安全感,所以做成刻意加固的旗標。**注意**:read-only 只擋 FS 寫入 +
-  **子行程**網路;grok 主行程仍上網,in-process `web_search`/`web_fetch` **照常可用**(`lib.rs:10`,
-  `streaming_local_terminal.rs:916`)—— 不會打死網路研究。resume 一個**已存不同 profile** 的 session
-  加 `--read-only` 會 exit(1)(`SandboxStartup::Conflict`,`cli.rs:883`;無存檔 profile 的舊 session
-  則直接套用)。所有 flag/輸出欄位對源碼的錨點見 `docs/grok-cli-contract-audit.md`(含 Codex 複查紀錄)。
+- **`--read-only` 是 opt-in,不是預設**(預設維持 `off`:可讀寫可連網)。刻意做成旗標、不對齊
+  codex/antigravity 的預設唯讀,因為 grok 的 read-only 是 **best-effort**(受管 requirements 會蓋過、
+  無 OS 後端時 fail-open 成可寫)——把會靜默失效的保證設成預設=假安全感。它**不會**打死網路研究
+  (只擋子行程網路,主行程的 web 工具照常)。機制、源碼錨點、resume 行為見
+  `docs/grok-cli-contract-audit.md` Part 3(單一正本,別在此重抄)。
 - **`wantsWatchdog: false`**。
 
 ## 踩雷
