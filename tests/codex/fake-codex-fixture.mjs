@@ -14,6 +14,12 @@ const readline = require("node:readline");
 
 	const STATE_PATH = ${JSON.stringify(statePath)};
 	const BEHAVIOR = ${JSON.stringify(behavior)};
+	// A terminal turn error whose .message is a JSON-ENCODED error envelope — the
+	// real HTTP-400 model-unavailable shape the silent-death fix must surface.
+	const TERMINAL_ERROR_ENVELOPE = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-5.6-sol' model requires a newer version of Codex." } });
+	// A failure that arrives ONLY via a terminal turn/completed carrying turn.error,
+	// with NO preceding standalone error notification — the second failure shape.
+	const TURN_COMPLETED_ERROR = "Codex turn failed: 401 Unauthorized (upstream auth rejected).";
 	const interruptibleTurns = new Map();
 
 	function loadState() {
@@ -362,6 +368,16 @@ rl.on("line", (line) => {
         }
         const turnId = nextTurnId(state);
         send({ id: message.id, result: { turn: buildTurn(turnId), reviewThreadId: reviewThread.id } });
+        if (BEHAVIOR === "terminal-error") {
+          send({ method: "turn/started", params: { threadId: reviewThread.id, turn: buildTurn(turnId) } });
+          send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          break;
+        }
+        if (BEHAVIOR === "turn-completed-error") {
+          send({ method: "turn/started", params: { threadId: reviewThread.id, turn: buildTurn(turnId) } });
+          send({ method: "turn/completed", params: { threadId: reviewThread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });
+          break;
+        }
         emitTurnCompleted(reviewThread.id, turnId, [
           {
             started: { type: "enteredReviewMode", id: turnId, review: "current changes" }
@@ -402,6 +418,17 @@ rl.on("line", (line) => {
 	        };
 	        saveState(state);
 	        send({ id: message.id, result: { turn: buildTurn(turnId) } });
+
+        if (BEHAVIOR === "terminal-error") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          break;
+        }
+        if (BEHAVIOR === "turn-completed-error") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });
+          break;
+        }
 
         const payload = message.params.outputSchema && message.params.outputSchema.properties && message.params.outputSchema.properties.verdict
           ? structuredReviewPayload(prompt)

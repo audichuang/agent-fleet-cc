@@ -11,6 +11,7 @@ import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import {
     buildPersistentTaskThreadName,
     DEFAULT_CONTINUE_PROMPT,
+    describeTurnError,
     findLatestTaskThread,
     getCodexAuthStatus,
     getCodexAvailability,
@@ -215,6 +216,25 @@ function firstMeaningfulLine(text, fallback) {
     .map((value) => value.trim())
     .find(Boolean);
   return line ?? fallback;
+}
+
+// Structured failure reason for a failed runner result — surfaced on BOTH the
+// foreground --json payload AND the persisted job record (via runTrackedJob), so a
+// failed turn never shows a bare "failed" or a success-sounding summary. Non-null on
+// failure: a messageless error still yields a definite reason rather than degrading
+// to the "<title> finished." summary fallback.
+function failureReasonFor(result) {
+  if (result.status === 0) {
+    return null;
+  }
+  // A failure can arrive two ways: a standalone `error` notification (→ result.error)
+  // or a terminal `turn/completed` carrying `turn.error` (which is NOT copied into
+  // result.error). Prefer the most specific real message before the generic fallback.
+  return (
+    describeTurnError(result.turn?.error) ??
+    describeTurnError(result.error, result.stderr) ??
+    "Codex ended the turn with a failure but reported no error detail."
+  );
 }
 
 // Confirm the configured default model (respecting CODEX_DEFAULT_MODEL) is one this
@@ -489,6 +509,7 @@ async function executeReviewRun(request) {
       model: request.model,
       onProgress: request.onProgress
     });
+    const errorMessage = failureReasonFor(result);
     const payload = {
       review: reviewName,
       target,
@@ -499,7 +520,8 @@ async function executeReviewRun(request) {
         stderr: result.stderr,
         stdout: result.reviewText,
         reasoning: result.reasoningSummary
-      }
+      },
+      ...(errorMessage ? { errorMessage } : {})
     };
     const rendered = renderNativeReviewResult(
       {
@@ -516,7 +538,9 @@ async function executeReviewRun(request) {
       turnId: result.turnId,
       payload,
       rendered,
-      summary: firstMeaningfulLine(result.reviewText, `${reviewName} completed.`),
+      // On failure use the real reason, not the success-sounding "<review> completed."
+      summary: firstMeaningfulLine(result.reviewText, errorMessage ?? `${reviewName} completed.`),
+      errorMessage,
       jobTitle: `Codex ${reviewName}`,
       jobClass: "review",
       targetLabel: target.label
@@ -536,6 +560,7 @@ async function executeReviewRun(request) {
     status: result.status,
     failureMessage: result.error?.message ?? result.stderr
   });
+  const errorMessage = failureReasonFor(result);
   const payload = {
     review: reviewName,
     target,
@@ -554,7 +579,8 @@ async function executeReviewRun(request) {
     result: parsed.parsed,
     rawOutput: parsed.rawOutput,
     parseError: parsed.parseError,
-    reasoningSummary: result.reasoningSummary
+    reasoningSummary: result.reasoningSummary,
+    ...(errorMessage ? { errorMessage } : {})
   };
 
   return {
@@ -567,7 +593,10 @@ async function executeReviewRun(request) {
       targetLabel: context.target.label,
       reasoningSummary: result.reasoningSummary
     }),
-    summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.finalMessage, `${reviewName} finished.`),
+    summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.finalMessage, errorMessage ?? `${reviewName} finished.`),
+    // Structured failure reason (same contract as executeTaskRun) so a failed
+    // review does not surface as a bare "failed" with an empty result.
+    errorMessage,
     jobTitle: `Codex ${reviewName}`,
     jobClass: "review",
     targetLabel: context.target.label
@@ -613,6 +642,7 @@ async function executeTaskRun(request) {
 
   const rawOutput = typeof result.finalMessage === "string" ? result.finalMessage : "";
   const failureMessage = result.error?.message ?? result.stderr ?? "";
+  const errorMessage = failureReasonFor(result);
   const rendered = renderTaskResult(
     {
       rawOutput,
@@ -630,7 +660,10 @@ async function executeTaskRun(request) {
     threadId: result.threadId,
     rawOutput,
     touchedFiles: result.touchedFiles,
-    reasoningSummary: result.reasoningSummary
+    reasoningSummary: result.reasoningSummary,
+    // Foreground `task --json` prints this payload directly — carry the failure
+    // reason here too, not only on the persisted record (status/wait/result).
+    ...(errorMessage ? { errorMessage } : {})
   };
 
   return {
@@ -639,7 +672,11 @@ async function executeTaskRun(request) {
     turnId: result.turnId,
     payload,
     rendered,
-    summary: firstMeaningfulLine(rawOutput, firstMeaningfulLine(failureMessage, `${taskMetadata.title} finished.`)),
+    summary: firstMeaningfulLine(rawOutput, firstMeaningfulLine(failureMessage, errorMessage ?? `${taskMetadata.title} finished.`)),
+    // Structured failure reason so a failed turn surfaces WHY (status/wait/--json),
+    // not a bare "failed" with an empty result. See describeTurnError + the finalize
+    // in runTrackedJob, which persists this onto the job record.
+    errorMessage,
     jobTitle: taskMetadata.title,
     jobClass: "task",
     write: Boolean(request.write)

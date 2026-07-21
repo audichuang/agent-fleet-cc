@@ -1120,6 +1120,57 @@ export function resolveFinalMessage(turnState) {
   return turnState?.lastAgentMessage ?? "";
 }
 
+// Best-effort human-readable failure reason for a FAILED turn — the value that
+// becomes the job's structured `errorMessage` so /codex:status, /codex:wait, and
+// the --json projection show WHY it died instead of a bare "failed". The
+// app-server delivers a turn error in a few shapes: a nested envelope
+// `{ error: { message } }`, a plain `{ message }`, OR a `{ message }` whose value
+// is itself a JSON-encoded envelope (the observed HTTP-400 model-unavailable
+// case). Dig one level so the user reads "The 'X' model requires a newer version
+// of Codex" rather than a raw `{"type":"error",...}` blob. Falls back to the raw
+// message, then stderr, then null. Never throws — a malformed error must not mask
+// the failure it describes.
+export function describeTurnError(error, stderr = "") {
+  // Bounds at a trust boundary: the error is external content. Never JSON.parse an
+  // unbounded string, and cap what we persist so a pathological error can't bloat
+  // the job record.
+  const cap = (text) => (text.length > MAX_TURN_ERROR_LEN ? `${text.slice(0, MAX_TURN_ERROR_LEN)}…` : text);
+  const dig = (value, depth = 0) => {
+    if (!value || typeof value !== "object" || depth > 3) {
+      return null;
+    }
+    const nested = value.error;
+    if (nested && typeof nested === "object" && typeof nested.message === "string" && nested.message.trim()) {
+      return nested.message.trim();
+    }
+    if (typeof value.message === "string" && value.message.trim()) {
+      const message = value.message.trim();
+      if (message.startsWith("{") && message.length <= MAX_TURN_ERROR_PARSE_LEN) {
+        try {
+          const inner = dig(JSON.parse(message), depth + 1);
+          if (inner) {
+            return inner;
+          }
+        } catch {
+          // .message is not JSON — use it verbatim below.
+        }
+      }
+      return message;
+    }
+    return null;
+  };
+
+  const fromError = dig(error);
+  if (fromError) {
+    return cap(fromError);
+  }
+  const fromStderr = typeof stderr === "string" ? stderr.trim() : "";
+  return fromStderr ? cap(fromStderr) : null;
+}
+
+const MAX_TURN_ERROR_LEN = 2000;
+const MAX_TURN_ERROR_PARSE_LEN = 32_000;
+
 const BUILTIN_PROVIDER_LABELS = new Map([
   ["openai", "OpenAI"],
   ["ollama", "Ollama"],

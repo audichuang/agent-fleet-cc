@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.3.3
+
+Fix a **silent failure**: a task/review turn ended by an app-server `error` notification
+(e.g. HTTP 400 "model requires a newer version of Codex", permanent auth) RETURNED a failed
+execution rather than throwing, and the failure reason never reached the structured
+`errorMessage` field. So `/codex:status`, `/codex:wait`, the persisted record, AND the foreground
+`--json` output showed a bare "failed" with an empty result — the reason lived only in the
+log/rendered blob. A delegating commander parsing `--json` got `errorMessage: null, rawOutput: ""`
+and had nothing to relay ("the job just died and I don't know why").
+
+- `runTrackedJob` persists `errorMessage` on a failed RETURN — the one point every runner's failed
+  return converges — mirroring the throw/crash paths that already did.
+- Every failed runner return now carries a structured `errorMessage` on **both** the foreground
+  `--json` payload and the persisted record, across all three shapes: `task`, native `review`, and
+  `adversarial-review`. On failure it never degrades to a success-sounding summary
+  ("… finished." / "Review completed."); a messageless error yields a definite reason.
+- New `describeTurnError` unwraps the app-server error shape (including the observed case where
+  `.message` is a JSON-encoded `{ error: { message } }` envelope) to the human sentence — bounded
+  parse/length so an oversized external error can't bloat the record.
+- Covers **both** failure shapes: a standalone `error` notification, and a terminal
+  `turn/completed` carrying `turn.error` with no preceding notification — the reason is taken from
+  `turn.error` first, then the error notification, then stderr, then a definite fallback.
+- Regression tests (`tests/codex/turn-error-surfacing.test.mjs`): finalize + extraction units, plus
+  black-box e2e that drives the real CLI against a fake app-server emitting a terminal error for
+  `task`/`review`/`adversarial-review` `--json`. Both seams are proven non-vacuous (they fail on
+  pre-fix code).
+
+Two independent review passes (Codex, gpt-5.6-sol): the first caught that the initial cut fixed
+only the persisted record and the adversarial-review path; the second caught the `turn.error`
+failure shape. This entry reflects the completed fix.
+
 ## 1.3.2
 
 Protocol-sync pass against codex HEAD `d5998e7452` (2026-07-21, codex-cli 0.144.6) — 153 commits
