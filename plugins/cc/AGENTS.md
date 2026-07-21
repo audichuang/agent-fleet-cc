@@ -30,8 +30,6 @@
   任意 model),`--model` 可再覆寫 model。單一 profile 自動採用(`setup` 自動建 `native` →
   `/cc:task` 免帶 flag);0 或 2+ 才需 `--profile <name>` / `--settings <path>` / `CC_DEFAULT_PROFILE`。
 - 用 **FULL shared runtime**(前景 `runWorker`、背景 `worker-entry.mjs`)—— 同 grok。
-- **dual-host**:`.codex-plugin/plugin.json` 帶自己的 version,bump 時會 **silently drift**,要手動
-  同步(root AGENTS `bump-version` 節)。
 
 ## 踩雷
 - **cc 不發 liveness line**:`renderStatus(jobs)` 只印原始 job status(queued / running / completed /

@@ -32,7 +32,7 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `task` / `review` / `adversarial-review` / `status` / `wait` / `logs` / `result` / `cancel` /
   `attach` 都 user-run(`disable-model-invocation`)—— 別假設 `/codex:task` 能自呼叫。
 - **動到 app-server 相關型別 → 跑 `npm run build:codex`**(`tsc`,對 generated types +
-  `lib/app-server-protocol.d.ts`);`npm test` 不跑它,型別錯紅 CI 卻 npm test 綠(root Conventions)。
+  `lib/app-server-protocol.d.ts`);為何 `npm test` 不涵蓋、CI 卻會紅,見 root Conventions。
 - **NOT dual-host**(無 `.codex-plugin/`)—— 不像 cc / agy;bump 只動 plugin.json ↔ marketplace。
 
 ## 踩雷
