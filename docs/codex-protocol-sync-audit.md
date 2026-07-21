@@ -41,16 +41,17 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 
 | | |
 |---|---|
-| Codex CLI HEAD | `800715d201` (`codex-zsh-v0.1.0-393` / `rust-v0.144.5`) |
-| Audit date | 2026-07-16 |
-| Plugin version at audit | `codex@1.3.1` |
+| Codex CLI HEAD | `d5998e7452` (`codex-zsh-v0.1.0-546` / codex-cli 0.144.6) |
+| Audit date | 2026-07-21 |
+| Plugin version at audit | `codex@1.3.2` |
 | Codex repo checked | `/home/audichuang/research/codex` |
 
-> Last re-audit (2026-07-16) re-verified all 11 protocol dimensions clean against
-> `800715d201` (112 commits past the prior baseline). No fixes needed — see the
-> latest Audit-log row for the additive-only evidence. The result tables below
-> still describe the deeper 2026-07-13 pass; their `file:line` anchors are from
-> that commit unless the log row notes a newer one.
+> Last re-audit (2026-07-21) re-ran all 11 protocol dimensions (adversarially verified) plus a
+> coverage critic against `d5998e7452` (153 commits past `800715d201`; 73 touch the protocol
+> surface). **No breaking drift.** Two source-grounded should-upgrade fixes landed in
+> `codex@1.3.2` (Bedrock auth-label field rename + v1 decline shape) — see the latest Audit-log
+> row. The result tables below still describe the deeper 2026-07-13 pass; their `file:line`
+> anchors are from that commit unless the log row notes a newer one.
 
 ---
 
@@ -97,7 +98,7 @@ The plugin speaks Codex **app-server v2** over JSON-RPC (`scripts/lib/app-server
 | review / guardian flow | ✅ none | `review/start` params, `ReviewTarget`, `delivery`, `reviewThreadId`, `enteredReviewMode`/`exitedReviewMode` all match. |
 | server→client declines | ✅ none | `SERVER_REQUEST_REPLIES` mirrors the current `server_request_definitions!` set; nothing would hit `-32601` or hang a turn. |
 | thread start/resume/name/list params | ✅ none | No renamed/removed/newly-required field on the params the plugin sends. |
-| **config/account/auth** | ⚠️ **should-upgrade** → **FIXED 1.3.0** | `account/read` can return `Account::AmazonBedrock { credentialSource }` (account.rs:21-40). Was falling through to a generic label with `authMethod:null`. |
+| **config/account/auth** | ⚠️ **should-upgrade** → **FIXED 1.3.0**, re-fixed **1.3.2** | `account/read` can return `Account::AmazonBedrock`. 1.3.0 added the branch (was falling through to a generic label with `authMethod:null`). In codex-cli 0.144.6 the field was renamed/retyped `credentialSource` (string enum) → `usesCodexManagedCredentials` (bool); 1.3.2 reads the bool with a legacy-string fallback so the label stops silently dropping. |
 | item types + payloads | ✅ none | Every `item.type` tag + field the plugin reads still matches the Rust enum + serde renames; web-search→extension migration and item-ID-prefix change are wire-transparent (plugin treats `item.id` opaquely). |
 
 **Bottom line:** No breaking drift. One trivial, cosmetic auth-label gap (now fixed).
@@ -184,4 +185,5 @@ that Codex diff-review before considering the pass done.
 | Date | Codex HEAD | Plugin | Outcome |
 |---|---|---|---|
 | 2026-07-13 | `2b0b37abb7` | 1.2.0 → **1.3.0** | No breaking protocol drift. 4 health/observability improvements + 1 auth-label fix applied, then 2 follow-on races (broker intentional-close, reconcile deadline TOCTOU) + 2 nits (monotonic clock, UTF-8 byte count) hardened after an independent Codex (GPT-5.6) diff review. 432 codex + 109 shared green. |
+| 2026-07-21 | `d5998e7452` (codex-cli 0.144.6) | 1.3.1 → **1.3.2** | **No breaking drift.** Re-ran all 11 dimensions (adversarially verified) + a coverage critic against 153 commits since `800715d201` (73 protocol-surface). 8 dimensions `none`; 3 non-none, all non-breaking. **Two source-grounded fixes applied in 1.3.2:** (1) **Bedrock auth label** — `account/read`'s `Account::AmazonBedrock` field was renamed/retyped `credentialSource` (string enum `awsManaged`/`codexManaged`) → `usesCodexManagedCredentials` (bool) and the `AmazonBedrockCredentialSource` enum deleted (`protocol/src/account.rs`, `app-server-protocol/src/protocol/v2/account.rs`); the plugin read `account.credentialSource` so the label silently dropped. `buildAppServerAuthStatus` (`codex.mjs`) now reads the bool, mapping true→`codexManaged`/false→`awsManaged`, with a legacy-string fallback for older CLIs. (2) **v1 decline shape** — `ReviewDecision::Denied` became a struct variant `{denied:{rejection}}` (`protocol/src/protocol.rs:4106`, snake_case externally tagged); the dead-path v1 `applyPatchApproval`/`execCommandApproval` replies in `app-server.mjs` were corrected from `{decision:"denied"}` to `{decision:{denied:{rejection}}}` (v2 turn/start flow uses `{decision:"decline"}`, unchanged — never triggered). Coverage critic: all_covered, only new methods are the Apps API (`app/read`/`app/installed`, plugin never calls); no request struct the plugin populates carries `deny_unknown_fields`. **Verified live:** real-engine e2e smoke vs codex-cli 0.144.6 (launch→cancel→wait, 0 violations) + `build:codex` typecheck vs types generated from the installed CLI + full `npm test` green. |
 | 2026-07-16 | `800715d201` (rust-v0.144.5) | 1.3.1 (**unchanged**) | **No breaking drift — record-only, no plugin change.** Re-audited all 5 dependency dimensions (requests sent · notifications · item types · account/auth · initialize+server-requests) against 112 commits since `2b0b37abb7`, each finding adversarially refuted against current Rust. Every change touching the plugin's read surface is additive/cosmetic and ignored: `emittedAtMs` (notification timestamp — additive **top-level sibling** of `method`/`params`, not an envelope wrapper; `common.rs:1731-1742`), `cacheWriteInputTokens` (`thread/tokenUsage/updated`; `v2/thread.rs:1458`), `spendControlReached` (`account/rateLimits/updated`; `v2/account.rs:536`), pagination `next_cursor` (responses only — **`thread/list` still does NOT require cursor/limit**, both `Option`, no `deny_unknown_fields`). The two removed fields (`mcpToolCall.appContext.templateId`, `ThreadItemsListResponse.data`) are outside the plugin's read set. `server_request_definitions!` + `InitializeCapabilities` byte-identical since baseline. Launch path (bare `codex app-server` → stdio; `cli/src/main.rs:516`) and hard default model `gpt-5.6-sol` (`codex-companion.mjs:96`) both still valid. |

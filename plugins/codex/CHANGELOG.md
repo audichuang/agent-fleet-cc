@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.2
+
+Protocol-sync pass against codex HEAD `d5998e7452` (2026-07-21, codex-cli 0.144.6) — 153 commits
+past the 1.3.1 baseline `800715d201`. **No breaking drift** (multi-agent audit, all 11
+dimensions adversarially verified plus a coverage critic; full details in the source repo's
+`docs/codex-protocol-sync-audit.md`). Two source-grounded should-upgrade fixes:
+
+- **Amazon Bedrock auth label** — upstream replaced the `account/read` Bedrock field
+  `credentialSource` (string enum) with `usesCodexManagedCredentials` (bool);
+  `buildAppServerAuthStatus` now reads the new bool and falls back to the legacy string for
+  older CLIs, so the codexManaged/awsManaged label no longer silently drops.
+- **v1 approval-decline shape** — `ReviewDecision::Denied` became a struct variant
+  `{ denied: { rejection } }`; the (dead-path, v2-only client) `applyPatchApproval` /
+  `execCommandApproval` decline replies were corrected to match, so an unexpected v1 request
+  still declines cleanly instead of hitting `-32601`.
+
+Verified live: real-engine e2e smoke against codex-cli 0.144.6 (launch → cancel → wait
+contract, 0 violations) plus `build:codex` typecheck against types generated from the installed
+CLI. Full suite green.
+
 ## 1.3.1
 
 Docs-only: realign the `gpt-5-6-prompting` skill with the latest official GPT-5.6 prompting

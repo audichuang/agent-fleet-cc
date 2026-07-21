@@ -96,9 +96,12 @@ const SERVER_REQUEST_REPLIES = {
   "attestation/generate": { errorCode: -32000, errorMessage: "attestation/generate is not supported by this client." },
   "currentTime/read": { errorCode: -32000, errorMessage: "currentTime/read is not supported by this client." },
   // Deprecated v1 (SendUserTurn/SendUserMessage; not used for turn/start) — v1 uses
-  // the core ReviewDecision enum, serialized snake_case.
-  applyPatchApproval: { result: { decision: "denied" } },
-  execCommandApproval: { result: { decision: "denied" } }
+  // the core ReviewDecision enum (snake_case, externally tagged). Denied became a
+  // struct variant `{ denied: { rejection } }` in codex-cli 0.144.6. Dead path for
+  // this v2-only client, kept correct so an unexpected v1 request still declines
+  // cleanly instead of hitting -32601.
+  applyPatchApproval: { result: { decision: { denied: { rejection: "declined by client" } } } },
+  execCommandApproval: { result: { decision: { denied: { rejection: "declined by client" } } } }
 };
 
 export class AppServerClientBase {

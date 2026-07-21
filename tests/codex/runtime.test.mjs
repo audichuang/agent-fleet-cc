@@ -102,6 +102,21 @@ test("setup reports Amazon Bedrock login from the app-server account", () => {
   assert.match(payload.auth.detail, /Amazon Bedrock login active \(awsManaged\)/);
 });
 
+test("setup reads the legacy Bedrock credentialSource string from older CLIs", () => {
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "bedrock-account-legacy");
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.auth.authMethod, "amazonBedrock");
+  assert.match(payload.auth.detail, /Amazon Bedrock login active \(codexManaged\)/);
+});
+
 test("setup is ready when the active provider does not require OpenAI login", () => {
   const binDir = makeTempDir();
   installFakeCodex(binDir, "provider-no-auth");

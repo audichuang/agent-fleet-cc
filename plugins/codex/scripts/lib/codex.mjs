@@ -1215,12 +1215,17 @@ function buildAppServerAuthStatus(accountResponse, configResponse) {
   // to the v2 protocol upstream). Without this branch a Bedrock-authenticated
   // account falls through to the generic requiresOpenaiAuth===false message
   // below with authMethod:null — loggedIn is still correct, but the status text
-  // is mislabeled. credentialSource is "awsManaged" | "codexManaged".
+  // is mislabeled. codex-cli 0.144.6 (protocol/src/account.rs) replaced the
+  // `credentialSource` string enum ("awsManaged"|"codexManaged") with a
+  // `usesCodexManagedCredentials` bool; read the new bool, fall back to the
+  // legacy string for older CLIs.
   if (account?.type === "amazonBedrock") {
     const credentialSource =
-      typeof account.credentialSource === "string" && account.credentialSource.trim()
-        ? account.credentialSource.trim()
-        : null;
+      typeof account.usesCodexManagedCredentials === "boolean"
+        ? (account.usesCodexManagedCredentials ? "codexManaged" : "awsManaged")
+        : typeof account.credentialSource === "string" && account.credentialSource.trim()
+          ? account.credentialSource.trim()
+          : null;
     return buildAuthStatus({
       loggedIn: true,
       detail: credentialSource ? `Amazon Bedrock login active (${credentialSource})` : "Amazon Bedrock login active",

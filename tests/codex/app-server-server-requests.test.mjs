@@ -70,11 +70,13 @@ test("attestation/generate and currentTime/read (unfulfillable here) return -320
   }
 });
 
-test("deprecated v1 approvals use the v1 ReviewDecision value 'denied' (not the v2 'decline')", () => {
-  // v1 (applyPatchApproval/execCommandApproval) serialize core ReviewDecision
-  // snake_case as "denied"; the v2 approvals use "decline". They must not be crossed.
-  assert.deepEqual(reply("applyPatchApproval").result, { decision: "denied" });
-  assert.deepEqual(reply("execCommandApproval").result, { decision: "denied" });
+test("deprecated v1 approvals use the v1 ReviewDecision::Denied struct (not the v2 'decline')", () => {
+  // v1 (applyPatchApproval/execCommandApproval) serialize the core ReviewDecision
+  // Denied variant; codex-cli 0.144.6 made it a struct variant, snake_case + externally
+  // tagged as { denied: { rejection } }. The v2 approvals use "decline". Not to be crossed.
+  const denied = { decision: { denied: { rejection: "declined by client" } } };
+  assert.deepEqual(reply("applyPatchApproval").result, denied);
+  assert.deepEqual(reply("execCommandApproval").result, denied);
 });
 
 test("a genuinely unknown server request still gets -32601", () => {
