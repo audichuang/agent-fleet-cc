@@ -13,7 +13,7 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   的路由入口不在這,在 fleet 的 `delegating-to-fleet`(見 `docs/adr/0001`)。
 - `bin/antigravity.mjs` — dual-host CLI 入口;`scripts/lib/host-detect.mjs` 判斷跑在哪個 host。
 - `commands/*.md` — slash verb 的薄殼,只 shell 同名 `scripts/commands/*.mjs`(那才是邏輯,
-  `runAsMain` 自呼叫)。
+  `runAsMain` 自呼叫)。例外:`handoff.md` 沒有同名 .mjs,殼的是 `rescue.mjs --prompt-file`。
 - `scripts/lib/adapter.mjs` — **所有 agy 引擎知識**(argv / parseEvent / classifyError);job 生命
   週期是 vendored shared runtime,不在這。
 - `agents/openai.yaml` — subagent 宣告。
@@ -29,6 +29,11 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   `--dangerously-skip-permissions` 是第二層 opt-in,gated 在 `--apply` 之後。
 
 ## 踩雷
+- **verb 行為有四個文案家**:SKILL.md 的 verb 表、`commands/*.md`、README、`agents/openai.yaml` 的
+  command descriptions。改 fg/bg 預設、flag、回傳形狀時四處都要對 —— 0.5.2 抓到 SKILL.md 把
+  review/rescue 寫反成 background-by-default,0.5.3 又在 openai.yaml 抓到同一個錯。
+- **agy 會背景自我更新**(同 session 實測 1.1.2→1.1.5;證據:`~/.gemini/antigravity-cli/updater/`)。
+  別假設引擎版本固定;「已於 X 版真機驗證」的結論要帶版本+日期,引用前先 `agy --version`。
 - **有兩個 wait 表面**:`/antigravity:status --wait`(`commands/status.mjs`)**和**獨立的
   `/antigravity:wait`(`commands/wait.mjs`)。改 wait 行為、或加一個 status/wait 欄位(例如
   liveness),**兩支都要動** —— 只改一支必漏(已被 review 抓過一次)。
@@ -46,6 +51,8 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   best-effort。1.1.5 真機重驗過的是:no-apply 不碰 job cwd、`--apply` 正常寫入(2026-07-22)。
 
 ## 細節指向
+- 引擎漂移重查:`agy --help` 逐旗比對 `adapter.mjs` 的 `argv.push` 清單 + `agy changelog`
+  (1.1.5 起有此子命令)掃行為變更;`agy models` 看模型清單。
 - 引擎行為決策 / §7 行為變更 / D-* :`docs/adr/`、
   `docs/superpowers/specs/2026-07-01-antigravity-shared-runtime-migration-design.md`。
 - 安裝 / smoke:`plugins/antigravity/docs/{INSTALL,SMOKE}.md`。

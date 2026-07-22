@@ -17,7 +17,7 @@ Skip `$antigravity` for trivial one-line edits or anything that requires interac
 
 ## Verbs
 
-All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Claude Code (`/antigravity:<verb>`), Codex CLI (`$antigravity <verb>`), agy native (`agy plugin run antigravity <verb>`), and standalone (`npx antigravity-plugin <verb>`).
+All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Claude Code (`/antigravity:<verb>`), Codex CLI (`$antigravity <verb>`), agy itself (installed via `agy plugin install antigravity@antigravity` or `agy plugin import claude` — see [docs/INSTALL.md](./docs/INSTALL.md); agy 1.1.5 has no standalone `plugin run` subcommand), and standalone (`npx antigravity-plugin <verb>`).
 
 | Verb     | What it does |
 |----------|--------------|

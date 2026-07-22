@@ -21,17 +21,22 @@ policy:
 # Verbs exposed under the `$antigravity` shortcut. Each one runs the
 # corresponding `scripts/commands/<verb>.mjs` module via the per-host bridge,
 # so a Codex invocation of `$antigravity review --base main` resolves to the
-# same code path as Claude Code's `/antigravity:review --base main` and
-# agy's `agy plugin run antigravity review --base main`.
+# same code path as Claude Code's `/antigravity:review --base main` (agy
+# itself installs the plugin via `agy plugin install` / `import claude` —
+# see docs/INSTALL.md).
 commands:
   - name: setup
     description: "One-time agy OAuth wizard. Idempotent — re-run anytime to refresh credentials."
   - name: review
-    description: "Hand the current git diff (or `--base <ref>`) to agy for a structured code review. Default is background mode; poll with $antigravity status."
+    description: "Hand the working tree or branch diff (`--base <ref>`) to agy for a structured code review. Foreground by default — blocks and prints the review; --background forks a worker to poll with $antigravity status."
+  - name: adversarial-review
+    description: "Stricter structured review: asks agy for a JSON verdict and renders it (falls back to raw text). Foreground only."
   - name: rescue
-    description: "Delegate an investigation or fix request to agy — e.g. 'why are the tests failing on main'. Returns a job id for $antigravity status / result."
+    description: "Delegate an investigation or fix request to agy — e.g. 'why are the tests failing on main'. Foreground by default — prints agy's answer; --background returns a job id for $antigravity status / result."
   - name: task
-    description: "Generic long-running task delegation. Supports --continue / --conversation <id> / --add-dir for follow-up agy conversations."
+    description: "Generic long-running task delegation, background by default (returns a job id). Supports --continue / --conversation <id> / --add-dir for follow-up agy conversations."
+  - name: image
+    description: "Generate an image with agy's generate_image tool (Imagen) and recover the saved file path; --output <path> copies it. Foreground only."
   - name: status
     description: "Show a Markdown table of current and recent agy jobs, with health, last progress, and any pending OAuth URL."
   - name: result
@@ -44,7 +49,7 @@ commands:
     description: "Show or follow the persisted log for an agy job."
 
 # Auth notes (surfaced via SKILL.md too):
-# - agy 1.0.x is OAuth-only — there is no API-key / headless path. The very
+# - agy is OAuth-only (still true as of 1.1.5) — no API-key auth path. The very
 #   first `$antigravity` invocation in a new account will block on an OAuth
 #   URL printed to stdout. Run `$antigravity setup` once, follow the URL in
 #   a browser, then re-issue the original command.

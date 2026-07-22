@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-07-22
+
+### Fixed
+- **Context/docs audit — removed the remaining stale & wrong statements** (docs only).
+  `agents/openai.yaml` repeated the same review/rescue background-by-default error 0.5.2 fixed
+  in SKILL.md (verb behavior lives in FOUR doc homes: SKILL.md table, `commands/*.md`, README,
+  openai.yaml — plugin AGENTS.md now says so), was missing `adversarial-review` and `image`,
+  and its comments referenced `agy plugin run antigravity <verb>` — a subcommand agy 1.1.5
+  does not have (SKILL.md too; correct path is `agy plugin install` / `import claude`).
+  `docs/INSTALL.md`'s Codex verb list was missing `adversarial-review`/`image`/`wait`/`logs`.
+  `.agents/plugins/marketplace.json` `metadata.version` had silently drifted (stuck at 0.5.0;
+  bump-version doesn't touch it — root AGENTS.md hand-sync note now covers it).
+
 ## [0.5.2] — 2026-07-22
 
 ### Fixed
