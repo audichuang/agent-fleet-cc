@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-07-22
+
+### Changed
+- **Model guidance refreshed for agy 1.1.5 / Gemini 3.6 Flash** (docs only, no code change —
+  the adapter forwards `--model` verbatim and hardcodes no model). Verified on real agy 1.1.5:
+  `agy models` now prints slugs (`gemini-3.6-flash-medium`) instead of display names, though
+  display names still work; the no-`--model` default remains a Gemini 3.5 Flash tier; 3.6 Flash
+  is fast and clean in headless `--print` (~4s, clean SVG/markup, actually switches — unlike
+  3.1 Pro) including through the plugin's background job path. `SKILL.md` now says so.
+
 ## [0.5.0] — 2026-07-14
 
 ### Added

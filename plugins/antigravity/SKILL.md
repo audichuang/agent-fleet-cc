@@ -33,14 +33,18 @@ All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Cl
 
 ## Model
 
-Every verb accepts `--model <name>` (`agy models` lists the options). **Omit it** — agy's
-default (a Gemini 3.5 Flash tier) is the recommended choice: fast and reliable in `--print`
-mode, including SVG / markup generation (returns in seconds, clean output).
+Every verb accepts `--model <name>` (`agy models` lists the options; since agy 1.1.5 it
+prints slugs like `gemini-3.6-flash-medium` — older display names such as
+`Gemini 3.6 Flash (High)` are still accepted and do switch the model). **Omit it** — agy's
+default (a Gemini 3.5 Flash tier as of 1.1.5) is the recommended choice: fast and reliable
+in `--print` mode, including SVG / markup generation (returns in seconds, clean output).
 
-**Avoid `Gemini 3.1 Pro (High)`.** In headless `--print` mode it stalls on a backend wait
-that never returns (minutes at 0% CPU, empty log), doesn't actually switch off the default,
-and one stalled call can wedge the session so later calls appear to hang too. If you must
-override the model, stay on a Gemini 3.5 Flash variant.
+**Avoid `gemini-3.1-pro-high`** (`Gemini 3.1 Pro (High)`). In headless `--print` mode it
+stalls on a backend wait that never returns (minutes at 0% CPU, empty log), doesn't actually
+switch off the default, and one stalled call can wedge the session so later calls appear to
+hang too. If you must override the model, stay on a Gemini Flash variant — 3.6 Flash
+(`gemini-3.6-flash-medium` / `-high`) is verified fast and clean in `--print`, including via
+the plugin's background job path (real agy 1.1.5, 2026-07-22).
 
 ## Auth requirements
 
