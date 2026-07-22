@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-07-22
+
+### Fixed
+- **SKILL.md verb table matched to actual behavior** (docs only). `review` and `rescue` were
+  described as background-by-default returning a job id — both are foreground by default
+  (`--background` is the opt-in); `task` is the background-by-default verb. Added the missing
+  `adversarial-review` and `image` rows, fixed the example job-id format
+  (`antigravity-…`, not a UUID), and unpinned the stale "agy 1.0.x" wording in the auth
+  section (still OAuth-only as of 1.1.5).
+- **Full-verb real-engine re-verification on agy 1.1.5** (basis for the above): review,
+  adversarial-review, rescue `--prompt-file`/`--continue`, `--apply` (writes land in job cwd),
+  no-`--apply` (job cwd untouched), image (Imagen file recovered), setup, plus the
+  wait/cancel/timeout/missing exit-code contract (0/2/10/1) — all pass. Plugin AGENTS.md now
+  notes upstream 1.1.5 claims headless honors `settings.json` policies, so the 1.1.2
+  "global deny still writes" observation must be re-verified before being cited.
+
 ## [0.5.1] — 2026-07-22
 
 ### Changed

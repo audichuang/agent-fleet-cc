@@ -40,6 +40,10 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   (那套 approval 流程是給互動 TUI 的)。所以 review / adversarial-review 的唯讀**只靠 prompt「Do NOT modify files」,
   是 best-effort、不是保證** —— 別把 `--sandbox` 或 settings deny 當硬護欄(舊註解錯過,已修)。真要硬擋只能靠上游
   給 per-run 權限,agy 目前沒有。
+  **1.1.5 後續**:上游 changelog 稱 headless 已改為 honor `settings.json` 的 permissions/file access
+  (且 1.1.3 起未授權工具會 soft-deny 並印 stderr 提示)—— 1.1.2「連全域 deny 都照寫」的觀察可能已過時,
+  重驗 deny 前別再引用它。plugin 端結論**不變**:仍無 per-run 硬擋,review 唯讀照舊是 prompt-only
+  best-effort。1.1.5 真機重驗過的是:no-apply 不碰 job cwd、`--apply` 正常寫入(2026-07-22)。
 
 ## 細節指向
 - 引擎行為決策 / §7 行為變更 / D-* :`docs/adr/`、

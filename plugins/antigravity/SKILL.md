@@ -21,10 +21,12 @@ All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Cl
 
 | Verb     | What it does |
 |----------|--------------|
-| `setup`  | One-time OAuth wizard. Runs `agy --print 'hi'` in the foreground so the user can complete the Google OAuth flow visibly. Idempotent. |
-| `review` | Reviews the current git diff (or `--base <ref>`). Background-by-default; returns a job id. |
-| `rescue` | Delegates an investigation or fix to agy — e.g. `$antigravity rescue why are the tests failing`. Returns a job id. |
-| `task`   | Generic long-running delegation. Supports `--continue`, `--conversation <id>`, `--add-dir <path>`, `--wait`, `--foreground`, `--json`. |
+| `setup`  | One-time OAuth wizard. Runs a one-shot `agy --print` probe in the foreground so the user can complete the Google OAuth flow visibly. Idempotent. |
+| `review` | Reviews the working tree or branch diff (`--base <ref>`, `--scope`). Foreground by default — blocks and prints the review; `--background` forks a worker and returns a job id. |
+| `adversarial-review` | Stricter structured review: asks agy for a JSON verdict and renders it (falls back to raw text). Foreground only. |
+| `rescue` | Delegates an investigation or fix to agy — e.g. `$antigravity rescue why are the tests failing`. Foreground by default — prints agy's answer; `--background` returns a job id. Repo writes are opt-in via `--apply`. |
+| `task`   | Generic long-running delegation, background by default (returns a job id). Supports `--continue`, `--conversation <id>`, `--add-dir <path>`, `--wait`, `--foreground`, `--json`, `--apply`. |
+| `image`  | Generates an image with agy's `generate_image` tool (Imagen) and recovers the saved file path; `--output <path>` copies it. Foreground only. |
 | `status` | Shows a compact table of current and recent jobs (id, kind, phase, health, last progress). Surfaces any pending OAuth URL prominently. |
 | `result` | Prints the final output of a completed job by id. |
 | `cancel` | Sends SIGTERM to a running worker by job id. |
@@ -48,7 +50,7 @@ the plugin's background job path (real agy 1.1.5, 2026-07-22).
 
 ## Auth requirements
 
-agy 1.0.x is **OAuth-only** — there is no API-key path yet (tracked upstream as `antigravity-cli#78`).
+agy is **OAuth-only** (still true as of 1.1.5) — there is no API-key path yet (tracked upstream as `antigravity-cli#78`).
 
 1. Run `$antigravity setup` (or `/antigravity:setup` from Claude Code) once per machine / account.
 2. agy prints an OAuth URL — open it in a browser, complete the Google flow.
@@ -63,9 +65,9 @@ $antigravity review --base main
 $antigravity rescue investigate why the integration tests started failing after PR #42
 $antigravity task --continue draft a migration plan from Sequelize to Drizzle
 $antigravity status
-$antigravity wait 0193e2c9-... --timeout-ms 600000
-$antigravity logs 0193e2c9-... --follow
-$antigravity result 0193e2c9-...
+$antigravity wait antigravity-mrvibyu3-9702f6 --timeout-ms 600000
+$antigravity logs antigravity-mrvibyu3-9702f6 --follow
+$antigravity result antigravity-mrvibyu3-9702f6
 ```
 
 ## Where this plugin lives (for Codex auto-discovery)

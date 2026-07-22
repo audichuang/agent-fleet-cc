@@ -21,7 +21,7 @@
       "name": "antigravity",
       "source": "./plugins/antigravity",
       "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, generate images, and hand off work — with a liveness watchdog and cross-process-safe job state.",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "author": {
         "name": "audichuang"
       }

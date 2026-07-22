@@ -1,6 +1,6 @@
 {
   "name": "antigravity",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Delegate tasks and code reviews to Google Antigravity CLI (agy) from Claude Code, Codex CLI, or any ACP-free host.",
   "author": {
     "name": "Sakib Sadman Shajib",
