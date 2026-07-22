@@ -41,17 +41,30 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 
 | | |
 |---|---|
-| Codex CLI HEAD | `d5998e7452` (`codex-zsh-v0.1.0-546` / codex-cli 0.144.6) |
-| Audit date | 2026-07-21 |
-| Plugin version at audit | `codex@1.3.2` |
+| Codex CLI HEAD | `4a443994bd` (`codex-zsh-v0.1.0-604`; installed binary codex-cli 0.145.0) |
+| Last re-check | 2026-07-22 (diff + source-grounded checklist) |
+| Last FULL 11-dimension audit | 2026-07-21 @ `d5998e7452` (codex-cli 0.144.6) → `codex@1.3.2` |
+| Plugin version now | `codex@1.4.0` |
 | Codex repo checked | `/home/audichuang/research/codex` |
 
-> Last re-audit (2026-07-21) re-ran all 11 protocol dimensions (adversarially verified) plus a
-> coverage critic against `d5998e7452` (153 commits past `800715d201`; 73 touch the protocol
-> surface). **No breaking drift.** Two source-grounded should-upgrade fixes landed in
-> `codex@1.3.2` (Bedrock auth-label field rename + v1 decline shape) — see the latest Audit-log
-> row. The result tables below still describe the deeper 2026-07-13 pass; their `file:line`
-> anchors are from that commit unless the log row notes a newer one.
+> **2026-07-22 re-check (codex-cli 0.144.6 → 0.145.0, HEAD `d5998e7452` → `4a443994bd`, 58 commits):**
+> No drift on the plugin's app-server v2 surface — **no plugin change needed.** Verified two ways:
+> (a) **diff** — the commits touching the protocol paths are all internal (sandbox / proxy /
+> plugin-list / rollout / HTTP client / response-item-ID assignment); the ones touching the
+> `app-server-protocol` crate are purely **additive** (new `configRequirements/read` fields,
+> `PluginListParams.forceRefetch`, `PathUri`/`FeedbackRequirements`) — `config/read` (what the plugin
+> reads) untouched, zero diff lines hit a durable-checklist identifier. (b) **source-grounded** —
+> every durable-checklist item was confirmed to still EXIST with its expected shape in the 0.145.0
+> source: all 10 sent requests present in the v2 schema, `turn/start` params (`thread_id`/`input`/
+> `model`/`effort`/`output_schema`) on `turn.rs`, Bedrock `usesCodexManagedCredentials` present
+> (`common.rs`), `InitializeCapabilities` fields present, all 18 notifications + 9 item.type variants
+> in the v2 schema, all 8 server-request decline names in `server_request_definitions!`.
+> `build:codex` regenerated types from the installed 0.145.0 CLI and tsc passed. Scope: diff +
+> source-grounded checklist verification (proportionate to a patch bump), not the full multi-agent
+> 11-dimension pass. The last FULL audit remains 2026-07-21 @ `d5998e7452`.
+>
+> The result tables below still describe the deeper 2026-07-13 pass; their `file:line` anchors are
+> from that commit unless a log row notes a newer one.
 
 ---
 
@@ -184,6 +197,7 @@ that Codex diff-review before considering the pass done.
 
 | Date | Codex HEAD | Plugin | Outcome |
 |---|---|---|---|
+| 2026-07-22 | `4a443994bd` (codex-cli 0.145.0) | 1.4.0 (**unchanged by this audit**) | **No drift — record-only.** codex-cli 0.144.6 → 0.145.0 (58 commits past `d5998e7452`). **Diff:** commits touching the protocol paths are all internal (sandbox / proxy / plugin-list / rollout / HTTP client factory / response-item-ID assignment `#34645` — plugin treats `item.id` opaque); the 3 touching `app-server-protocol` are all **additive**: new `configRequirements/read` fields (`sqlite_home`/`log_dir`/`model_catalog_json`/`feedback`/… on `ConfigRequirements`; `v2/config.rs`) + a `ConfigRequirementReadonly` write-error variant, `PluginListParams.forceRefetch`, new `PathUri`/`FeedbackRequirements`. **`config/read` (`ConfigReadResponse`) — what the plugin reads — untouched;** the new `configRequirements/read` endpoint is not called by the plugin. Zero diff lines hit a durable-checklist identifier. **Source-grounded:** confirmed every checklist item still exists with its expected shape in the 0.145.0 source — 10/10 sent requests in the v2 schema, `turn/start` params incl. `output_schema` on `turn.rs`, Bedrock `usesCodexManagedCredentials` (`common.rs`), `InitializeCapabilities` (`experimental_api`/`request_attestation`/`optOutNotificationMethods`), all 18 notifications + 9 item.type variants, all 8 server-request decline names (`server_request_definitions!`). `build:codex` regenerated types from the installed 0.145.0 CLI; `tsc` passed. Scope: diff + source-grounded checklist verification (proportionate to a patch bump), not the full multi-agent 11-dimension pass. (Plugin 1.4.0 = the unrelated model-auto-fallback feature, not driven by this sync.) |
 | 2026-07-13 | `2b0b37abb7` | 1.2.0 → **1.3.0** | No breaking protocol drift. 4 health/observability improvements + 1 auth-label fix applied, then 2 follow-on races (broker intentional-close, reconcile deadline TOCTOU) + 2 nits (monotonic clock, UTF-8 byte count) hardened after an independent Codex (GPT-5.6) diff review. 432 codex + 109 shared green. |
 | 2026-07-21 | `d5998e7452` (codex-cli 0.144.6) | 1.3.1 → **1.3.2** | **No breaking drift.** Re-ran all 11 dimensions (adversarially verified) + a coverage critic against 153 commits since `800715d201` (73 protocol-surface). 8 dimensions `none`; 3 non-none, all non-breaking. **Two source-grounded fixes applied in 1.3.2:** (1) **Bedrock auth label** — `account/read`'s `Account::AmazonBedrock` field was renamed/retyped `credentialSource` (string enum `awsManaged`/`codexManaged`) → `usesCodexManagedCredentials` (bool) and the `AmazonBedrockCredentialSource` enum deleted (`protocol/src/account.rs`, `app-server-protocol/src/protocol/v2/account.rs`); the plugin read `account.credentialSource` so the label silently dropped. `buildAppServerAuthStatus` (`codex.mjs`) now reads the bool, mapping true→`codexManaged`/false→`awsManaged`, with a legacy-string fallback for older CLIs. (2) **v1 decline shape** — `ReviewDecision::Denied` became a struct variant `{denied:{rejection}}` (`protocol/src/protocol.rs:4106`, snake_case externally tagged); the dead-path v1 `applyPatchApproval`/`execCommandApproval` replies in `app-server.mjs` were corrected from `{decision:"denied"}` to `{decision:{denied:{rejection}}}` (v2 turn/start flow uses `{decision:"decline"}`, unchanged — never triggered). Coverage critic: all_covered, only new methods are the Apps API (`app/read`/`app/installed`, plugin never calls); no request struct the plugin populates carries `deny_unknown_fields`. **Verified live:** real-engine e2e smoke vs codex-cli 0.144.6 (launch→cancel→wait, 0 violations) + `build:codex` typecheck vs types generated from the installed CLI + full `npm test` green. |
 | 2026-07-16 | `800715d201` (rust-v0.144.5) | 1.3.1 (**unchanged**) | **No breaking drift — record-only, no plugin change.** Re-audited all 5 dependency dimensions (requests sent · notifications · item types · account/auth · initialize+server-requests) against 112 commits since `2b0b37abb7`, each finding adversarially refuted against current Rust. Every change touching the plugin's read surface is additive/cosmetic and ignored: `emittedAtMs` (notification timestamp — additive **top-level sibling** of `method`/`params`, not an envelope wrapper; `common.rs:1731-1742`), `cacheWriteInputTokens` (`thread/tokenUsage/updated`; `v2/thread.rs:1458`), `spendControlReached` (`account/rateLimits/updated`; `v2/account.rs:536`), pagination `next_cursor` (responses only — **`thread/list` still does NOT require cursor/limit**, both `Option`, no `deny_unknown_fields`). The two removed fields (`mcpToolCall.appContext.templateId`, `ThreadItemsListResponse.data`) are outside the plugin's read set. `server_request_definitions!` + `InitializeCapabilities` byte-identical since baseline. Launch path (bare `codex app-server` → stdio; `cli/src/main.rs:516`) and hard default model `gpt-5.6-sol` (`codex-companion.mjs:96`) both still valid. |
