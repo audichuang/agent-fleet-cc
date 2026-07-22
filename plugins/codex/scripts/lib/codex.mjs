@@ -31,6 +31,7 @@
  *   messages: Array<{ lifecycle: string, phase: string | null, text: string }>,
  *   fileChanges: ThreadItem[],
  *   commandExecutions: ThreadItem[],
+ *   startedSideEffect: boolean,
  *   commandOutputBytes: number,
  *   lastCommandHeartbeatMs: number,
  *   onProgress: ProgressReporter | null
@@ -373,6 +374,11 @@ function createTurnCaptureState(threadId, options = {}) {
     messages: [],
     fileChanges: [],
     commandExecutions: [],
+    // Set as soon as a command/file-change item is even STARTED (fileChanges/
+    // commandExecutions only record COMPLETED items). The model-fallback retry guard
+    // reads this so a turn that began mutating — but errored before item/completed —
+    // is never re-run.
+    startedSideEffect: false,
     // Command-output heartbeat throttle state (see the outputDelta handler).
     // -Infinity so the first delta always fires immediately under a monotonic
     // clock (performance.now() starts near 0, unlike Date.now()).
@@ -470,6 +476,11 @@ function belongsToTurn(state, message) {
 }
 
 function recordItem(state, item, lifecycle, threadId = null) {
+  // A command/file-change item existing at all (started OR completed) means the turn
+  // began doing work — flag it so the model-fallback retry never re-runs a mutation.
+  if (item.type === "commandExecution" || item.type === "fileChange") {
+    state.startedSideEffect = true;
+  }
   if (item.type === "collabAgentToolCall") {
     if (!threadId || threadId === state.threadId) {
       if (lifecycle === "started" || item.status === "inProgress") {
@@ -1171,6 +1182,37 @@ export function describeTurnError(error, stderr = "") {
 const MAX_TURN_ERROR_LEN = 2000;
 const MAX_TURN_ERROR_PARSE_LEN = 32_000;
 
+// The frontier tier (gpt-5.6-sol) is intermittently gated on ChatGPT-account Codex —
+// a turn is rejected with HTTP 400 "The 'X' model requires a newer version of Codex"
+// (or a model not-found / unavailable variant). The companion falls back to this
+// executor tier once when that happens, so an intermittent gate reads as "retried on
+// terra", not "the plugin died". Kept as an explicit slug — the `gpt-5.6` family alias
+// is not resolvable on ChatGPT-account Codex.
+export const MODEL_FALLBACK_SLUG = "gpt-5.6-terra";
+
+// Match ONLY the one CONFIRMED model-gate signal: HTTP 400 "The '<slug>' model
+// requires a newer version of Codex." Requires BOTH the exact gate phrase AND the word
+// "model" (in any order) so unrelated "requires a newer version of Codex" notices — e.g.
+// an MCP integration notice — never trigger a model switch. We deliberately do NOT match
+// speculative "unsupported/unknown/not-found model" phrasings: there is no evidence Codex
+// emits them, and broad model+keyword matching false-fires on real turn errors like
+// "unsupported model output format" / "model failed with an unknown transport error".
+// Add a phrase here only with a real captured sample. A genuine bug (auth, rate limit,
+// a real turn error) must be surfaced, never model-switched.
+const MODEL_UNAVAILABLE_RE = /(?=[\s\S]*\bmodel\b)[\s\S]*requires a newer version of codex/i;
+
+// True when a FAILED turn/review result failed specifically because its model was
+// unavailable. Checks BOTH error sources (turn.error AND the error notification)
+// independently — a `??` would let a generic message on one source mask the
+// model-unavailable message on the other.
+export function isModelUnavailableFailure(result) {
+  if (!result || result.status === 0) {
+    return false;
+  }
+  const messages = [describeTurnError(result.turn?.error), describeTurnError(result.error, result.stderr)];
+  return messages.some((message) => typeof message === "string" && MODEL_UNAVAILABLE_RE.test(message));
+}
+
 const BUILTIN_PROVIDER_LABELS = new Map([
   ["openai", "OpenAI"],
   ["ollama", "Ollama"],
@@ -1609,7 +1651,8 @@ export async function runAppServerTurn(cwd, options = {}) {
       stderr: cleanCodexStderr(client.stderr),
       fileChanges: turnState.fileChanges,
       touchedFiles: collectTouchedFiles(turnState.fileChanges),
-      commandExecutions: turnState.commandExecutions
+      commandExecutions: turnState.commandExecutions,
+      startedSideEffect: turnState.startedSideEffect
     };
   });
 }

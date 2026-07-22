@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.4.0
+
+Auto-fallback to `gpt-5.6-terra` when the frontier tier is unavailable. The default model
+`gpt-5.6-sol` is intermittently gated on ChatGPT-account Codex and rejects a turn with HTTP 400
+"The 'X' model requires a newer version of Codex" — the same turn succeeds on other days, so it
+read as "the plugin is broken."
+
+- `task`, `review`, and `adversarial-review` now retry the turn **once** on `gpt-5.6-terra` when it
+  failed *specifically* because the model was unavailable (`isModelUnavailableFailure` — an
+  anchored, conservative match, so auth / rate-limit / genuine turn errors that merely mention a
+  model are never model-switched; both error sources are checked so neither masks the other). It
+  never re-runs a turn that already executed a command or touched a file, so a `--write` task's
+  side effects can't be duplicated.
+- The degrade is **visible**, never silent: a progress line ("Model gpt-5.6-sol is unavailable;
+  retrying on gpt-5.6-terra") plus a `modelFallback: { from, to }` field on the `--json` payload.
+- Builds on 1.3.3's failure-surfacing: if `terra` also fails, the real reason is surfaced (not a
+  bare "failed"). An explicit `--model gpt-5.6-terra` (or `CODEX_DEFAULT_MODEL=gpt-5.6-terra`)
+  skips the redundant retry.
+- Tests: `tests/codex/model-fallback.test.mjs` — detection units (varied phrasings + false-positive
+  traps + both-sources) plus black-box e2e driving the real CLI for task / native review /
+  adversarial review (sol rejected → terra succeeds), a retry-boundary attempt-count guard, and a
+  terra-also-fails surfacing case; proven non-vacuous.
+
+Independent review (Codex, gpt-5.6-sol) hardened the detection regex (dropped bare
+`model … unsupported/unknown` that false-matched real turn errors), added the two-source check and
+the did-work retry guard, and broadened the e2e coverage.
+
 ## 1.3.3
 
 Fix a **silent failure**: a task/review turn ended by an app-server `error` notification

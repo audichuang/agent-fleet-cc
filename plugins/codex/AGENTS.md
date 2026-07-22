@@ -41,6 +41,12 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   (`commands/handoff.md`)。要活過 session 用 `/codex:task --background`。
 - broker 是持久共用的(一次一個 turn、idle 5s 自關),不是每次 spawn;改 broker / turn-ack / idle /
   watchdog 時,event-ordering 測試偶爾 flaky(root gotcha),re-run 一次確認。
+- **預設模型 `gpt-5.6-sol` 對 ChatGPT 帳號會間歇被 400**(「requires a newer version of Codex」,同模型
+  多數時候可用)。turn 失敗**是 RETURN 不是 throw**,失敗原因有兩種形狀(獨立 `error` notification 與
+  terminal `turn/completed` 的 `turn.error`)—— 兩者都要灌進結構化 `errorMessage`(`failureReasonFor`),
+  否則 `--json`/status 只剩裸「failed」。model-unavailable 會**自動單次重試降 `gpt-5.6-terra`**
+  (`isModelUnavailableFailure` + `runWithModelFallback`,可見:progress line + payload `modelFallback`);
+  偵測刻意保守,別把 auth/rate-limit 也吃進 fallback。
 
 ## 細節指向
 - protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。

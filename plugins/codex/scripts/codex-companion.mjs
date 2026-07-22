@@ -13,6 +13,8 @@ import {
     DEFAULT_CONTINUE_PROMPT,
     describeTurnError,
     findLatestTaskThread,
+    isModelUnavailableFailure,
+    MODEL_FALLBACK_SLUG,
     getCodexAuthStatus,
     getCodexAvailability,
     getSessionRuntimeStatus,
@@ -235,6 +237,36 @@ function failureReasonFor(result) {
     describeTurnError(result.error, result.stderr) ??
     "Codex ended the turn with a failure but reported no error detail."
   );
+}
+
+// Run a turn/review and, if it failed ONLY because the requested model was
+// unavailable (gpt-5.6-sol is intermittently gated → HTTP 400), retry ONCE on the
+// executor tier. `run(model)` must execute the turn with that model. The degrade is
+// never silent: it is announced on the progress stream and tagged as `modelFallback`
+// on the result (which callers surface on the --json payload). A genuine failure
+// (auth, rate limit, a real turn error) is returned unchanged — never model-switched.
+async function runWithModelFallback(requestedModel, onProgress, run) {
+  const result = await run(requestedModel);
+  if (requestedModel === MODEL_FALLBACK_SLUG || !isModelUnavailableFailure(result)) {
+    return result;
+  }
+  // Never re-run a turn that already did work: a real model-unavailable 400 is
+  // rejected at turn start (nothing ran), but should detection ever mis-fire on a
+  // mid-turn error, retrying would duplicate a --write task's side effects. Bail if
+  // the first attempt even STARTED a command or file change (startedSideEffect covers
+  // items that began but errored before item/completed, which the arrays would miss).
+  if (result.startedSideEffect || result.commandExecutions?.length || result.fileChanges?.length) {
+    return result;
+  }
+  if (typeof onProgress === "function") {
+    onProgress(`Model ${requestedModel} is unavailable; retrying on ${MODEL_FALLBACK_SLUG}.`);
+  }
+  // ponytail: a fresh (non-resume) task leaves the sol attempt's empty persistent
+  // thread behind — harmless (the job records the terra thread, so --resume-last is
+  // correct), just minor Codex thread-history litter. Retry-on-same-thread if it ever matters.
+  const retried = await run(MODEL_FALLBACK_SLUG);
+  retried.modelFallback = { from: requestedModel, to: MODEL_FALLBACK_SLUG };
+  return retried;
 }
 
 // Confirm the configured default model (respecting CODEX_DEFAULT_MODEL) is one this
@@ -504,11 +536,13 @@ async function executeReviewRun(request) {
   const reviewName = request.reviewName ?? "Review";
   if (reviewName === "Review") {
     const reviewTarget = validateNativeReviewRequest(target, focusText);
-    const result = await runAppServerReview(request.cwd, {
-      target: reviewTarget,
-      model: request.model,
-      onProgress: request.onProgress
-    });
+    const result = await runWithModelFallback(request.model, request.onProgress, (model) =>
+      runAppServerReview(request.cwd, {
+        target: reviewTarget,
+        model,
+        onProgress: request.onProgress
+      })
+    );
     const errorMessage = failureReasonFor(result);
     const payload = {
       review: reviewName,
@@ -521,7 +555,8 @@ async function executeReviewRun(request) {
         stdout: result.reviewText,
         reasoning: result.reasoningSummary
       },
-      ...(errorMessage ? { errorMessage } : {})
+      ...(errorMessage ? { errorMessage } : {}),
+      ...(result.modelFallback ? { modelFallback: result.modelFallback } : {})
     };
     const rendered = renderNativeReviewResult(
       {
@@ -549,13 +584,15 @@ async function executeReviewRun(request) {
 
   const context = collectReviewContext(request.cwd, target);
   const prompt = buildAdversarialReviewPrompt(context, focusText);
-  const result = await runAppServerTurn(context.repoRoot, {
-    prompt,
-    model: request.model,
-    sandbox: "read-only",
-    outputSchema: readOutputSchema(REVIEW_SCHEMA),
-    onProgress: request.onProgress
-  });
+  const result = await runWithModelFallback(request.model, request.onProgress, (model) =>
+    runAppServerTurn(context.repoRoot, {
+      prompt,
+      model,
+      sandbox: "read-only",
+      outputSchema: readOutputSchema(REVIEW_SCHEMA),
+      onProgress: request.onProgress
+    })
+  );
   const parsed = parseStructuredOutput(result.finalMessage, {
     status: result.status,
     failureMessage: result.error?.message ?? result.stderr
@@ -580,7 +617,8 @@ async function executeReviewRun(request) {
     rawOutput: parsed.rawOutput,
     parseError: parsed.parseError,
     reasoningSummary: result.reasoningSummary,
-    ...(errorMessage ? { errorMessage } : {})
+    ...(errorMessage ? { errorMessage } : {}),
+    ...(result.modelFallback ? { modelFallback: result.modelFallback } : {})
   };
 
   return {
@@ -628,17 +666,19 @@ async function executeTaskRun(request) {
     throw new Error("Provide a prompt, a prompt file, piped stdin, or use --resume-last.");
   }
 
-  const result = await runAppServerTurn(workspaceRoot, {
-    resumeThreadId,
-    prompt: request.prompt,
-    defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
-    model: request.model,
-    effort: request.effort,
-    sandbox: request.write ? "workspace-write" : "read-only",
-    onProgress: request.onProgress,
-    persistThread: true,
-    threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
-  });
+  const result = await runWithModelFallback(request.model, request.onProgress, (model) =>
+    runAppServerTurn(workspaceRoot, {
+      resumeThreadId,
+      prompt: request.prompt,
+      defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
+      model,
+      effort: request.effort,
+      sandbox: request.write ? "workspace-write" : "read-only",
+      onProgress: request.onProgress,
+      persistThread: true,
+      threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
+    })
+  );
 
   const rawOutput = typeof result.finalMessage === "string" ? result.finalMessage : "";
   const failureMessage = result.error?.message ?? result.stderr ?? "";
@@ -663,7 +703,8 @@ async function executeTaskRun(request) {
     reasoningSummary: result.reasoningSummary,
     // Foreground `task --json` prints this payload directly — carry the failure
     // reason here too, not only on the persisted record (status/wait/result).
-    ...(errorMessage ? { errorMessage } : {})
+    ...(errorMessage ? { errorMessage } : {}),
+    ...(result.modelFallback ? { modelFallback: result.modelFallback } : {})
   };
 
   return {

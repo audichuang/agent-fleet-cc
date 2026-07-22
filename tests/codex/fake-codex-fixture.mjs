@@ -321,6 +321,8 @@ rl.on("line", (line) => {
           throw new Error("thread/start.persistFullHistory requires experimentalApi capability");
         }
         const thread = nextThread(state, message.params.cwd, message.params.ephemeral);
+        thread.model = message.params.model ?? null; // remember the requested model so review/start can gate on it
+        saveState(state);
         send({ id: message.id, result: { thread: buildThread(thread), model: message.params.model || "gpt-5.4", modelProvider: "openai", serviceTier: null, cwd: thread.cwd, approvalPolicy: "never", sandbox: { type: "readOnly", access: { type: "fullAccess" }, networkAccess: false }, reasoningEffort: null } });
         send({ method: "thread/started", params: { thread: { id: thread.id } } });
         break;
@@ -378,6 +380,13 @@ rl.on("line", (line) => {
           send({ method: "turn/completed", params: { threadId: reviewThread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });
           break;
         }
+        // Native review runs on the thread's model (set at thread/start); reject any
+        // non-terra so the review fallback path can be proven end-to-end.
+        if (BEHAVIOR === "model-fallback" && thread.model !== "gpt-5.6-terra") {
+          send({ method: "turn/started", params: { threadId: reviewThread.id, turn: buildTurn(turnId) } });
+          send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          break;
+        }
         emitTurnCompleted(reviewThread.id, turnId, [
           {
             started: { type: "enteredReviewMode", id: turnId, review: "current changes" }
@@ -427,6 +436,21 @@ rl.on("line", (line) => {
         if (BEHAVIOR === "turn-completed-error") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
           send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });
+          break;
+        }
+        // Model fallback: sol (or any non-terra) is rejected as unavailable; the
+        // executor tier succeeds — so the companion's retry-on-terra path can be proven.
+        if (BEHAVIOR === "model-fallback" && message.params.model !== "gpt-5.6-terra") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          break;
+        }
+        // A command STARTS (side effect), then the model-gate error arrives before
+        // item/completed — the retry guard must NOT re-run this (would double the effect).
+        if (BEHAVIOR === "model-error-after-command") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "item/started", params: { threadId: thread.id, turnId, item: { type: "commandExecution", id: "cmd_" + turnId, command: "echo side-effect", status: "inProgress" } } });
+          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
           break;
         }
 
