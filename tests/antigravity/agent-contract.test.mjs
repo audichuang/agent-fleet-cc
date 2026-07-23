@@ -38,7 +38,7 @@ describe('agy-rescue agent contract', () => {
     // response is a real flake; one identical retry is allowed — but only for
     // side-effect-free calls (codex review finding: --apply/--resume/--continue/
     // --conversation runs may have edited files or advanced a conversation).
-    assert.match(agent, /none of `--apply`, `--resume`, `--continue`, or `--conversation`[^.]*exits 0 but prints nothing[^.]*retry the identical command once/i);
+    assert.match(agent, /none of `--apply`, `--background`, `--resume`, `--continue`, or `--conversation`[^.]*exits 0 but prints nothing[^.]*retry the identical command once/i);
     assert.match(agent, /Never retry a run that carried any of those flags/i);
     assert.match(agent, /Never retry a non-zero exit, and never retry more than once/i);
     assert.match(agent, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/commands\/rescue\.mjs/);

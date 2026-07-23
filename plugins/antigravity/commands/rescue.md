@@ -34,5 +34,5 @@ Operating rules:
 - `--model <id>`, `--conversation <id>`, `--add-dir <path>`, and `--prompt-file <path>` are runtime flags. Leave them in the forwarded request; do not treat them as task text.
 - `--apply` and `--dangerously-skip-permissions` are write-mode flags. Leave them in the forwarded request; do not treat them as task text. By default (no `--apply`) Antigravity does not edit your repo — it returns text/a proposed patch for you to apply (not a hard read-only guard: agy may still write to its own `~/.gemini` scratch). `--dangerously-skip-permissions` only takes effect together with `--apply`.
 - Leave `--resume`, `--continue`, and `--fresh` in the forwarded request. The subagent handles that routing when it builds the `rescue.mjs` command.
-- If the subagent's output says Antigravity is missing or not authenticated, stop and tell the user to run `/antigravity:setup`.
+- If the subagent's output says Antigravity is missing or not authenticated and the relayed text does not already point at setup, stop and tell the user to run `/antigravity:setup`.
 - If the user did not supply a request, ask what Antigravity should investigate or fix.
