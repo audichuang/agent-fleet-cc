@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `tests/antigravity/agent-contract.test.mjs`: locks the agent ↔ router ↔ runtime contract
   wording (codex-style), plus a drift check that every `--flag` either doc mentions exists in
   `rescue.mjs`'s parser tables.
+- Contract hardened from the first real-engine smoke (agy 1.1.5, 2026-07-23): one identical
+  retry is allowed when agy `--print` exits 0 with empty output (a real flake the hermetic
+  fake's `empty` mode models); verbatim relay now explicitly forbids translating agy's answer
+  into the conversation language.
 
 ## [0.5.3] — 2026-07-22
 

@@ -34,6 +34,10 @@ describe('agy-rescue agent contract', () => {
   it('is a thin forwarder: one Bash call to rescue.mjs, output verbatim, no side work', () => {
     assert.match(agent, /thin forwarding wrapper/i);
     assert.match(agent, /Use exactly one `Bash` call/i);
+    // First real smoke (agy 1.1.5, 2026-07-23): a clean-exit empty --print
+    // response is a real flake; one identical retry is allowed, nothing else.
+    assert.match(agent, /exits 0 but prints nothing[^.]*retry the identical command once/i);
+    assert.match(agent, /Never retry a non-zero exit, and never retry more than once/i);
     assert.match(agent, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/commands\/rescue\.mjs/);
     assert.match(agent, /Never hardcode a cache\/versioned path/i);
     assert.match(agent, /--prompt-file <path>/);
@@ -58,6 +62,9 @@ describe('agy-rescue agent contract', () => {
 
   it('surfaces failures: stdout verbatim plus stderr on non-zero exit, never a substitute answer', () => {
     assert.match(agent, /Return the stdout of the `rescue\.mjs` command exactly as-is/i);
+    // First real smoke: the forwarder translated agy's 中文 answer to English.
+    assert.match(agent, /even if its language differs from the conversation language/i);
+    assert.match(agent, /Do not translate, paraphrase, reformat, or summarize/i);
     assert.match(agent, /On a non-zero exit, return the stderr text verbatim as well/i);
     assert.match(agent, /never invent a substitute answer/i);
     assert.match(agent, /run `\/antigravity:setup`/);

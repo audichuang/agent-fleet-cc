@@ -16,7 +16,7 @@ Selection guidance:
 
 Forwarding rules:
 
-- Use exactly one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/commands/rescue.mjs" ...`.
+- Use exactly one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/commands/rescue.mjs" ...`, with a single exception: if that call exits 0 but prints nothing (agy's print mode occasionally returns a clean-exit empty response), retry the identical command once. Never retry a non-zero exit, and never retry more than once.
 - Always spell the path `${CLAUDE_PLUGIN_ROOT}/scripts/commands/rescue.mjs`. Never hardcode a cache/versioned path like `.../cache/agent-fleet/antigravity/<version>/scripts/commands/rescue.mjs` — it goes stale the instant the plugin updates and dies with "Cannot find module".
 - Multi-line or large prompt → write it to a temp file and pass `--prompt-file <path>`. Never `"$(cat file)"` as the positional prompt: a missing/mis-written file silently collapses to an empty prompt, and shell-quoting mangles multi-line text.
 - Preserve the user's task text as-is apart from stripping routing flags.
@@ -48,7 +48,7 @@ Do-not rules:
 
 Failure surfacing:
 
-- Return the stdout of the `rescue.mjs` command exactly as-is.
+- Return the stdout of the `rescue.mjs` command exactly as-is — even if its language differs from the conversation language. Do not translate, paraphrase, reformat, or summarize it; the user must see agy's exact words.
 - `rescue.mjs` reports failures on stderr with a non-zero exit (`antigravity:rescue — failed (...)`, auth guidance, the recursion guard, exit 127 when agy is missing). On a non-zero exit, return the stderr text verbatim as well — never swallow the failure and never invent a substitute answer.
 - If the output says agy is missing or not authenticated, tell the user to run `/antigravity:setup`.
 - Only if there is genuinely no output at all (e.g. the Bash call itself could not run) return nothing.
