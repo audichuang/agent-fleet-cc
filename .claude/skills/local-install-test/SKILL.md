@@ -94,6 +94,24 @@ Trade-off: you'll have a marketplace pointing at a local path (fine for dev). Re
 releases still go through the git fork. You still must bump the version each cycle —
 the cache is version-keyed regardless of source.
 
+## Workflow C — unpushed branch (hand-materialize the cache)
+
+Use when the marketplace points at GitHub but your change only exists on a local
+branch (pre-review, nothing pushed). Skip the marketplace entirely — the cache is
+just a directory and the pin is just JSON (verified end-to-end 2026-07-23, shipping
+antigravity 0.6.0's subagent before it was pushed):
+
+```bash
+# 0) bump the version as always, then: payload -> versioned cache dir
+cp -r plugins/<plugin> ~/.claude/plugins/cache/agent-fleet/<plugin>/<new>
+# repoint the pin at it WITHOUT refreshing the marketplace (which would not have it)
+npm run use-local -- <plugin> <new> --no-refresh
+```
+
+Re-copy after every rebase/amend or cache-worthy edit — the cache dir does not track
+your working tree. `diff -rq plugins/<plugin> ~/.claude/plugins/cache/agent-fleet/<plugin>/<new>`
+proves the payload is byte-identical.
+
 ## Flipping the active version
 
 After `marketplace update` has materialized `cache/agent-fleet/<plugin>/<new>/`, make
@@ -135,6 +153,23 @@ Then exercise it for real — e.g. for codex: `/codex:setup` shows `Status: read
 then run a real `/codex:rescue` or `/codex:review`. Grep'ing the cache is the fast
 proof the bytes are live; the slash command is the proof it behaves.
 
+Verifying plugin **agents** (subagents) has three extra traps (all hit for real on
+2026-07-23):
+
+- Agent definitions load at **session start**. `/reload-plugins` does NOT re-read
+  `installed_plugins.json` — it reloads the paths resolved when the session started —
+  and refreshing the cache dir under a running session changes nothing either. Every
+  agent-content change needs a full restart to take effect.
+- Headless `claude -p` loads **no plugin agents at all**, so it cannot probe them.
+  Verify in an interactive session: call the Agent tool with
+  `subagent_type: "<plugin>:<agent>"`, then prove the run went through the real
+  runtime by checking it left a job record (e.g.
+  `node plugins/antigravity/scripts/commands/status.mjs`).
+- `claude plugin details <plugin>@agent-fleet` reflects the **marketplace clone**,
+  not the installed pin — after a Workflow-C install it still shows the old
+  version/component inventory. Trust `claude plugin list` (reads the pin) plus the
+  cache grep instead.
+
 ## Quick reference
 
 | Symptom | Cause | Fix |
@@ -144,3 +179,5 @@ proof the bytes are live; the slash command is the proof it behaves.
 | Repointed the pin, still old in this session | session loaded old version at start | restart Claude Code |
 | Hand edit to installed_plugins.json reverted | a `/plugin` op in the stale session rewrote it | restart first, don't touch `/plugin` in the old session |
 | `codex` structure test fails after bump | plugin.json and marketplace.json disagree | make both versions identical |
+| Ran `/reload-plugins`, new agent still missing | reload keeps session-start paths, never re-reads the pin | full Claude Code restart |
+| `plugin details` shows the old version after a flip | `details` reads the marketplace clone, not the pin | trust `claude plugin list` + cache grep |
