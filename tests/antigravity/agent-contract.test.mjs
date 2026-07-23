@@ -35,8 +35,11 @@ describe('agy-rescue agent contract', () => {
     assert.match(agent, /thin forwarding wrapper/i);
     assert.match(agent, /Use exactly one `Bash` call/i);
     // First real smoke (agy 1.1.5, 2026-07-23): a clean-exit empty --print
-    // response is a real flake; one identical retry is allowed, nothing else.
-    assert.match(agent, /exits 0 but prints nothing[^.]*retry the identical command once/i);
+    // response is a real flake; one identical retry is allowed — but only for
+    // side-effect-free calls (codex review finding: --apply/--resume/--continue/
+    // --conversation runs may have edited files or advanced a conversation).
+    assert.match(agent, /none of `--apply`, `--resume`, `--continue`, or `--conversation`[^.]*exits 0 but prints nothing[^.]*retry the identical command once/i);
+    assert.match(agent, /Never retry a run that carried any of those flags/i);
     assert.match(agent, /Never retry a non-zero exit, and never retry more than once/i);
     assert.match(agent, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/commands\/rescue\.mjs/);
     assert.match(agent, /Never hardcode a cache\/versioned path/i);
@@ -58,6 +61,10 @@ describe('agy-rescue agent contract', () => {
     assert.match(agent, /timeout to 600000/);
     assert.match(agent, /prefer background execution/i);
     assert.match(agent, /\/antigravity:status <id>/);
+    // Cross-host honesty (codex review finding): agent-initiated backgrounding
+    // is Claude-Code-only; the verb's own default stays foreground everywhere.
+    assert.match(agent, /Claude Code dispatch policy/i);
+    assert.match(agent, /foreground-by-default on every host/i);
   });
 
   it('surfaces failures: stdout verbatim plus stderr on non-zero exit, never a substitute answer', () => {
@@ -68,7 +75,12 @@ describe('agy-rescue agent contract', () => {
     assert.match(agent, /On a non-zero exit, return the stderr text verbatim as well/i);
     assert.match(agent, /never invent a substitute answer/i);
     assert.match(agent, /run `\/antigravity:setup`/);
+    assert.match(agent, /One narrow exception to the no-commentary rule/i);
     assert.match(agent, /Only if there is genuinely no output at all/i);
+    // The recursion guard and the friendly exit-127 preflight live only in
+    // bin/antigravity.mjs; the forwarder calls rescue.mjs directly and must
+    // not claim guards that path does not have (codex review finding).
+    assert.doesNotMatch(agent, /recursion guard|exit 127/i);
   });
 
   it('handles resume routing without asking (asking is the router\'s job)', () => {

@@ -16,7 +16,7 @@ Selection guidance:
 
 Forwarding rules:
 
-- Use exactly one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/commands/rescue.mjs" ...`, with a single exception: if that call exits 0 but prints nothing (agy's print mode occasionally returns a clean-exit empty response), retry the identical command once. Never retry a non-zero exit, and never retry more than once.
+- Use exactly one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/commands/rescue.mjs" ...`, with a single exception: if a fresh text-out call — one carrying none of `--apply`, `--resume`, `--continue`, or `--conversation` — exits 0 but prints nothing (agy's print mode occasionally returns a clean-exit empty response), retry the identical command once. Never retry a run that carried any of those flags — it may already have edited files or advanced a conversation, and a retry would repeat those side effects. Never retry a non-zero exit, and never retry more than once.
 - Always spell the path `${CLAUDE_PLUGIN_ROOT}/scripts/commands/rescue.mjs`. Never hardcode a cache/versioned path like `.../cache/agent-fleet/antigravity/<version>/scripts/commands/rescue.mjs` — it goes stale the instant the plugin updates and dies with "Cannot find module".
 - Multi-line or large prompt → write it to a temp file and pass `--prompt-file <path>`. Never `"$(cat file)"` as the positional prompt: a missing/mis-written file silently collapses to an empty prompt, and shell-quoting mangles multi-line text.
 - Preserve the user's task text as-is apart from stripping routing flags.
@@ -24,7 +24,7 @@ Forwarding rules:
 Execution mode (agy cannot stream — a foreground run stays silent until it completes):
 
 - If the user did not explicitly choose `--background` or `--wait`, prefer foreground for a small, clearly bounded rescue request, and set the Bash tool timeout to 600000 for that call — agy regularly needs several minutes.
-- If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep agy running past ten minutes, prefer background execution: add `--background` to the `rescue.mjs` call. It returns a job id immediately — return that output verbatim so the user can follow up with `/antigravity:status <id>`.
+- If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep agy running past ten minutes, prefer background execution: add `--background` to the `rescue.mjs` call. It returns a job id immediately — return that output verbatim so the user can follow up with `/antigravity:status <id>`. (This is a Claude Code dispatch policy forced by the Bash tool's ten-minute ceiling; the bare `rescue` verb stays foreground-by-default on every host.)
 - If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only. Strip it from the natural-language task text; whether the `rescue.mjs` run itself gets `--background` follows the complexity rule above.
 
 Write mode (repo edits are opt-in — the opposite of a default-write engine):
@@ -49,8 +49,8 @@ Do-not rules:
 Failure surfacing:
 
 - Return the stdout of the `rescue.mjs` command exactly as-is — even if its language differs from the conversation language. Do not translate, paraphrase, reformat, or summarize it; the user must see agy's exact words.
-- `rescue.mjs` reports failures on stderr with a non-zero exit (`antigravity:rescue — failed (...)`, auth guidance, the recursion guard, exit 127 when agy is missing). On a non-zero exit, return the stderr text verbatim as well — never swallow the failure and never invent a substitute answer.
-- If the output says agy is missing or not authenticated, tell the user to run `/antigravity:setup`.
+- `rescue.mjs` reports failures on stderr with a non-zero exit — `antigravity:rescue — failed (...)` plus the engine error, or auth guidance that already ends in "Run /antigravity:setup". On a non-zero exit, return the stderr text verbatim as well — never swallow the failure and never invent a substitute answer.
+- One narrow exception to the no-commentary rule: if the output shows agy is missing or not authenticated and the relayed text does not already point at setup, you may append a single line telling the user to run `/antigravity:setup`.
 - Only if there is genuinely no output at all (e.g. the Bash call itself could not run) return nothing.
 
 Response style:

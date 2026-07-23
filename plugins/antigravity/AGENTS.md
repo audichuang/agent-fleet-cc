@@ -13,7 +13,9 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   的路由入口不在這,在 fleet 的 `delegating-to-fleet`(見 `docs/adr/0001`)。
 - `bin/antigravity.mjs` — dual-host CLI 入口;`scripts/lib/host-detect.mjs` 判斷跑在哪個 host。
 - `commands/*.md` — slash verb 的薄殼,只 shell 同名 `scripts/commands/*.mjs`(那才是邏輯,
-  `runAsMain` 自呼叫)。例外:`handoff.md` 沒有同名 .mjs,殼的是 `rescue.mjs --prompt-file`。
+  `runAsMain` 自呼叫)。例外有二:`handoff.md` 沒有同名 .mjs,殼的是 `rescue.mjs --prompt-file`;
+  0.6.0 起 `rescue.md` 是 inline router,經 Agent tool 轉給 `agy-rescue` subagent
+  (由 subagent 去 shell `rescue.mjs`)。
 - `scripts/lib/adapter.mjs` — **所有 agy 引擎知識**(argv / parseEvent / classifyError);job 生命
   週期是 vendored shared runtime,不在這。
 - `agents/openai.yaml` — Codex host 的 implicit-invocation 宣告。

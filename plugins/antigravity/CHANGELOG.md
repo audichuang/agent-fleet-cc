@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retry is allowed when agy `--print` exits 0 with empty output (a real flake the hermetic
   fake's `empty` mode models); verbatim relay now explicitly forbids translating agy's answer
   into the conversation language.
+- Independent pre-merge review (Codex GPT-5.6) tightened the contract further: the
+  empty-output retry is restricted to side-effect-free calls (never with `--apply` /
+  `--resume` / `--continue` / `--conversation`); the agent no longer claims bin-only guards
+  (recursion refuse, exit-127 preflight) for its direct `rescue.mjs` path; the setup hint is
+  a single explicit exception to the no-commentary rule; agent-initiated `--background` is
+  documented as a Claude-Code-only dispatch policy. Also synced the standalone npm
+  `package.json` version (was stuck at 0.5.0) — root AGENTS.md hand-sync list now covers it.
 
 ## [0.5.3] — 2026-07-22
 

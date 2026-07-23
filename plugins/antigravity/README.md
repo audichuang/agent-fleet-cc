@@ -86,7 +86,9 @@ claude plugin install antigravity@antigravity
 In Claude Code the plugin also ships a proactive **`antigravity:agy-rescue` subagent** — a thin
 forwarder that Claude reaches for on its own when a task wants a second opinion or a
 large-context pass from agy. It keeps the agy operating contract out of the main thread's
-context; `/antigravity:rescue` routes through it too.
+context; `/antigravity:rescue` routes through it too. For long open-ended asks it may start
+the run detached (`--background`) and hand you the job id — a Claude-Code-only dispatch
+choice; the bare `rescue` verb stays foreground-by-default on every host.
 
 Background jobs survive a crashed or SIGKILL'd worker: the shared runtime's dead-PID
 reconcile (with a TTL claim-orphan check, on every status read) marks a stuck job

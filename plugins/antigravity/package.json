@@ -1,6 +1,6 @@
 {
   "name": "antigravity-plugin",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Multi-host plugin for delegating tasks and code reviews to Google Antigravity CLI (agy). Works inside Claude Code, Codex CLI, agy itself, and standalone via npx.",
   "type": "module",
   "bin": {

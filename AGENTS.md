@@ -34,10 +34,12 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
   check-version` verifies). It syncs only those two; the per-plugin `.codex-plugin/plugin.json`
   dual-host manifests (`cc`, `antigravity`) also carry a version and drift silently — hand-sync
-  those, plus antigravity's `.agents/plugins/marketplace.json` `metadata.version` (the only
-  per-plugin descriptor carrying one). (Root `package.json` holds the repo's own version, not a
-  plugin mirror; the root `.agents/plugins/marketplace.json` carries no version — neither needs
-  touching on a plugin bump.)
+  those, plus antigravity's `.agents/plugins/marketplace.json` `metadata.version` and its
+  standalone-host pair `plugins/antigravity/plugin.json` + `plugins/antigravity/package.json`
+  (npx `--version` reads the former; npm metadata is the latter — both drifted once). (Root
+  `package.json` holds the repo's own version, not a plugin mirror; the root
+  `.agents/plugins/marketplace.json` carries no version — neither needs touching on a plugin
+  bump.)
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
