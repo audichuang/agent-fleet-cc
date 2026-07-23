@@ -77,11 +77,16 @@ claude plugin install antigravity@antigravity
 | `/antigravity:setup` | Verify `agy` is installed + complete OAuth (idempotent). |
 | `/antigravity:review [--base <ref>] [--scope ...] [--model <id>]` | Free-form review of the working-tree or branch diff (read-only `--sandbox`). |
 | `/antigravity:adversarial-review` | Strict, structured (JSON) review rendered as markdown. |
-| `/antigravity:rescue <task> [--background] [--continue] [--model <id>] [--prompt-file <p>]` | Delegate a free-form task to agy. |
+| `/antigravity:rescue <task> [--background] [--continue] [--model <id>] [--prompt-file <p>]` | Delegate a free-form task to agy (routes through the `agy-rescue` subagent). |
 | `/antigravity:task <task> [--foreground] [--wait]` | Free-form prompt with background job tracking (background by default). |
 | `/antigravity:image <desc> [--name <n>] [--output <path>]` | Generate an image with agy's `generate_image` (Imagen). |
 | `/antigravity:handoff [focus] [--print] [--background]` | Write a handoff doc and hand the work to agy to continue. |
 | `/antigravity:status [<id>] [--wait]` · `/antigravity:result [<id>]` · `/antigravity:cancel [<id>]` | Inspect / fetch / cancel background jobs. |
+
+In Claude Code the plugin also ships a proactive **`antigravity:agy-rescue` subagent** — a thin
+forwarder that Claude reaches for on its own when a task wants a second opinion or a
+large-context pass from agy. It keeps the agy operating contract out of the main thread's
+context; `/antigravity:rescue` routes through it too.
 
 Background jobs survive a crashed or SIGKILL'd worker: the shared runtime's dead-PID
 reconcile (with a TTL claim-orphan check, on every status read) marks a stuck job

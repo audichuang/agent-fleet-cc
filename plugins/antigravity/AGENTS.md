@@ -16,7 +16,11 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   `runAsMain` 自呼叫)。例外:`handoff.md` 沒有同名 .mjs,殼的是 `rescue.mjs --prompt-file`。
 - `scripts/lib/adapter.mjs` — **所有 agy 引擎知識**(argv / parseEvent / classifyError);job 生命
   週期是 vendored shared runtime,不在這。
-- `agents/openai.yaml` — subagent 宣告。
+- `agents/openai.yaml` — Codex host 的 implicit-invocation 宣告。
+- `agents/agy-rescue.md` — Claude Code 的 proactive thin-forwarder subagent(agy 操作合約
+  **內聯**在 agent 本體,不開 skill —— `disable-model-invocation` 的 skill 不能被 `skills:` 預載;
+  `commands/rescue.md` 是 inline router,經 Agent tool 轉進來)。合約鎖在
+  `tests/antigravity/agent-contract.test.mjs`。
 
 ## 進來改要遵守
 - **agy 無 conversation id → `sessionId` 恆 `null`**;resume 走 `--continue` / `--conversation`,
@@ -29,9 +33,11 @@ review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run �
   `--dangerously-skip-permissions` 是第二層 opt-in,gated 在 `--apply` 之後。
 
 ## 踩雷
-- **verb 行為有四個文案家**:SKILL.md 的 verb 表、`commands/*.md`、README、`agents/openai.yaml` 的
-  command descriptions。改 fg/bg 預設、flag、回傳形狀時四處都要對 —— 0.5.2 抓到 SKILL.md 把
-  review/rescue 寫反成 background-by-default,0.5.3 又在 openai.yaml 抓到同一個錯。
+- **verb 行為有五個文案家**:SKILL.md 的 verb 表、`commands/*.md`、README、`agents/openai.yaml` 的
+  command descriptions,0.6.0 起 rescue 還多了 `agents/agy-rescue.md`。改 fg/bg 預設、flag、回傳
+  形狀時全部都要對 —— 0.5.2 抓到 SKILL.md 把 review/rescue 寫反成 background-by-default,0.5.3 又在
+  openai.yaml 抓到同一個錯;rescue 的 agent/router 兩份由 `agent-contract.test.mjs` 鎖住
+  (含「文件旗標 ⊆ rescue.mjs parser」的 drift 檢查),其餘仍靠人眼。
 - **agy 會背景自我更新**(同 session 實測 1.1.2→1.1.5;證據:`~/.gemini/antigravity-cli/updater/`)。
   別假設引擎版本固定;「已於 X 版真機驗證」的結論要帶版本+日期,引用前先 `agy --version`。
 - **有兩個 wait 表面**:`/antigravity:status --wait`(`commands/status.mjs`)**和**獨立的

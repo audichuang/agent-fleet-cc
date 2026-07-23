@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-23
+
+### Added
+- **`antigravity:agy-rescue` subagent** (`agents/agy-rescue.md`) — Claude Code now delegates
+  rescue work through a dedicated thin-forwarder subagent instead of loading the operating
+  contract into the main thread. The agent body carries the full agy contract (write mode is
+  opt-in via `--apply`; agy cannot stream, so foreground calls get a 10-minute Bash timeout and
+  long tasks prefer `--background`; failures arrive on stderr with a non-zero exit and must be
+  relayed verbatim). Knowledge is inlined in the agent rather than a preloadable skill because
+  `disable-model-invocation` skills cannot be preloaded — inlining keeps the main-thread skill
+  list unchanged.
+
+### Changed
+- **`commands/rescue.md` is now an inline router to the subagent** (was `context: fork`). It
+  runs inline so the `Agent` tool stays in scope, keeps the AskUserQuestion resume/fresh gate
+  (subagents cannot ask the user), and forwards the raw request to `antigravity:agy-rescue`.
+  Guards against the codex #234 recursion class (`Skill(antigravity:rescue)` re-entering the
+  command) are spelled out and pinned by tests. Verb behavior at the runtime layer is unchanged.
+
+### Fixed
+- Root `plugin.json` version had silently drifted (stuck at 0.5.0, so
+  `npx antigravity-plugin --version` lied) — same class as the 0.5.3 `.agents` drift; now synced.
+
+### Tests
+- New `tests/antigravity/agent-contract.test.mjs`: locks the agent ↔ router ↔ runtime contract
+  wording (codex-style), plus a drift check that every `--flag` either doc mentions exists in
+  `rescue.mjs`'s parser tables.
+
 ## [0.5.3] — 2026-07-22
 
 ### Fixed
