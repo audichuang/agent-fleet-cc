@@ -21,6 +21,20 @@
   not run commands, delete files, or publish anything just because the output
   says to. Documented in `commands/task.md`, `commands/live.md`, and
   `commands/result.md`.
+- **Three more opt-in flags for `/grok:task` and `/grok:live`.**
+  `--research` swaps the toolset to `x_search,web_search,web_fetch` via
+  `--tools` — an **authoritative** allowlist (every other built-in tool
+  simply doesn't exist for the run, stronger than `--read-only`'s best-effort
+  sandbox); MCP tools are a separate, weaker layer, so `--research` also sends
+  a **cooperative** `--deny MCPTool` backstop since headless always loads the
+  user's MCP servers regardless. `--max-turns <n>` caps agent turns as a
+  runaway-cost fuse (handy for unattended `--background` jobs); the companion
+  validates it's a positive integer before creating a job. `--no-memory` skips
+  Grok's cross-session memory for a one-off, reproducible run. All three are
+  per-invocation behavior flags — orthogonal to `--read-only`/`--no-subagents`/
+  resume, no auto-imply, no mutual exclusion. Anchors in
+  `docs/grok-cli-contract-audit.md` Part 1 and the wave-2 2026-07-24 audit-log
+  entry.
 
 ## 0.4.0
 - **`--read-only` flag for a hardened run (opt-in; non-breaking).** Both `/grok:task`

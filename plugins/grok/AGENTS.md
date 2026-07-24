@@ -35,6 +35,9 @@
   存進 `request.sessionId` 並在 `createJob` 持久化之後才 spawn,worker 中途死掉仍能 `-r` resume)。
   跟 `resumeSessionId`(resume 路徑)**互斥** —— 兩者不會同時送(grok 對 `--session-id` 併
   `--resume` 且無 `--fork-session` 會直接報錯);`adapter.mjs` 的 `else if` 是最後一道防線。
+- **`--research` 是兩層不同強度的保證,別混為一談**:內建工具白名單(`--tools`)是**權威**
+  取代(白名單外的工具直接不存在),MCP 工具只靠 `--deny MCPTool` **cooperative** 擋,細節/
+  錨點見 `docs/grok-cli-contract-audit.md` Part 1(單一正本,別在此重抄)。
 
 ## 踩雷
 - **fan-out 會洩漏 subagent 文字**:多 agent 跑會把每個 agent 的 text 併成一串、無法 demux

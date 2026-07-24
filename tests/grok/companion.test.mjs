@@ -216,6 +216,72 @@ test("task accepts --read-only (does not reject it as an unknown flag)", async (
   assert.equal(json.status, "completed");
 });
 
+test("task accepts --research, --max-turns, --no-memory (not rejected as unknown flags) and maps them into the spawned argv", async () => {
+  const { out, lines } = collect();
+  let capturedArgs = null;
+  const code = await runCompanion(
+    ["task", "research xyz", "--research", "--max-turns", "7", "--no-memory", "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+      grokSpawnImpl: (bin, args, opts) => {
+        capturedArgs = args;
+        return spawn(bin, args, opts);
+      },
+    },
+  );
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(code, 0);
+  assert.equal(json.status, "completed");
+  assert.equal(capturedArgs[capturedArgs.indexOf("--tools") + 1], "x_search,web_search,web_fetch");
+  assert.equal(capturedArgs[capturedArgs.indexOf("--deny") + 1], "MCPTool");
+  assert.equal(capturedArgs[capturedArgs.indexOf("--max-turns") + 1], "7");
+  assert.ok(capturedArgs.includes("--no-memory"));
+});
+
+test("task without --research/--max-turns/--no-memory sends none of their flags (opt-in only)", async () => {
+  const { out, lines } = collect();
+  let capturedArgs = null;
+  const code = await runCompanion(
+    ["task", "plain run", "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+      grokSpawnImpl: (bin, args, opts) => {
+        capturedArgs = args;
+        return spawn(bin, args, opts);
+      },
+    },
+  );
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(lines.at(-1)).status, "completed");
+  assert.ok(!capturedArgs.includes("--tools"));
+  assert.ok(!capturedArgs.includes("--deny"));
+  assert.ok(!capturedArgs.includes("--max-turns"));
+  assert.ok(!capturedArgs.includes("--no-memory"));
+});
+
+test("task rejects --max-turns 0 / negative / non-numeric with a UsageError, creates no job", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  for (const bad of ["0", "-1", "abc", "1.5"]) {
+    const { out, lines } = collect();
+    const code = await runCompanion(["task", "hi", "--max-turns", bad, "--wait", "--json"], {
+      env: { GROK_PLUGIN_DATA: dataRoot, GROK_BIN: `${process.execPath}` },
+      cwd,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    });
+    assert.equal(code, 1, `--max-turns ${bad} should be rejected`);
+    assert.match(lines.at(-1), /--max-turns must be a positive integer/);
+  }
+  assert.equal(listJobs(workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd)).length, 0, "a rejected --max-turns must create no job record");
+});
+
 test("task --schema returns grok's structured JSON as resultText", async () => {
   const schemaPath = path.join(makeTempDir(), "schema.json");
   fs.writeFileSync(schemaPath, JSON.stringify({ type: "object", properties: { ok: { type: "boolean" } } }));

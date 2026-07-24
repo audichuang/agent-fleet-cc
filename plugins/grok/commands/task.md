@@ -1,6 +1,6 @@
 ---
 description: Run a headless Grok Build task (grok-4.5) — launch, then wait/poll for the result
-argument-hint: "<prompt> [--read-only] [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 ---
 
 Run the grok companion with the user's arguments and relay its output:
@@ -68,6 +68,16 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
   ready to `JSON.parse`. This runs Grok non-streaming (no live `/grok:logs` for
   that job) and needs no fan-out sentinel. Good for extraction/classification
   tasks where you want fields, not prose.
+- **`--research` for a curated tool set (opt-in).** Restricts Grok to
+  `x_search`/`web_search`/`web_fetch` — every other built-in tool (shell, edit,
+  write, read, …) is authoritatively absent, a harder guarantee than
+  `--read-only`'s best-effort sandbox. MCP tools are a separate, weaker layer —
+  Grok still loads your MCP servers regardless, so this also sends a
+  cooperative `--deny MCPTool` as a backstop, not a hard guarantee like the
+  built-in restriction. Composes freely with `--read-only`/`--no-subagents`/resume.
+- Use `--max-turns <n>` as a runaway-cost fuse (handy for `--background` jobs
+  nobody is watching live) and `--no-memory` to skip Grok's cross-session
+  memory for a one-off, reproducible run.
 - Use `--resume-job <job>` or `--resume-last` to continue a previous Grok session.
 - Never re-run a failed job — it may already have side effects.
 - Report the companion's output back to the user verbatim.

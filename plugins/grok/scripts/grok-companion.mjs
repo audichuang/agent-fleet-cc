@@ -36,7 +36,7 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: grok-companion <command> [...]
   setup
-  task <prompt...>|--prompt-file <path> [--read-only] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
+  task <prompt...>|--prompt-file <path> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status [--json]
   result [<job-id>|--last] [--json]
   cancel <job-id> [--json]
@@ -44,8 +44,8 @@ const USAGE = `usage: grok-companion <command> [...]
   logs <job-id> [--follow]`;
 
 const TASK_FLAGS = {
-  valueFlags: ["model", "effort", "resume-job", "timeout-ms", "prompt-file", "schema"],
-  boolFlags: ["background", "wait", "live", "resume-last", "json", "no-subagents", "read-only"],
+  valueFlags: ["model", "effort", "resume-job", "timeout-ms", "prompt-file", "schema", "max-turns"],
+  boolFlags: ["background", "wait", "live", "resume-last", "json", "no-subagents", "read-only", "research", "no-memory"],
 };
 
 // --schema <path>: read a JSON Schema file and pass it to grok's --json-schema
@@ -96,6 +96,17 @@ function parseTimeoutMs(value, env) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
     throw new UsageError(`--timeout-ms must be a positive number, got: ${value}`);
+  }
+  return n;
+}
+
+// --max-turns <n>: a runaway-cost fuse (grok's own clap range is 1.., cli.rs:627).
+// Validate here so a typo/negative value fails fast instead of at engine spawn.
+function parseMaxTurns(value) {
+  if (value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new UsageError(`--max-turns must be a positive integer, got: ${value}`);
   }
   return n;
 }
@@ -207,6 +218,7 @@ function resolveResumeSource({ flags, stateDir }) {
 
 async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
   const jsonSchema = readSchemaFile(flags.schema, cwd); // UsageError on bad file/JSON
+  const maxTurns = parseMaxTurns(flags["max-turns"]); // UsageError on non-positive-integer
   if (authPreflightNeeded(env, deps) && !hasGrokAuth(env)) {
     const msg =
       "not authenticated — run `!grok login` (SuperGrok / X Premium+) or set XAI_API_KEY. " +
@@ -225,6 +237,9 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
       effort: flags.effort ?? env.GROK_DEFAULT_EFFORT ?? null,
       noSubagents: flags["no-subagents"] ?? false,
       readOnly: flags["read-only"] ?? false, // opt-in --sandbox read-only (OS-enforced no-write; also no network)
+      research: flags.research ?? false, // opt-in --tools x_search,web_search,web_fetch --deny MCPTool
+      maxTurns, // opt-in --max-turns <n> — runaway-cost fuse, validated above
+      noMemory: flags["no-memory"] ?? false, // opt-in --no-memory (skip cross-session grok memory)
       jsonSchema,
       resumeSessionId: source?.sessionId ?? null,
       resumedFrom: source?.id ?? null,

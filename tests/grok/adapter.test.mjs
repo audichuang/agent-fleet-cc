@@ -67,6 +67,49 @@ test("buildInvocation adds --no-subagents only when requested", () => {
   assert.ok(!off.argv.includes("--no-subagents"));
 });
 
+test("buildInvocation: --research emits --tools x_search,web_search,web_fetch --deny MCPTool (opt-in only)", () => {
+  const a = makeGrokAdapter();
+  const off = a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+  assert.ok(!off.argv.includes("--tools"));
+  assert.ok(!off.argv.includes("--deny"));
+  const on = a.buildInvocation({ job: { cwd: "/w", request: { research: true } }, prompt: "p" }).argv;
+  assert.equal(on[on.indexOf("--tools") + 1], "x_search,web_search,web_fetch");
+  assert.equal(on[on.indexOf("--deny") + 1], "MCPTool");
+});
+
+test("buildInvocation: --max-turns <n> only when a positive maxTurns is set", () => {
+  const a = makeGrokAdapter();
+  const off = a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+  assert.ok(!off.argv.includes("--max-turns"));
+  const on = a.buildInvocation({ job: { cwd: "/w", request: { maxTurns: 5 } }, prompt: "p" }).argv;
+  assert.equal(on[on.indexOf("--max-turns") + 1], "5");
+});
+
+test("buildInvocation: --no-memory only when opted in", () => {
+  const a = makeGrokAdapter();
+  const off = a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+  assert.ok(!off.argv.includes("--no-memory"));
+  const on = a.buildInvocation({ job: { cwd: "/w", request: { noMemory: true } }, prompt: "p" });
+  assert.ok(on.argv.includes("--no-memory"));
+});
+
+test("buildInvocation: --research / --max-turns / --no-memory compose freely with --read-only and resume (all orthogonal)", () => {
+  const a = makeGrokAdapter();
+  const { argv } = a.buildInvocation({
+    job: {
+      cwd: "/w",
+      request: { readOnly: true, research: true, maxTurns: 3, noMemory: true, resumeSessionId: "s1" },
+    },
+    prompt: "p",
+  });
+  assert.ok(argv.includes("--sandbox"));
+  assert.ok(argv.includes("--tools"));
+  assert.ok(argv.includes("--max-turns"));
+  assert.ok(argv.includes("--no-memory"));
+  // resume args (session identity) still land last, unaffected by these behavior flags
+  assert.deepEqual(argv.slice(-2), ["-r", "s1"]);
+});
+
 test("json-schema mode: buildInvocation switches to --json-schema (not streaming-json)", () => {
   const a = makeGrokAdapter();
   const { argv } = a.buildInvocation({ job: { cwd: "/w", request: { jsonSchema: '{"type":"object"}' } }, prompt: "p" });

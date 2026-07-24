@@ -111,6 +111,34 @@ export function makeGrokAdapter() {
       // cli.rs:883); a legacy session with no saved profile just applies read-only.
       // Fail-closed on a real conflict beats silently granting writes.
       if (r.readOnly) argv.push("--sandbox", "read-only");
+      // Opt-in research mode (r.research): swaps the built-in toolset for a curated
+      // read/search set. `--tools` AUTHORITATIVELY replaces the agent's tool
+      // definition (CliAgentOverrides.tools → apply_to_definition overwrites
+      // def.tools outright, config.rs:1564-1573; subagents get the session-clamped
+      // variant, config.rs:1576-1587) — every non-listed built-in tool (shell, edit,
+      // write, read, …) simply does not exist for this run, a harder guarantee than
+      // `--sandbox read-only`'s best-effort FS enforcement. Hosted tools gate through
+      // the SAME allowlist (hosted_tool_allowed, xai-grok-agent/src/config.rs:1349-
+      // 1357; canonical names builder.rs:1175-1182, HostedTool::XSearch=>"x_search",
+      // sampling-types/conversation.rs:495) — hence x_search/web_search/web_fetch.
+      // MCP tools are a SEPARATE, weaker layer: headless always loads the user's MCP
+      // servers regardless of `--tools` (headless.rs:615/660) and nothing in source
+      // proves the whitelist covers them, so `--deny MCPTool` (cli.rs:476) rides
+      // along as a COOPERATIVE backstop — same permission-layer tier as Part 3's
+      // `--deny` rows, not a hard guarantee like the built-in whitelist above.
+      if (r.research) argv.push("--tools", "x_search,web_search,web_fetch", "--deny", "MCPTool");
+      // Opt-in agent-turn ceiling (r.maxTurns) — a runaway-cost fuse, chiefly for
+      // background jobs nobody is watching live. cli.rs:627: value_parser u32
+      // range 1.. ("Maximum number of agent turns") → CliAgentOverrides.max_turns
+      // (headless.rs ~907). The companion validates it's a positive integer
+      // before a job record is even created.
+      if (r.maxTurns) argv.push("--max-turns", String(r.maxTurns));
+      // Opt-in r.noMemory: skip cross-session memory for a one-off delegated task
+      // so the result stays reproducible and never reads/writes the user's grok
+      // memory. cli.rs:611 ("Disable cross-session memory for this session"),
+      // `conflicts_with = "experimental_memory"` — we never send that flag, so no
+      // conflict.
+      if (r.noMemory) argv.push("--no-memory");
       // r.sessionId is minted client-side BEFORE spawn (grok-companion.mjs
       // startJob, via crypto.randomUUID()) and persisted into the job record's
       // request BEFORE createJob writes it to disk — so a worker crash mid-run
