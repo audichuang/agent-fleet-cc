@@ -59,7 +59,7 @@ breaks) → `cosmetic` (additive upstream, we ignore it fine) → `none`.
 | What | Value |
 | --- | --- |
 | Plugin | `plugins/grok/` @ `0.5.0` |
-| Released binary we invoke | `grok 0.2.111` (re-verified 2026-07-24; `--help` confirms `--session-id`/`-s`) |
+| Released binary we invoke | `grok 0.2.111` (re-verified 2026-07-24; `--help` confirms `--session-id`/`-s`. classifyError buckets were behaviorally verified by running `0.2.93` and have not been re-run since) |
 | Open-source tree audited | commit `c68e39f` ("Publish harness and TUI open-source", 2026-07-16), `xai-grok-pager-bin 0.1.220-alpha.4` (source tree at `~/research/grok-build`, re-checked 2026-07-24 — same commit, no upstream drift) |
 | Contract files | `crates/codegen/xai-grok-pager/src/app/cli.rs`, `.../src/headless.rs`, `.../xai-grok-sandbox/src/profiles.rs` |
 | Verdict | **none** — zero drift; every flag we send and field we read is present with matching semantics |
