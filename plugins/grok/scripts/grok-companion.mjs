@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -177,19 +178,29 @@ function cmdSetup({ env, out, deps }) {
   return healthy ? 0 : 1;
 }
 
+// job.sessionId is the post-hoc value extractResult reports off the `end` event
+// (only written once the worker finalizes normally). job.request.sessionId is the
+// SAME id, minted+persisted before spawn (see startJob) — it survives a worker
+// crash that never reaches finalize, which is the entire point of pre-generating
+// it. Prefer the post-hoc one when present (belt-and-braces; they should match).
+function effectiveSessionId(job) {
+  return job?.sessionId ?? job?.request?.sessionId ?? null;
+}
+
 function resolveResumeSource({ flags, stateDir }) {
   if (flags["resume-job"]) {
     const source = readJob(stateDir, safeJobId(flags["resume-job"]));
     if (!source) throw new UsageError(`No job ${flags["resume-job"]} to resume`);
-    if (!source.sessionId) throw new UsageError(`Job ${source.id} has no session id to resume`);
-    return source;
+    const sessionId = effectiveSessionId(source);
+    if (!sessionId) throw new UsageError(`Job ${source.id} has no session id to resume`);
+    return { ...source, sessionId };
   }
   if (flags["resume-last"]) {
     const source = listJobs(stateDir).find(
-      (j) => TERMINAL_STATUSES.has(j.status) && j.sessionId,
+      (j) => TERMINAL_STATUSES.has(j.status) && effectiveSessionId(j),
     );
     if (!source) throw new UsageError("No resumable job in this workspace");
-    return source;
+    return { ...source, sessionId: effectiveSessionId(source) };
   }
   return null;
 }
@@ -217,6 +228,15 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
       jsonSchema,
       resumeSessionId: source?.sessionId ?? null,
       resumedFrom: source?.id ?? null,
+      // Pre-generate the session id for a NEW conversation only (never set
+      // alongside resumeSessionId — grok rejects --session-id combined with
+      // --resume, see adapter.mjs). Minted here and persisted by createJob
+      // below BEFORE runWorker/the background worker ever spawns the grok
+      // child, so a crash mid-run still leaves an id to resume from
+      // (resolveResumeSource's request.sessionId fallback above). One job =
+      // one spawn (no retry-with-same-request path in this companion), so
+      // minting once per job record is safe — a fresh id is never reused.
+      sessionId: source ? null : crypto.randomUUID(),
       // test-only injection of a fake binary; undefined in production.
       binaryArgv: deps.binaryArgv,
     },

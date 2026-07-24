@@ -58,9 +58,9 @@ breaks) → `cosmetic` (additive upstream, we ignore it fine) → `none`.
 
 | What | Value |
 | --- | --- |
-| Plugin | `plugins/grok/` @ `0.4.0` |
-| Released binary we invoke | `grok 0.2.93` (adapter buckets verified by running it) |
-| Open-source tree audited | commit `c68e39f` ("Publish harness and TUI open-source", 2026-07-16), `xai-grok-pager-bin 0.1.220-alpha.4` |
+| Plugin | `plugins/grok/` @ `0.5.0` |
+| Released binary we invoke | `grok 0.2.111` (re-verified 2026-07-24; `--help` confirms `--session-id`/`-s`) |
+| Open-source tree audited | commit `c68e39f` ("Publish harness and TUI open-source", 2026-07-16), `xai-grok-pager-bin 0.1.220-alpha.4` (source tree at `~/research/grok-build`, re-checked 2026-07-24 — same commit, no upstream drift) |
 | Contract files | `crates/codegen/xai-grok-pager/src/app/cli.rs`, `.../src/headless.rs`, `.../xai-grok-sandbox/src/profiles.rs` |
 | Verdict | **none** — zero drift; every flag we send and field we read is present with matching semantics |
 
@@ -84,6 +84,7 @@ Built by `adapter.mjs → buildInvocation`. Each row is pinned to its `cli.rs` a
 | `--no-subagents` | `long="no-subagents"` (602) | Disable fan-out (deterministic single agent) | ✓ |
 | `--sandbox read-only` | `#[arg(long, env="GROK_SANDBOX")] pub sandbox` (decl 674; 673 is its doc comment) | Emitted only on opt-in `--read-only` — see Part 3 | ✓ |
 | `-r <ID>` | `short='r', long="resume"` (554) | Resume an existing session | ✓ |
+| `-s <UUID>` | `short='s', long="session-id"` (582) | Use a specific session UUID for a **new** conversation (must be a valid UUID, must not already exist under the target session directory); with `--resume`/`--continue`, only valid together with `--fork-session` (we never pass that, so always mutually exclusive with `-r` in this plugin). Minted client-side (`crypto.randomUUID()`) and persisted to the job record BEFORE spawn, so a worker crash mid-run still leaves a resumable id. headless.rs wires it through: `session_id_flag` param (608), consumed at (617). | ✓ |
 
 ## Part 2 — Output we read (durable checklist)
 
@@ -172,3 +173,4 @@ plugin only injects `--sandbox` for `--read-only`, so it won't clobber your env 
 | --- | --- | --- | --- |
 | 2026-07-16 | `c68e39f` / bin `0.1.220-alpha.4` (released `grok 0.2.93`) | **none** | First source-grounded audit after open-sourcing. All 11 flags + all read fields pinned to anchors, zero drift. Same pass added `usage` capture (`{inputTokens,outputTokens}`) — the old "grok emits no token counts" assumption was stale; `attach_result_usage` now stamps usage on `end`/json/error. Documented read-only sandbox levers (Part 3). |
 | 2026-07-16 | (same tree) | **none** | `grok@0.4.0`: wired an **opt-in `--read-only`** (`--sandbox read-only`). NON-breaking — default unchanged (`off`, full access). Opt-in (not a codex/antigravity-style default) because read-only is **best-effort**: a managed `requirements.toml` overrides it (`config.rs:1123`) and it fails *open* to writable when no OS backend applies (`lib.rs:143`) — a false-confidence default. Independent Codex review (session `019f6b69`) corrected several prior-draft errors, all verified against source: (1) read-only does **not** disable web tools — network restriction is **child-process only**, grok's in-process `web_search`/`web_fetch` stay online (`lib.rs:10`, `streaming_local_terminal.rs:916`); (2) default is `off` not `workspace` (`config.rs:1132`); (3) enum is `SandboxStartup::Conflict`+`exit(1)`, constructed `cli.rs:883` (not `Refused`), and only on a *persisted* differing profile — a no-saved-profile session applies read-only (`persistence.rs:739`, `cli.rs:888`); (4) read-only skips bwrap (no deny-plan) → Landlock directly, `strict` not in the read-deny set (`lib.rs:359`); (5) usage is captured from `end`/json only, not error events; (6) anchors: reasoning-effort `525`, `--sandbox` decl `674`. |
+| 2026-07-24 | `~/research/grok-build` @ `c68e39f` (same tree, re-verified) + released `grok 0.2.111` | **none** | Wired `-s`/`--session-id` (`cli.rs:582`, adopted in headless at `headless.rs:608/617`) so a session id is minted client-side (`crypto.randomUUID()`) and persisted into the job record's `request` BEFORE the engine spawns — a worker crash mid-run (no `end` event) no longer loses the id needed to `-r`/`--resume`. Sent only for a brand-new conversation; always mutually exclusive with `-r` (grok rejects `--session-id` + `--resume` without `--fork-session`, which this plugin never passes). Local released binary `grok 0.2.111 --help` cross-checked the flag exists. |

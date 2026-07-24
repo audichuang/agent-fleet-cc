@@ -210,3 +210,31 @@ test("classifyError maps auth / quota / config / endpoint / not-installed / unkn
 test("resumeArgs yields -r <id>", () => {
   assert.deepEqual(makeGrokAdapter().resumeArgs("s1"), ["-r", "s1"]);
 });
+
+test("buildInvocation: -s <sessionId> for a new conversation (request.sessionId, no resume)", () => {
+  const a = makeGrokAdapter();
+  const uuid = "6f9d3c2a-1b4e-4a7f-9c2d-8e5f6a1b2c3d";
+  const { argv } = a.buildInvocation({
+    job: { cwd: "/w", request: { model: "grok-4.5", sessionId: uuid } },
+    prompt: "p",
+  });
+  assert.deepEqual(argv.slice(-2), ["-s", uuid]);
+});
+
+test("buildInvocation: resumeSessionId wins — never sends -s alongside -r (cli.rs:582: --session-id is new-conversation-only, invalid with --resume without --fork-session)", () => {
+  const a = makeGrokAdapter();
+  const { argv } = a.buildInvocation({
+    job: { cwd: "/w", request: { resumeSessionId: "prior-session", sessionId: "should-never-be-sent" } },
+    prompt: "p",
+  });
+  assert.deepEqual(argv.slice(-2), ["-r", "prior-session"]);
+  assert.ok(!argv.includes("-s"));
+  assert.ok(!argv.includes("should-never-be-sent"));
+});
+
+test("buildInvocation: no sessionId and no resumeSessionId sends neither flag", () => {
+  const a = makeGrokAdapter();
+  const { argv } = a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+  assert.ok(!argv.includes("-s"));
+  assert.ok(!argv.includes("-r"));
+});

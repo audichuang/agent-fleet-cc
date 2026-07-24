@@ -36,7 +36,7 @@
       "name": "grok",
       "source": "./plugins/grok",
       "description": "Use xAI Grok Build (grok) from Claude Code to delegate headless coding tasks — launch, wait, tail, cancel, resume.",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "author": {
         "name": "xAI"
       }

@@ -4,16 +4,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir, makeDataRoot } from "./helpers.mjs";
 import { runCompanion } from "../../plugins/grok/scripts/grok-companion.mjs";
 import { resolveDataRoot, workspaceStateDir } from "../../plugins/grok/scripts/lib/adapter.mjs";
-import { createJob, markJobRunning, finalizeJob, jobDir } from "../../plugins/grok/scripts/lib/shared/core/state-store.mjs";
+import { createJob, listJobs, markJobRunning, finalizeJob, jobDir } from "../../plugins/grok/scripts/lib/shared/core/state-store.mjs";
 import { createJobRecord } from "../../plugins/grok/scripts/lib/shared/core/job.mjs";
 import { appendEvent } from "../../plugins/grok/scripts/lib/shared/core/events.mjs";
 
 // Seed a job in the exact state dir the companion will resolve for (dataRoot, cwd).
-function seedJob(dataRoot, cwd, { status, resultText, pid, text = "editing src/foo.ts" } = {}) {
+function seedJob(dataRoot, cwd, { status, resultText, pid, text = "editing src/foo.ts", sessionId } = {}) {
   const stateDir = workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd);
   const record = createJobRecord({ engine: "grok", title: "watch me", cwd });
   createJob(stateDir, record, "prompt");
@@ -23,7 +24,7 @@ function seedJob(dataRoot, cwd, { status, resultText, pid, text = "editing src/f
     if (text) appendEvent(jobDir(stateDir, record.id), "engine-event", { kind: "text", text });
   } else if (status) {
     // any terminal status: completed / failed / cancelled / timed-out
-    finalizeJob(stateDir, record.id, { status, resultText });
+    finalizeJob(stateDir, record.id, sessionId !== undefined ? { status, resultText, sessionId } : { status, resultText });
   }
   return record.id;
 }
@@ -354,4 +355,115 @@ test("wait timeout on a running job exits 10 with exactly ONE compact liveness l
   assert.match(lines[0], /alive✓/);
   assert.match(lines[0], /running tests/);
   assert.doesNotMatch(lines[0], /the final answer/);
+});
+
+// --- pre-spawn --session-id (crash-safe resume) -----------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+test("new task: mints a valid session id and PERSISTS it to request.sessionId before the engine ever spawns", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const stateDir = workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd);
+  let sessionIdOnDiskAtSpawn = null;
+  let capturedArgs = null;
+  let spawnCount = 0;
+  const code = await runCompanion(
+    ["task", "hello", "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: dataRoot, GROK_BIN: `${process.execPath}` },
+      cwd,
+      out: () => {},
+      binaryArgv: [process.execPath, FAKE_GROK],
+      // Injected in place of node:child_process's spawn (spawnEngine calls
+      // spawnImpl(bin, args, opts)) — read the job record off disk BEFORE
+      // calling through, proving persistence happened strictly before spawn.
+      grokSpawnImpl: (bin, args, opts) => {
+        spawnCount += 1;
+        sessionIdOnDiskAtSpawn = listJobs(stateDir)[0]?.request?.sessionId ?? null;
+        capturedArgs = args;
+        return spawn(bin, args, opts);
+      },
+    },
+  );
+  assert.equal(code, 0);
+  assert.ok(UUID_RE.test(sessionIdOnDiskAtSpawn), `expected a valid UUID on disk pre-spawn, got ${sessionIdOnDiskAtSpawn}`);
+  assert.deepEqual(capturedArgs.slice(-2), ["-s", sessionIdOnDiskAtSpawn], "the persisted id must be the exact one sent to grok");
+  assert.equal(spawnCount, 1, "no retry-with-same-request path — one task invocation spawns the engine exactly once");
+});
+
+test("resume: sends -r <sessionId> and never -s (grok rejects --session-id together with --resume)", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const priorId = seedJob(dataRoot, cwd, { status: "completed", resultText: "prior answer", sessionId: "prior-session-abc" });
+  let capturedArgs = null;
+  const code = await runCompanion(
+    ["task", "follow up", "--resume-job", priorId, "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: dataRoot, GROK_BIN: `${process.execPath}` },
+      cwd,
+      out: () => {},
+      binaryArgv: [process.execPath, FAKE_GROK],
+      grokSpawnImpl: (bin, args, opts) => {
+        capturedArgs = args;
+        return spawn(bin, args, opts);
+      },
+    },
+  );
+  assert.equal(code, 0);
+  assert.ok(capturedArgs.includes("-r"));
+  assert.equal(capturedArgs[capturedArgs.indexOf("-r") + 1], "prior-session-abc");
+  assert.ok(!capturedArgs.includes("-s"), "resume must never send --session-id (grok rejects both together)");
+});
+
+test("crash-safe resume: a job that died before an `end` event (no top-level sessionId) is still resumable via request.sessionId", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const stateDir = workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd);
+  // Simulate the exact scenario this feature exists for: the id was minted and
+  // persisted into request.sessionId before spawn, but the worker process died
+  // before extractResult ever ran, so finalize (here, standing in for
+  // reconcileDeadPids) never learned a sessionId from the `end` event.
+  const crashedRecord = createJobRecord({
+    engine: "grok",
+    title: "crashed run",
+    cwd,
+    request: { model: "grok-4.5", sessionId: "pre-spawn-uuid-1234" },
+  });
+  createJob(stateDir, crashedRecord, "prompt");
+  finalizeJob(stateDir, crashedRecord.id, { status: "failed", error: "worker process died (reconciled dead pid)" });
+
+  let capturedArgs = null;
+  const code = await runCompanion(
+    ["task", "continue after crash", "--resume-job", crashedRecord.id, "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: dataRoot, GROK_BIN: `${process.execPath}` },
+      cwd,
+      out: () => {},
+      binaryArgv: [process.execPath, FAKE_GROK],
+      grokSpawnImpl: (bin, args, opts) => {
+        capturedArgs = args;
+        return spawn(bin, args, opts);
+      },
+    },
+  );
+  assert.equal(code, 0, "resume must succeed even though the crashed job never got a post-hoc top-level sessionId");
+  assert.ok(capturedArgs.includes("-r"));
+  assert.equal(capturedArgs[capturedArgs.indexOf("-r") + 1], "pre-spawn-uuid-1234");
+  assert.ok(!capturedArgs.includes("-s"));
+});
+
+test("resume-job on a job with NO session id anywhere (never spawned) still refuses with the usage error", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const id = seedJob(dataRoot, cwd, { status: "failed" }); // no sessionId, no request.sessionId
+  const { out, lines } = collect();
+  const code = await runCompanion(["task", "hi", "--resume-job", id, "--wait", "--json"], {
+    env: { GROK_PLUGIN_DATA: dataRoot, GROK_BIN: `${process.execPath}` },
+    cwd,
+    out,
+    binaryArgv: [process.execPath, FAKE_GROK],
+  });
+  assert.equal(code, 1);
+  assert.match(lines.join("\n"), /has no session id to resume/);
 });

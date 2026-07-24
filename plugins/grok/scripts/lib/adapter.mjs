@@ -111,7 +111,18 @@ export function makeGrokAdapter() {
       // cli.rs:883); a legacy session with no saved profile just applies read-only.
       // Fail-closed on a real conflict beats silently granting writes.
       if (r.readOnly) argv.push("--sandbox", "read-only");
+      // r.sessionId is minted client-side BEFORE spawn (grok-companion.mjs
+      // startJob, via crypto.randomUUID()) and persisted into the job record's
+      // request BEFORE createJob writes it to disk — so a worker crash mid-run
+      // (no `end` event, extractResult's post-hoc sessionId never captured)
+      // still leaves a resumable id (see resolveResumeSource's request.sessionId
+      // fallback). New-conversation only: cli.rs:582 documents `-s`/`--session-id`
+      // as "a specific session UUID for a NEW conversation", invalid combined
+      // with `--resume` unless `--fork-session` is also given (we never pass
+      // that) — headless.rs:608/617 wires it through. Always mutually exclusive
+      // with resumeSessionId; resume wins when (in principle) both are set.
       if (r.resumeSessionId) argv.push("-r", r.resumeSessionId);
+      else if (r.sessionId) argv.push("-s", r.sessionId);
       // env: conformance/e2e can inject via request.env; secrets are NOT set here.
       return { argv, env: r.env ?? {}, stdinPayload: null };
     },

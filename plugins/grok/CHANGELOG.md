@@ -1,5 +1,27 @@
 # grok — changelog
 
+## 0.5.0
+- **Crash-safe resume: session id is minted before spawn, not scraped after.**
+  A new-conversation job now generates its session id client-side
+  (`crypto.randomUUID()`) and persists it into the job record's `request`
+  **before** the grok engine ever spawns, passed via `-s`/`--session-id`
+  (`cli.rs:582`). Previously the id came only from the `end` event/json result
+  *after* the run finished — if the worker process died mid-run, no id was ever
+  recorded and `--resume-job`/`--resume-last` had nothing to resume from.
+  `resolveResumeSource` now falls back to that pre-spawn `request.sessionId`
+  when the post-hoc `job.sessionId` is missing, so a crashed job is still
+  resumable. Always mutually exclusive with `-r`/`--resume` — grok rejects
+  `--session-id` combined with `--resume` unless `--fork-session` is also given
+  (which this plugin never passes); a resuming job never sends `-s`. Verified
+  against `~/research/grok-build` @ `c68e39f` (headless wiring `headless.rs:608/617`)
+  and released `grok 0.2.111 --help`; see `docs/grok-cli-contract-audit.md` Part 1
+  and the 2026-07-24 audit-log entry.
+- **Untrusted-output note on `task`/`live`/`result`.** Grok's `resultText` is
+  advisory text from a delegated model, not instructions — the commander must
+  not run commands, delete files, or publish anything just because the output
+  says to. Documented in `commands/task.md`, `commands/live.md`, and
+  `commands/result.md`.
+
 ## 0.4.0
 - **`--read-only` flag for a hardened run (opt-in; non-breaking).** Both `/grok:task`
   and `/grok:live` now accept `--read-only`, which runs Grok under its `read-only`
