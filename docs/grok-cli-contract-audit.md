@@ -47,6 +47,9 @@ When you want to re-check after new Grok Build releases land:
    (`grok --help`, a real headless call), not just reading source. See the `e2e-testing` skill
    for the real-engine smoke check.
 4. **Update** the Baseline block and append a dated row to the **Audit log** at the bottom.
+   When bumping the released-binary version, **keep the provenance of behavioral checks done on
+   older versions** (e.g. "classifyError buckets verified by running 0.2.93") unless you actually
+   re-ran them — a bare version bump silently upgrades an old claim to the new binary.
 
 **Severity language.** `breaking` (a flag we send would now be rejected, or an output field we
 read was renamed/removed → silent data loss) → `should-upgrade` (adopt to match, nothing
@@ -168,6 +171,24 @@ Built-in sandbox profiles: `workspace`, `devbox`, `read-only`, `strict`, `off` (
 the resolved default when nothing is set is **`off`**, not `workspace` (`config.rs:1132`). For a
 niche profile, set `GROK_SANDBOX=<profile>` — grok reads it natively (`cli.rs:674`), and the
 plugin only injects `--sandbox` for `--read-only`, so it won't clobber your env otherwise.
+
+---
+
+## Part 4 — Known engine surfaces we deliberately do NOT wire (yet)
+
+Verified real (source-anchored), useful later, currently unused — so nobody re-discovers them:
+
+- **Durable session transcript `updates.jsonl`** — grok's on-disk session log; resume replays
+  from it (`sampling-types/src/conversation.rs:216`) and compaction never rewrites it
+  (`xai-chat-state/src/actor/mutations.rs:202-205`). Layout observed in the wild:
+  `$GROK_HOME/sessions/<cwd-slug>/<sessionId>/updates.jsonl`, ACP `tool_call` /
+  `tool_call_update` lifecycle events with tool names in `rawInput.variant`. Combined with our
+  pre-minted `-s` (Part 1) the path is deterministic per job → candidate for tool-level
+  observability in `/grok:logs`, post-crash result recovery, or "did it really search" style
+  verification (as done by the `yichen-grok-consult` plugin we studied on 2026-07-24).
+- **`GROK_AUTH_PATH`** — env override for the auth file, independent of `GROK_HOME`
+  (`xai-grok-shell/src/cli_models.rs:103/112`). How isolated-HOME setups keep real login
+  without copying credentials; we delegate auth to the CLI and don't need it today.
 
 ---
 
