@@ -2,7 +2,7 @@
 name: local-install-test
 description: >-
   How to install a locally-developed agent-fleet-cc plugin (codex / antigravity /
-  cc / fleet / delegate) into the real Claude Code and test it — including how to
+  cc / grok / fleet) into the real Claude Code and test it — including how to
   REPLACE the currently-installed version with your edited copy. Use this whenever
   you edit a plugin in this repo and want to try it for real in Claude Code, or ask
   "how do I install this locally", "how do I test my plugin change", "how do I

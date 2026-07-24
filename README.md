@@ -145,21 +145,27 @@ codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/
 ## Development
 
 ```bash
-npm test               # structure + shared + cc + antigravity + codex + grok + fleet suites (Node >= 22.3)
-npm run test:cc  # one suite at a time (also test:fleet, test:codex, test:grok, …)
+npm test               # structure + shared + cc + antigravity + codex + grok + fleet + e2e
+npm run test:cc        # one suite at a time (also test:fleet, test:codex, test:grok, …)
 npm run test:e2e       # black-box CLI end-to-end regression for all 5 plugins (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```
 
-Layout: `plugins/<name>/` is the exact install payload; `tests/<name>/` mirrors each
-source repo's hermetic suite (fake binaries, redirected `CLAUDE_PLUGIN_DATA`, no real network).
+Run the suites on **Node 24**: the codex suite's unref'd-timer tests fail on 22.22–23.x, which is
+why CI pins 24 even though `engines` still allows `>=22.3`.
 
-**Shared foundation (Phase 2):** `shared/lib/` is a zero-dependency job runtime — a
-directory-per-job state store with O_EXCL CAS terminal transitions, a generic
-adapter-driven worker (process-group spawn/kill so engine grandchildren are reaped),
-mandatory env sanitization with a recursion guard, and a parameterized 10-scenario
-conformance suite. `cc` (v0.3.0) and `grok` (v0.1.0) are built on it: engine knowledge
-lives in a per-engine adapter (`ClaudeAdapter`, `GrokAdapter`), the job runtime in the
-shared lib. Each plugin carries a vendored copy under `scripts/lib/shared/` kept in sync
-by `npm run sync-shared` and drift-checked in CI. Designs live in `docs/specs/`.
+Layout: `plugins/<name>/` is the exact install payload; `tests/<name>/` mirrors it with a hermetic
+suite (fake binaries, redirected `CLAUDE_PLUGIN_DATA`, no real network). Contributor rules — how
+to bump a version, what CI checks beyond `npm test`, which plugin may touch which — live in
+[`AGENTS.md`](AGENTS.md).
+
+**Shared foundation:** `shared/lib/` is a zero-dependency job runtime — a directory-per-job
+state store with O_EXCL CAS terminal transitions, a generic adapter-driven worker (process-group
+spawn/kill so engine grandchildren are reaped), mandatory env sanitization with a recursion
+guard, and a parameterized 10-scenario conformance suite. `cc`, `grok`, and `antigravity` run the
+full runtime — engine knowledge lives in a per-engine adapter (`makeClaudeAdapter`,
+`makeGrokAdapter`, `makeAntigravityAdapter`), the job lifecycle in the shared lib — while `codex`
+uses only the shared state core and drives its own app-server broker instead. Those four carry a
+vendored copy under `scripts/lib/shared/`, kept in sync by `npm run sync-shared` and drift-checked
+in CI. Designs live in `docs/specs/`.

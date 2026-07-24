@@ -1,5 +1,5 @@
-> 共通規則見 repo 根 `AGENTS.md`(IRONCLAD、sync-shared、bump-version+dual-host、CI gate、
-> attribution、autonomy 邊界)。本檔只寫 cc 這顆引擎的**增量**。完整結構問 `codegraph explore` / `tree`。
+> 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
+> 本檔只寫 cc 這顆引擎的**增量**。完整結構問 `codegraph explore` / `tree`,別在這窮舉。
 
 # cc plugin — a headless Claude Code (cc) as a delegatable engine
 
@@ -17,8 +17,9 @@
 - `scripts/lib/adapter.mjs` — cc 引擎**接線**(argv / parseEvent / classifyError、recursionMarker
   `CLAUDE_CC_ACTIVE`、claude binary 走 `CC_CLAUDE_BIN`);**不含** profile。job 生命週期是 vendored
   shared runtime。
-- `scripts/lib/profiles.mjs` — profile 解析 / 驗證(`profiles/<name>.json` = 標準 Claude Code
-  settings);選 profile 與 `--model` 覆寫在 companion。
+- `scripts/lib/profiles.mjs` — profile 解析 / 驗證。profile 檔**不在 plugin 內**,住
+  `<dataRoot>/profiles/<name>.json`(`profilesDir(dataRoot)`,dataRoot 由 `CLAUDE_PLUGIN_DATA`
+  決定)= 標準 Claude Code settings;選 profile 與 `--model` 覆寫在 companion。
 - `scripts/lib/resolve-companion.mjs` — 從 Codex/任意 host 定位 companion,**不寫死路徑、不靠
   plugin-root env**(orca 皆不可靠),改在 cache 目錄有界搜尋 + plugin.json `name==="cc"` 驗證。
 

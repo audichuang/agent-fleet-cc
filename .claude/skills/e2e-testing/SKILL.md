@@ -2,12 +2,12 @@
 name: e2e-testing
 description: >-
   Complete end-to-end testing for the agent-fleet-cc plugin marketplace (codex /
-  antigravity / cc / fleet). Use this whenever you need to verify engine
+  antigravity / cc / grok / fleet). Use this whenever you need to verify engine
   behavior end-to-end, run or write E2E tests, run the real-engine smoke check,
   confirm a control-plane fix actually works against the live CLIs, prove a test
   is a true regression, or answer "did you actually run it end-to-end?". Triggers
   on: e2e, end-to-end, smoke test, test:e2e, real engine test, "verify the fix
-  works", "test against real codex/agy/claude", launch/wait/logs/cancel exit
+  works", "test against real codex/agy/claude/grok", launch/wait/logs/cancel exit
   codes, before-release verification, and any doubt about whether testing was
   hermetic (fake engine) vs real. Reach for this skill BEFORE claiming any
   end-to-end verification is done — there are two distinct layers and it is easy

@@ -75,13 +75,20 @@ claude plugin install antigravity@antigravity
 | Command | What it does |
 |---------|--------------|
 | `/antigravity:setup` | Verify `agy` is installed + complete OAuth (idempotent). |
-| `/antigravity:review [--base <ref>] [--scope ...] [--model <id>]` | Free-form review of the working-tree or branch diff (read-only `--sandbox`). |
-| `/antigravity:adversarial-review` | Strict, structured (JSON) review rendered as markdown. |
+| `/antigravity:review [--base <ref>] [--scope ...] [--model <id>] [--no-sandbox]` | Free-form review of the working-tree or branch diff. Read-only **by instruction** (see the note below). |
+| `/antigravity:adversarial-review [--no-sandbox]` | Strict, structured (JSON) review rendered as markdown. Same read-only posture as `review`. |
 | `/antigravity:rescue <task> [--background] [--continue] [--model <id>] [--prompt-file <p>]` | Delegate a free-form task to agy (routes through the `agy-rescue` subagent). |
 | `/antigravity:task <task> [--foreground] [--wait]` | Free-form prompt with background job tracking (background by default). |
 | `/antigravity:image <desc> [--name <n>] [--output <path>]` | Generate an image with agy's `generate_image` (Imagen). |
 | `/antigravity:handoff [focus] [--print] [--background]` | Write a handoff doc and hand the work to agy to continue. |
 | `/antigravity:status [<id>] [--wait]` · `/antigravity:result [<id>]` · `/antigravity:cancel [<id>]` | Inspect / fetch / cancel background jobs. |
+
+> **The review verbs are read-only by *instruction*, not by enforcement.** agy's headless
+> `--print` mode has no per-run write guard: the prompt tells agy not to modify files, and that
+> is the whole mechanism. `--sandbox` is passed by default but only adds OS *terminal*
+> restrictions — it blocks shell commands, **not** file writes (`--no-sandbox` turns it off).
+> If a run must not be able to touch your tree, review from a committed state so any write shows
+> up in `git status`. Full evidence: `docs/antigravity-cli-contract-audit.md` Part 3.
 
 In Claude Code the plugin also ships a proactive **`antigravity:agy-rescue` subagent** — a thin
 forwarder that Claude reaches for on its own when a task wants a second opinion or a

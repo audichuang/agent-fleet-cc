@@ -1,4 +1,4 @@
-> 共通規則見 repo 根 `AGENTS.md`(IRONCLAD、sync-shared、bump-version、CI gate、attribution)。
+> 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
 > 本檔只寫 grok 這顆引擎的**增量**。完整結構問 `codegraph explore` / `tree`,別在這窮舉。
 
 # grok plugin — the xAI Grok Build (grok-4.5) engine

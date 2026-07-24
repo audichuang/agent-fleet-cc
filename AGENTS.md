@@ -89,11 +89,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - Domain glossary (the project's ubiquitous language): `CONTEXT.md`
 - Architecture decisions (why a shape was chosen, not how): `docs/adr/`
 - Specs / plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/specs/`
-- SDD progress ledger (full build history per feature): `.git/sdd/progress.md`
 - Per-plugin requirements (CLI login / OAuth / endpoint profiles): each `plugins/<name>/`
   directory and `README.md`
-- Codex ↔ CLI protocol/health sync audit (+ how to re-run it when Codex ships new commits):
-  `docs/codex-protocol-sync-audit.md`
-- Grok plugin ↔ Grok Build CLI contract audit (every flag/output field we depend on, pinned
-  to a source anchor + re-run recipe; also why CLI over ACP, and read-only sandbox levers):
-  `docs/grok-cli-contract-audit.md`
+- **Engine ↔ CLI contract audits** — every flag/output field a plugin depends on, pinned to a
+  source anchor (or, for a closed binary, an evidence class) + the recipe to re-run the check.
+  Update the audit doc, not the plugin's `AGENTS.md`, when you learn something about an engine:
+  `docs/codex-protocol-sync-audit.md` · `docs/grok-cli-contract-audit.md` ·
+  `docs/antigravity-cli-contract-audit.md` (`cc` has none — its engine is Claude Code itself).

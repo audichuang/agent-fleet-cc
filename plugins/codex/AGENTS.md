@@ -1,5 +1,5 @@
-> 共通規則見 repo 根 `AGENTS.md`(IRONCLAD、sync-shared、bump-version、CI gate、attribution、
-> autonomy 邊界)。root 已載 codex 的幾個跨層事實:**不跑 shared runWorker**、
+> 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
+> root 已載 codex 的幾個跨層事實:**不跑 shared runWorker**、
 > **build:codex 型別檢查是 npm test 之外的**、**runtime.test 偶爾 flaky**、`codex-protocol-sync-audit.md`。
 > 本檔只寫增量,不重抄。完整結構問 `codegraph explore` / `tree`。
 
@@ -22,6 +22,11 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   watchdog、tracked-job timeout/interrupt、dead-pid/deadline reconcile)。
 - `scripts/stop-review-gate-hook.mjs` — Stop hook,對上一個 Claude turn 跑 codex review
   (`/codex:setup --enable-review-gate` / `--disable-review-gate` 開關)。
+- `scripts/session-lifecycle-hook.mjs` — SessionStart/SessionEnd hook(`hooks/hooks.json`)。
+  SessionEnd **終止並標 failed** 本 session 非 background 的 queued/running job
+  (`endedBySession: true`),`background: true` 的**豁免存活**;broker 只在「shutdown 未被
+  BUSY 拒絕 **且** 無 active background job」才拆(`shouldTeardownBroker`)。下面
+  「session-scoped vs durable」那條踩雷的底層機制就是它。
 - `scripts/lib/codex.mjs` — 高層編排(turn / review、auth·availability、model list、structured
   output);app-server **client 與 direct/broker transport 在 `lib/app-server.mjs`**。
 - `scripts/lib/worktree-guard.mjs` — **條件式** expected-triplet 驗證(給齊 expected-worktree /
@@ -51,5 +56,4 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 ## 細節指向
 - protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。
 - 寫 GPT-5.6 prompt:`gpt-5-6-prompting` skill(本 plugin 內);worktree 驗證合約見
-  `lib/worktree-guard.mjs`、設計見 `docs/superpowers/plans/2026-06-21-worktree-cwd-guard.md`
-  (**repo 內尚無同名 skill**)。
+  `lib/worktree-guard.mjs`、設計見 `docs/superpowers/plans/2026-06-21-worktree-cwd-guard.md`。
