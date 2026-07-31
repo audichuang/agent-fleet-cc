@@ -67,6 +67,42 @@ test("describeTurnError never throws on a malformed error object", () => {
   assert.equal(describeTurnError({ message: "{not valid json" }), "{not valid json");
 });
 
+// The v2 `TurnError` carries `codexErrorInfo` + `additionalDetails` alongside
+// `message`; both were being dropped, so a delegating commander reading --json got
+// prose only. Tag the code and keep the details.
+test("describeTurnError surfaces the structured codexErrorInfo code", () => {
+  assert.equal(
+    describeTurnError({ message: "Usage limit reached", codexErrorInfo: "usageLimitExceeded" }),
+    "Usage limit reached [usageLimitExceeded]"
+  );
+});
+
+test("describeTurnError reads the tag from an object-form codexErrorInfo", () => {
+  assert.equal(
+    describeTurnError({ message: "stream died", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 502 } } }),
+    "stream died [httpConnectionFailed]"
+  );
+});
+
+test("describeTurnError appends additionalDetails without duplicating it", () => {
+  assert.equal(
+    describeTurnError({ message: "Bad request", additionalDetails: "model gpt-5.6-sol is gated" }),
+    "Bad request — model gpt-5.6-sol is gated"
+  );
+  // Already contained in the message → no duplicate tail.
+  assert.equal(
+    describeTurnError({ message: "Bad request: it is gated", additionalDetails: "it is gated" }),
+    "Bad request: it is gated"
+  );
+});
+
+test("describeTurnError annotates a stderr-only failure too, and ignores malformed error info", () => {
+  assert.equal(describeTurnError({ codexErrorInfo: "unauthorized" }, "boom"), "boom [unauthorized]");
+  for (const codexErrorInfo of [null, "", "   ", [], 7, {}]) {
+    assert.equal(describeTurnError({ message: "plain", codexErrorInfo }), "plain");
+  }
+});
+
 test("runTrackedJob persists errorMessage when the runner RETURNS a failed execution (turn-error path)", async () => {
   // This is the silent-death regression: a turn ended by an `error` notification
   // makes the runner RETURN { exitStatus: 1 } (it does not throw). Before the fix,

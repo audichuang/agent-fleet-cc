@@ -30,6 +30,18 @@ test("isTerminalTurnError falls back to a NARROW permanent-auth regex when willR
   }
 });
 
+test("isTerminalTurnError uses the structured unauthorized code where the regex only guesses", () => {
+  // willRetry absent + prose the regex would miss → the structured code is exact.
+  assert.equal(isTerminalTurnError({ error: { message: "no access", codexErrorInfo: "unauthorized" } }), true);
+  // willRetry still wins: the server saying it will retry outranks any code.
+  assert.equal(
+    isTerminalTurnError({ willRetry: true, error: { message: "no access", codexErrorInfo: "unauthorized" } }),
+    false
+  );
+  // A transient structured code must not become terminal via this branch.
+  assert.equal(isTerminalTurnError({ error: { message: "busy", codexErrorInfo: "serverOverloaded" } }), false);
+});
+
 test("isTerminalTurnError does NOT treat transient/server errors as terminal", () => {
   for (const msg of ["429 Too Many Requests", "rate limit exceeded", "500 Internal Server Error", "503 Service Unavailable", "overloaded", "network timeout", ""]) {
     assert.equal(isTerminalTurnError({ error: { message: msg } }), false, `must NOT short-circuit on: ${msg}`);

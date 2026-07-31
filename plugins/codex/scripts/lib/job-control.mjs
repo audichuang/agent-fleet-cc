@@ -299,6 +299,15 @@ function matchJobReference(jobs, reference, predicate = () => true) {
     throw new Error(`Job reference "${reference}" is ambiguous. Use a longer job id.`);
   }
 
+  // A reference that resolves against the UNFILTERED list is not unknown — the job
+  // exists and is merely in the wrong state for this action. Return null so the
+  // caller's own state-specific message runs ("already completed", "still running");
+  // claiming "no job found" sends the operator hunting for a job /codex:status shows
+  // plainly. Only a genuinely unknown reference is an error.
+  if (jobs.some((job) => job.id === reference || job.id.startsWith(reference))) {
+    return null;
+  }
+
   throw new Error(`No job found for "${reference}". Run /codex:status to list known jobs.`);
 }
 
@@ -414,12 +423,21 @@ export function resolveResultJob(cwd, reference, options = {}) {
 export function resolveCancelableJob(cwd, reference, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
-  const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "running");
+  const isActive = (job) => job.status === "queued" || job.status === "running";
+  const activeJobs = jobs.filter(isActive);
 
   if (reference) {
-    const selected = matchJobReference(activeJobs, reference);
+    // Match against the FULL list with an active-only predicate (not a pre-filtered
+    // list): that is what lets the matcher tell an already-finished job apart from an
+    // unknown id, so a just-completed job is reported as finished, not as missing.
+    const selected = matchJobReference(jobs, reference, isActive);
     if (!selected) {
-      throw new Error(`No active job found for "${reference}".`);
+      const finished = jobs.find((job) => job.id === reference || job.id.startsWith(reference));
+      throw new Error(
+        finished
+          ? `Job ${finished.id} is already ${finished.status}; nothing to cancel.`
+          : `No active job found for "${reference}".`
+      );
     }
     return { workspaceRoot, job: selected };
   }

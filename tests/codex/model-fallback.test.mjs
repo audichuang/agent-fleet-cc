@@ -64,6 +64,46 @@ test("isModelUnavailableFailure is false for a successful result", () => {
   assert.equal(isModelUnavailableFailure({ status: 0, error: null }), false);
 });
 
+// The safety property, now structural rather than regex-conservative: the model gate is
+// an HTTP 400 (`badRequest`), so any OTHER structured code is a genuine failure and must
+// never be model-switched — even if its prose happens to carry the gate phrase.
+test("isModelUnavailableFailure never fires when codexErrorInfo says the failure is something else", () => {
+  const gatePhrase = "The 'gpt-5.6-sol' model requires a newer version of Codex.";
+  for (const codexErrorInfo of [
+    "unauthorized",
+    "usageLimitExceeded",
+    "contextWindowExceeded",
+    "serverOverloaded",
+    { responseStreamDisconnected: { httpStatusCode: 500 } }
+  ]) {
+    assert.equal(
+      isModelUnavailableFailure({ status: 1, error: { message: gatePhrase, codexErrorInfo } }),
+      false,
+      `must NOT model-switch on ${JSON.stringify(codexErrorInfo)}`
+    );
+  }
+  // The two codes a gate can arrive under BOTH still fall back. `other` is the one that
+  // matters: an upstream 400 is CodexErrorDetails::UnexpectedStatus, which maps to the
+  // `other` catch-all — a live 0.146.0 rejection returned `[other]`, so an allow-list of
+  // `badRequest` alone would silently disable the whole 1.4.0 fallback.
+  for (const codexErrorInfo of ["badRequest", "other"]) {
+    assert.equal(
+      isModelUnavailableFailure({ status: 1, error: { message: gatePhrase, codexErrorInfo } }),
+      true,
+      `must still fall back on ${codexErrorInfo}`
+    );
+  }
+  // The gate on one source is not suppressed by another source's unrelated code.
+  assert.equal(
+    isModelUnavailableFailure({
+      status: 1,
+      turn: { error: { message: "turn ended", codexErrorInfo: "usageLimitExceeded" } },
+      error: { message: gatePhrase, codexErrorInfo: "badRequest" }
+    }),
+    true
+  );
+});
+
 test("e2e: `task --json` auto-falls back to gpt-5.6-terra when the default model is unavailable", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();

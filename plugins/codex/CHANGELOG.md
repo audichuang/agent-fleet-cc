@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.4.1
+
+Read the app-server's **structured** error fields instead of only its prose. The v2 `TurnError`
+carries `codexErrorInfo` (a machine-readable code: `unauthorized`, `usageLimitExceeded`,
+`badRequest`, `contextWindowExceeded`, …) and `additionalDetails` next to `message`; both were
+being dropped, so every failure decision and every surfaced reason came from regex-matching
+English.
+
+- **The model-fallback safety property is now structural, not regex-conservative.**
+  `isModelUnavailableFailure` requires the code to be one that a model gate can actually arrive
+  under (`badRequest` or `other`) — or absent, on an older CLI — before matching the gate phrase.
+  An `unauthorized` / `usageLimitExceeded` / `contextWindowExceeded` failure can no longer be
+  model-switched however its prose reads, and an unknown future code takes the safe direction (no
+  switch). `other` is in the set by **live evidence, not guesswork**: Codex maps an error to a code
+  by error VARIANT, not HTTP status, and an upstream 400 is `CodexErrorDetails::UnexpectedStatus` →
+  the `_ => CodexErrorInfo::Other` catch-all (`codex-rs/protocol/src/error.rs`); a real rejected
+  turn on 0.146.0 returned `[other]`. An allow-list of `badRequest` alone would have silently
+  disabled the whole 1.4.0 fallback.
+- **The fake engine now emits the real wire shape.** `tests/codex/fake-codex-fixture.mjs` sends
+  `codexErrorInfo: "other"` on its terminal error notifications (its `turn.error` path stays
+  code-less to keep covering the no-code branch), so the hermetic e2e stops modelling a payload the
+  real engine never produces — it now fails on exactly the allow-list mistake above.
+- **`errorMessage` keeps the actionable half.** `describeTurnError` appends `additionalDetails`
+  (often the upstream HTTP body) when it isn't already in the message, and tags the code —
+  `"Usage limit reached [usageLimitExceeded]"` — so a delegating commander can branch on a failed
+  `--json` payload without parsing prose. Flows through `/codex:status`, `/codex:wait`, the
+  persisted record, and the foreground `--json` alike (one seam: `failureReasonFor`).
+- **`isTerminalTurnError`** treats a structured `unauthorized` as terminal when `willRetry` is
+  absent, where the narrow auth regex was only guessing. `willRetry` still outranks it — a server
+  promising a retry is never short-circuited.
+- Tests: `turn-error-surfacing` (code tag, object-form tag, details de-duplication, malformed
+  info), `model-fallback` (the never-switch-on-another-code property + `badRequest` still
+  switches), `permanent-auth-shortcircuit` (structured auth vs. `willRetry` precedence). Proven
+  non-vacuous: neutering the three branches fails 5 of them.
+
+Also fixed, found by the real-engine smoke: **a job in the wrong state for an action was reported
+as missing.** `/codex:cancel <id>` on a job that had just finished answered `No job found for
+"<id>". Run /codex:status to list known jobs.` — telling the operator the record was gone when
+`/codex:status` shows it plainly. Root cause in `matchJobReference` (`job-control.mjs`): it only
+ever saw the pre-filtered list, so "excluded by the predicate" and "unknown id" collapsed into one
+message. It now returns null for a reference that resolves against the unfiltered list, letting
+each caller's own state-specific message run; an unknown or ambiguous reference still errors as
+before. That also makes `resolveResultJob`'s authored "Job X is still running. Check
+/codex:status and try again once it finishes." reachable — for an explicit reference it was dead
+code. Live-verified: `already completed; nothing to cancel` / `already cancelled; nothing to
+cancel`, and an unknown id still says `No job found`. Test:
+`tests/codex/job-reference-state.test.mjs` (fails 2/5 on the pre-fix code).
+
+Verified against codex-cli **0.146.0**: full `npm test` + `build:codex` green, and a real-engine
+smoke (live 0.146.0) covering launch → `wait --timeout-ms 0` (79ms, no default block) → completed
+`wait` exit 0 → cancel → `wait` exit 2, plus a real rejected turn confirming `codexErrorInfo`
+reaches `errorMessage`. See the 2026-07-31 row in `docs/codex-protocol-sync-audit.md` — no protocol
+drift in 0.145.0 → 0.146.0; everything here is a long-standing gap, not an adaptation.
+
 ## 1.4.0
 
 Auto-fallback to `gpt-5.6-terra` when the frontier tier is unavailable. The default model

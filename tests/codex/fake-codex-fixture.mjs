@@ -17,6 +17,11 @@ const readline = require("node:readline");
 	// A terminal turn error whose .message is a JSON-ENCODED error envelope — the
 	// real HTTP-400 model-unavailable shape the silent-death fix must surface.
 	const TERMINAL_ERROR_ENVELOPE = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-5.6-sol' model requires a newer version of Codex." } });
+	// Real 0.146.0 sends the structured code alongside the message, and an upstream 400 is
+	// CodexErrorDetails::UnexpectedStatus, which maps to the "other" catch-all (verified
+	// against a live rejected turn). The error notifications below mirror that, or the
+	// hermetic tests would model a shape the real engine never produces. The turn.error
+	// path deliberately stays code-less, covering the older-CLI / no-code branch.
 	// A failure that arrives ONLY via a terminal turn/completed carrying turn.error,
 	// with NO preceding standalone error notification — the second failure shape.
 	const TURN_COMPLETED_ERROR = "Codex turn failed: 401 Unauthorized (upstream auth rejected).";
@@ -372,7 +377,7 @@ rl.on("line", (line) => {
         send({ id: message.id, result: { turn: buildTurn(turnId), reviewThreadId: reviewThread.id } });
         if (BEHAVIOR === "terminal-error") {
           send({ method: "turn/started", params: { threadId: reviewThread.id, turn: buildTurn(turnId) } });
-          send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
         }
         if (BEHAVIOR === "turn-completed-error") {
@@ -384,7 +389,7 @@ rl.on("line", (line) => {
         // non-terra so the review fallback path can be proven end-to-end.
         if (BEHAVIOR === "model-fallback" && thread.model !== "gpt-5.6-terra") {
           send({ method: "turn/started", params: { threadId: reviewThread.id, turn: buildTurn(turnId) } });
-          send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
         }
         emitTurnCompleted(reviewThread.id, turnId, [
@@ -430,7 +435,7 @@ rl.on("line", (line) => {
 
         if (BEHAVIOR === "terminal-error") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
-          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
         }
         if (BEHAVIOR === "turn-completed-error") {
@@ -442,7 +447,7 @@ rl.on("line", (line) => {
         // executor tier succeeds — so the companion's retry-on-terra path can be proven.
         if (BEHAVIOR === "model-fallback" && message.params.model !== "gpt-5.6-terra") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
-          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
         }
         // A command STARTS (side effect), then the model-gate error arrives before
@@ -450,7 +455,7 @@ rl.on("line", (line) => {
         if (BEHAVIOR === "model-error-after-command") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
           send({ method: "item/started", params: { threadId: thread.id, turnId, item: { type: "commandExecution", id: "cmd_" + turnId, command: "echo side-effect", status: "inProgress" } } });
-          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE } } });
+          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
         }
 

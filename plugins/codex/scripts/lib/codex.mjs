@@ -462,6 +462,11 @@ export function isTerminalTurnError(params) {
   if (params?.willRetry === false) {
     return true;
   }
+  // willRetry absent (older protocol, or a malformed notification): a structured
+  // `unauthorized` code is exact where the regex below only guesses.
+  if (codexErrorCode(params?.error) === "unauthorized") {
+    return true;
+  }
   return PERMANENT_AUTH_ERROR.test(params?.error?.message ?? "");
 }
 
@@ -1172,11 +1177,37 @@ export function describeTurnError(error, stderr = "") {
   };
 
   const fromError = dig(error);
-  if (fromError) {
-    return cap(fromError);
-  }
   const fromStderr = typeof stderr === "string" ? stderr.trim() : "";
-  return fromStderr ? cap(fromStderr) : null;
+  const message = fromError || fromStderr;
+  if (!message) {
+    return null;
+  }
+  // `message` has two structured companions on the wire that were being dropped:
+  // `additionalDetails` (often the upstream HTTP body — the actionable half) and
+  // `codexErrorInfo` (a machine-readable code). Both belong in the persisted
+  // `errorMessage`: the details so a human sees WHY, the code so a delegating
+  // commander can branch on a failed --json payload without parsing prose.
+  const details = typeof error?.additionalDetails === "string" ? error.additionalDetails.trim() : "";
+  const prose = details && !message.includes(details) ? `${message} — ${details}` : message;
+  const code = codexErrorCode(error);
+  // Cap the prose, never the code: the tag is the machine-readable half and costs ~20 chars.
+  return code ? `${cap(prose)} [${code}]` : cap(prose);
+}
+
+// `codexErrorInfo` (v2 `TurnError`) is either a bare string tag ("unauthorized",
+// "usageLimitExceeded", "badRequest", …) or a single-key object carrying data
+// (`{ httpConnectionFailed: { httpStatusCode } }`). Return the tag either way; null
+// when the CLI omitted it (older protocol) or it arrived malformed.
+export function codexErrorCode(error) {
+  const info = error?.codexErrorInfo;
+  if (typeof info === "string" && info.trim()) {
+    return info.trim();
+  }
+  if (info && typeof info === "object" && !Array.isArray(info)) {
+    const [tag] = Object.keys(info);
+    return typeof tag === "string" && tag ? tag : null;
+  }
+  return null;
 }
 
 const MAX_TURN_ERROR_LEN = 2000;
@@ -1201,6 +1232,15 @@ export const MODEL_FALLBACK_SLUG = "gpt-5.6-terra";
 // a real turn error) must be surfaced, never model-switched.
 const MODEL_UNAVAILABLE_RE = /(?=[\s\S]*\bmodel\b)[\s\S]*requires a newer version of codex/i;
 
+// The codes a model gate can actually arrive under. `badRequest` is the obvious one,
+// but `other` is REQUIRED and verified live: Codex maps an error to a code by error
+// VARIANT, not HTTP status, and an upstream 400 is `CodexErrorDetails::UnexpectedStatus`,
+// which falls into the `_ => CodexErrorInfo::Other` catch-all
+// (codex-rs/protocol/src/error.rs `to_codex_protocol_error`, codex-cli 0.146.0). A real
+// rejected turn on 0.146.0 returned `[other]` — so allowing only `badRequest` would
+// silently disable the fallback. Anything NOT in this set is a genuine failure.
+const MODEL_GATE_CODES = new Set(["badRequest", "other"]);
+
 // True when a FAILED turn/review result failed specifically because its model was
 // unavailable. Checks BOTH error sources (turn.error AND the error notification)
 // independently — a `??` would let a generic message on one source mask the
@@ -1209,8 +1249,22 @@ export function isModelUnavailableFailure(result) {
   if (!result || result.status === 0) {
     return false;
   }
-  const messages = [describeTurnError(result.turn?.error), describeTurnError(result.error, result.stderr)];
-  return messages.some((message) => typeof message === "string" && MODEL_UNAVAILABLE_RE.test(message));
+  const sources = [
+    { error: result.turn?.error ?? null, message: describeTurnError(result.turn?.error) },
+    { error: result.error ?? null, message: describeTurnError(result.error, result.stderr) }
+  ];
+  return sources.some(({ error, message }) => {
+    // A structured `codexErrorInfo` narrows the regex: a code that can never be a
+    // model gate — `unauthorized`, `usageLimitExceeded`, `contextWindowExceeded`, … —
+    // is a genuine failure and must not be model-switched however its prose reads.
+    // No code (older CLI, or a message recovered from stderr) → the regex decides
+    // alone, as before. Unknown future code → no fallback, i.e. the safe direction.
+    const code = codexErrorCode(error);
+    if (code && !MODEL_GATE_CODES.has(code)) {
+      return false;
+    }
+    return typeof message === "string" && MODEL_UNAVAILABLE_RE.test(message);
+  });
 }
 
 const BUILTIN_PROVIDER_LABELS = new Map([
