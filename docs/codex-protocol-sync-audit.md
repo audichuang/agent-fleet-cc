@@ -56,11 +56,33 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 
 | | |
 |---|---|
-| Codex CLI HEAD | `e363b08c91` (`rust-v0.146.0`; installed binary codex-cli 0.146.0) |
-| Last re-check | 2026-07-31 (wire-schema diff + source-grounded checklist + real-engine smoke) |
+| Codex CLI HEAD | `2b5bdcf675` (main @ 2026-08-02; installed binary codex-cli 0.146.0 = `rust-v0.146.0`, still the newest **stable** tag — 0.147.0 is alpha-only) |
+| Last re-check | 2026-08-02 (wire-schema diff + schema-derived checklist assertion) |
 | Last FULL 11-dimension audit | 2026-07-21 @ `d5998e7452` (codex-cli 0.144.6) → `codex@1.3.2` |
 | Plugin version now | `codex@1.4.1` |
 | Codex repo checked | `/home/audichuang/research/codex` |
+
+> **2026-08-02 re-check (`e363b08c91` → main `2b5bdcf675`, 352 commits; 46 past the previous
+> pass's forward-look `4642370542`, 13 of those on protocol paths):** **No drift — no plugin
+> change needed.** Schema diff: 50 files, +2450/−233, **zero** method/notification/item-variant
+> removals. Everything new is a surface the plugin never calls (`threadSection/*` + `thread/section/move`,
+> plugin search, external-agent-config import) or an additive field (`readOnlyHint` on tool-call
+> items, `encrypted_function_args` in resume history, `ToolRequestUserInputParams.isBlocking`).
+> The one type change on a read path is cosmetic: `CommandAction.read.path` moved
+> `AbsolutePathBuf` → `LegacyAppPathString`, **both plain JSON strings**. The plugin's `isPinned`
+> churn resolved as predicted (added 0.146.0, removed again). **Response shapes the plugin sends
+> back are all still valid** — `PermissionsRequestApprovalResponse{permissions,scope,strictAutoReview?}`,
+> `ToolRequestUserInputResponse{answers}`, `McpServerElicitationRequestResponse{action,content,_meta}`
+> — despite #36365 (strict auto-review for MCP elicitations) and #36410 (explicit input blocking)
+> touching those paths. Launch path unchanged (`codex app-server` untouched; `cli/src/main.rs`
+> churn is all remote/exec-server daemon). `gpt-5.6-sol`/`terra`/`luna` still the newest family,
+> `ReasoningEffort` enum unchanged (incl. `Custom` catch-all). Note: `currentTime/read` — in the
+> plugin's decline table — is `#[experimental]` upstream so it is absent from `ServerRequest.json`
+> by design (an export test asserts it); the entry is a harmless no-op, not drift.
+> **Cheapest way to redo this pass** (~4 commands, no agents): schema diff for method/notification
+> deletions, then assert the Part-1 durable checklist against the checked-in schema JSON with a
+> throwaway Python script — every list in it is machine-checkable from `ClientRequest.json` /
+> `ServerNotification.json` / `ServerRequest.json` / `v2/ItemCompletedNotification.json`.
 
 > **2026-07-31 re-check (codex-cli 0.145.0 → 0.146.0, `4a443994bd` → `rust-v0.146.0` = `e363b08c91`,
 > 154 commits, 59 touching protocol paths):** **No drift — no adaptation needed.** New, faster
@@ -249,6 +271,7 @@ that Codex diff-review before considering the pass done.
 
 | Date | Codex HEAD | Plugin | Outcome |
 |---|---|---|---|
+| 2026-08-02 | `2b5bdcf675` (main, 0.147-alpha era; installed CLI still 0.146.0) | 1.4.1 (**unchanged**) | **No drift — record-only.** 352 commits past `e363b08c91` (13 on protocol paths past the last forward-look). Zero method / notification / item-variant removals; all additions are surfaces the plugin never calls (`threadSection/*`, plugin search, external-agent-config import) or additive fields (`readOnlyHint`, `encrypted_function_args`, `isBlocking`). Only read-path type change is `AbsolutePathBuf` → `LegacyAppPathString` on `CommandAction.read.path` — both plain strings. Decline-reply shapes re-verified against the structs (#36365 / #36410 touched those paths but not the response types). Launch path + model catalog + `ReasoningEffort` unchanged. Details + the cheap re-run recipe in the Baseline block. |
 | 2026-07-31 | `e363b08c91` (`rust-v0.146.0`, codex-cli 0.146.0) | 1.4.0 → **1.4.1** | **No protocol drift** (details in the Baseline block: wire-schema diff of `app-server-protocol/schema/json/`, 154 commits / 59 on protocol paths, only additive changes + one deletion outside the read set; forward-checked to main `4642370542` too). **Two fixes applied, both long-standing gaps rather than adaptations.** (1) **Structured error fields were never read.** `TurnError.codexErrorInfo` + `additionalDetails` existed since before the previous baseline and the plugin used neither — every failure decision and surfaced reason came from regex-matching English. 1.4.1 tags the code and keeps the details in `errorMessage` (via `describeTurnError`, so it flows to `/codex:status`, `/codex:wait`, the persisted record, and `--json` alike), gates `isModelUnavailableFailure` on the codes a gate can arrive under, and prefers a structured `unauthorized` over the auth regex in `isTerminalTurnError` (`willRetry` still outranks it). **The live smoke earned its keep here:** the first attempt allow-listed `badRequest`, which a real rejected turn disproved — the code came back `other`, because the mapping is by error variant (`UnexpectedStatus` → `_ => Other`), so that version would have silently disabled the 1.4.0 model fallback. `fake-codex-fixture.mjs` now emits `codexErrorInfo: "other"` so the hermetic e2e reproduces the real shape and fails on exactly that mistake. (2) **A job in the wrong state was reported as missing** — `/codex:cancel <just-finished-id>` said `No job found`; `matchJobReference` could not distinguish "predicate excluded it" from "unknown id", which also left `resolveResultJob`'s "still running" message dead for an explicit reference. Both now say what is true. **Verified:** 469 codex + full chain green on Node 24, `build:codex` against types regenerated from the 0.146.0 binary, and a real-engine smoke on live 0.146.0 (launch → `wait --timeout-ms 0` 79ms → completed exit 0 → cancel → `wait` exit 2; plus the real rejected turn and the two new cancel messages). Scope: wire-schema diff + source-grounded checklist + live smoke (proportionate to a patch bump), not the full multi-agent 11-dimension pass. |
 | 2026-07-22 | `4a443994bd` (codex-cli 0.145.0) | 1.4.0 (**unchanged by this audit**) | **No drift — record-only.** codex-cli 0.144.6 → 0.145.0 (58 commits past `d5998e7452`). **Diff:** commits touching the protocol paths are all internal (sandbox / proxy / plugin-list / rollout / HTTP client factory / response-item-ID assignment `#34645` — plugin treats `item.id` opaque); the 3 touching `app-server-protocol` are all **additive**: new `configRequirements/read` fields (`sqlite_home`/`log_dir`/`model_catalog_json`/`feedback`/… on `ConfigRequirements`; `v2/config.rs`) + a `ConfigRequirementReadonly` write-error variant, `PluginListParams.forceRefetch`, new `PathUri`/`FeedbackRequirements`. **`config/read` (`ConfigReadResponse`) — what the plugin reads — untouched;** the new `configRequirements/read` endpoint is not called by the plugin. Zero diff lines hit a durable-checklist identifier. **Source-grounded:** confirmed every checklist item still exists with its expected shape in the 0.145.0 source — 10/10 sent requests in the v2 schema, `turn/start` params incl. `output_schema` on `turn.rs`, Bedrock `usesCodexManagedCredentials` (`common.rs`), `InitializeCapabilities` (`experimental_api`/`request_attestation`/`optOutNotificationMethods`), all 18 notifications + 9 item.type variants, all 8 server-request decline names (`server_request_definitions!`). `build:codex` regenerated types from the installed 0.145.0 CLI; `tsc` passed. Scope: diff + source-grounded checklist verification (proportionate to a patch bump), not the full multi-agent 11-dimension pass. (Plugin 1.4.0 = the unrelated model-auto-fallback feature, not driven by this sync.) |
 | 2026-07-13 | `2b0b37abb7` | 1.2.0 → **1.3.0** | No breaking protocol drift. 4 health/observability improvements + 1 auth-label fix applied, then 2 follow-on races (broker intentional-close, reconcile deadline TOCTOU) + 2 nits (monotonic clock, UTF-8 byte count) hardened after an independent Codex (GPT-5.6) diff review. 432 codex + 109 shared green. |
