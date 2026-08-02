@@ -75,6 +75,14 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   - **Real-engine (non-hermetic) runs** that spend another engine's quota or hit the network.
 
 ## Gotchas
+- **Editing `plugins/<name>/` does NOT change the agent/skill/command Claude Code actually runs.**
+  It spawns from the installed copy at `~/.claude/plugins/cache/agent-fleet/<plugin>/<version>/`,
+  so a subagent keeps its **old** frontmatter `description` (and body) until the plugin is bumped
+  and reinstalled. Verifying a prose/routing change therefore needs a reinstall — a worktree edit
+  plus a green `npm test` proves nothing about the live agent. Quickest check that you are looking
+  at the live text: `diff ~/.claude/plugins/cache/agent-fleet/<plugin>/<version>/agents/<a>.md
+  plugins/<plugin>/agents/<a>.md`. (The agent list in a running session shows the installed
+  description — that is the authoritative tell.)
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.

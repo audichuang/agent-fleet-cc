@@ -52,8 +52,22 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   否則 `--json`/status 只剩裸「failed」。model-unavailable 會**自動單次重試降 `gpt-5.6-terra`**
   (`isModelUnavailableFailure` + `runWithModelFallback`,可見:progress line + payload `modelFallback`);
   偵測刻意保守,別把 auth/rate-limit 也吃進 fallback。
+- **`context: fork` 別碰**(issue #234)。forked general-purpose subagent **沒有 `Agent` tool**,
+  routing 會退回 `Skill(codex:rescue)` 並遞迴回同一個 command。`commands/rescue.md` 保持 inline +
+  用 `Agent` 派 subagent;`tests/codex/commands.test.mjs` 與 antigravity 那邊各釘一條
+  `doesNotMatch(/^context:\s*fork\b/m)`。名字很像但機制不同的另兩個(`/subtask`、`/fork`)見下面
+  delivery-paths。
+- **`codex-rescue` 一次 spawn ~20K tokens**(實測 `subagent_tokens: 20732`,一次 trivial 轉發)。
+  成因:`skills:` frontmatter 會**預載技能全文**,不只 description —— 兩顆 skill + agent body ≈ 4.8K
+  固定成本,每次 spawn 都付。它買到的是 proactive discovery 與 `tools: Bash` 圍欄,**不是** context
+  隔離(隔離本來就由 Codex 自己的 context 提供,主線兩條路收到的位元組一樣,因為 agent 被明文禁止摘要)。
+  一批 ticket 走主線直接 `task` 就好,別 N × 20K。要調的話 frontmatter 還有 `effort` / `maxTurns`
+  沒用 —— 但 `maxTurns` 會夾死 `--prompt-file` 那條(寫檔 + task + 收尾 = 3 turns 起),別設 2。
+  `permissionMode` / `hooks` / `mcpServers` 對 plugin subagent **會被靜默忽略**,別在這裡試。
 
 ## 細節指向
+- 交付路徑選型(直接 `task` · `--resume-last` · subagent · conversation fork)含實測成本與 fork 命名
+  陷阱:`skills/gpt-5-6-prompting/references/delivery-paths.md`。
 - protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。
 - 寫 GPT-5.6 prompt:`gpt-5-6-prompting` skill(本 plugin 內);worktree 驗證合約見
   `lib/worktree-guard.mjs`、設計見 `docs/superpowers/plans/2026-06-21-worktree-cwd-guard.md`。

@@ -130,9 +130,14 @@ function buildModelListResult() {
   if (BEHAVIOR === "model-list-fails") {
     throw new Error("model/list failed");
   }
+  // Shapes mirror a real model/list includeHidden:true call (see
+  // docs/codex-protocol-sync-audit.md): the 5.6 family is all hidden:false, and the
+  // one genuinely hidden entry is codex-auto-review. The unsupported branch carries
+  // that hidden entry so setup's !hidden filter is actually exercised — without it the
+  // "suggest alternatives" assertion passes whether or not the filter works.
   const models = BEHAVIOR === "model-unsupported"
-    ? [{ id: "gpt-5.4", hidden: false }, { id: "gpt-5.5", hidden: false }, { id: "gpt-5.6-terra", hidden: false }]
-    : [{ id: "gpt-5.6-sol", hidden: false }, { id: "gpt-5.6-terra", hidden: false }, { id: "gpt-5.4", hidden: false }, { id: "gpt-5.6-luna", hidden: true }];
+    ? [{ id: "gpt-5.4", hidden: false }, { id: "gpt-5.5", hidden: false }, { id: "gpt-5.6-terra", hidden: false }, { id: "codex-auto-review", hidden: true }]
+    : [{ id: "gpt-5.6-sol", hidden: false }, { id: "gpt-5.6-terra", hidden: false }, { id: "gpt-5.4", hidden: false }, { id: "gpt-5.6-luna", hidden: false }];
   return { data: models, nextCursor: null };
 }
 

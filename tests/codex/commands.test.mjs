@@ -228,6 +228,41 @@ test("result and cancel commands are exposed as deterministic runtime entrypoint
   assert.match(resultHandling, /if Codex was never successfully invoked, do not generate a substitute answer at all/i);
 });
 
+// The ticket lane is a routing capability that lives only in prose: the small-task
+// route exists because these two files say it does. A silent edit dropping either
+// half (the model/effort pairing, or the rescue agent's permission to take a ticket
+// at all) removes the capability with no code change and no other failure.
+test("gpt-5.6-luna is documented as the ticket lane, pinned to max effort", () => {
+  const promptingSkill = read("skills/gpt-5-6-prompting/SKILL.md");
+  const agent = read("agents/codex-rescue.md");
+
+  assert.match(promptingSkill, /\|\s*\*\*gpt-5\.6-luna\*\*\s*\|/, "luna needs a row in the model table");
+  assert.match(promptingSkill, /Luna always runs at `--effort max`/);
+  assert.match(promptingSkill, /One ticket per run/);
+  // Pre-cut prices would misprice every routing decision made from this table.
+  assert.match(promptingSkill, /\$0\.20 \/ \$1\.20/, "luna's post-2026-07-30 price");
+  assert.match(promptingSkill, /\$2\.00 \/ \$12\.00/, "terra's post-2026-07-30 price");
+  assert.doesNotMatch(promptingSkill, /\$2\.50 \/ \$15\.00/, "stale pre-cut terra price");
+
+  assert.match(agent, /Ticket lane/);
+  assert.match(agent, /--model gpt-5\.6-luna --effort max/);
+});
+
+// Delivery-path choice is disclosed to a reference rather than carried in SKILL.md,
+// because every codex-rescue spawn preloads SKILL.md in full and the forwarder can
+// only ever execute one path. The pointer is what makes the reference reachable.
+test("delivery-path reference is reachable and carries the fork trap", () => {
+  const promptingSkill = read("skills/gpt-5-6-prompting/SKILL.md");
+  const deliveryPaths = read("skills/gpt-5-6-prompting/references/delivery-paths.md");
+
+  assert.match(promptingSkill, /references\/delivery-paths\.md/, "SKILL.md must point at the reference");
+  assert.match(deliveryPaths, /`--resume-last`/);
+  assert.match(deliveryPaths, /subagent_tokens: 20732/, "the measured cost is the whole argument");
+  // #234 is cheap to reintroduce from the name alone; the reference has to say why not.
+  assert.match(deliveryPaths, /context: fork/);
+  assert.match(deliveryPaths, /no `Agent` tool/i);
+});
+
 test("internal docs use task terminology for rescue runs", () => {
   const runtimeSkill = read("skills/codex-cli-runtime/SKILL.md");
   const promptingSkill = read("skills/gpt-5-6-prompting/SKILL.md");

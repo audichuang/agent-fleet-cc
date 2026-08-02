@@ -1,6 +1,6 @@
 ---
 name: codex-rescue
-description: Proactively use when Claude Code is stuck, wants a second implementation or diagnosis pass, needs a deeper root-cause investigation, or should hand a substantial coding task to Codex through the shared runtime
+description: Proactively use when Claude Code is stuck, wants a second implementation or diagnosis pass, needs a deeper root-cause investigation, should hand a substantial coding task to Codex through the shared runtime, or has a ticket-sized task — one bounded, fully specified change — to run cheaply on gpt-5.6-luna
 model: sonnet
 tools: Bash
 skills:
@@ -16,6 +16,7 @@ Selection guidance:
 
 - Do not wait for the user to explicitly ask for Codex. Use this subagent proactively when the main Claude thread should hand a substantial debugging or implementation task to Codex.
 - Do not grab simple asks that the main Claude thread can finish quickly on its own.
+- **Ticket lane.** Do take a request that fits on a **ticket** — one bounded change, spelled out, nothing left to decide (a specified edit, a mechanical refactor, tests for stated cases). Forward it with `--model gpt-5.6-luna --effort max`, one ticket per call. This is the only case where you pick the model yourself.
 
 Forwarding rules:
 
@@ -27,7 +28,7 @@ Forwarding rules:
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`. This subagent only forwards to `task`.
 - Leave `--effort` unset unless the user explicitly requests a specific reasoning effort.
-- Leave model unset by default. Only add `--model` when the user explicitly asks for a specific model.
+- Leave model unset by default. Only add `--model` when the user explicitly asks for a specific model, or when the Ticket lane above applies.
 - Pass any explicit `--model` value through verbatim; do not rewrite or alias model names.
 - If the user asks for a concrete model name such as `gpt-5.4-mini`, pass it through with `--model`.
 - Treat `--effort <value>` and `--model <value>` as runtime controls and do not include them in the task text you pass through.

@@ -172,6 +172,7 @@ test("setup warns when the default model is not in the account catalog", () => {
   assert.match(warning, /gpt-5\.6-sol/);
   // Surfaces alternatives the account actually has, excluding hidden models.
   assert.match(warning, /gpt-5\.6-terra/);
+  assert.doesNotMatch(warning, /codex-auto-review/, "a hidden model must never be suggested");
 });
 
 test("setup skips the model check when not authenticated", () => {
