@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.5.0
+
+**`gpt-5.6-luna` becomes a real lane.** OpenAI cut Luna 80% on 2026-07-30 ($0.20 / $1.20 per 1M
+tokens; Terra −20% to $2 / $12), and Codex's own catalog declares `gpt-5.4-mini`'s upgrade target
+as `gpt-5.6-luna` — the small-model lane is the supported one now. The `gpt-5-6-prompting` skill
+had Luna written off as "rarely the right fit here" and still priced Terra pre-cut, so every
+routing decision made from that table was wrong in the cheap direction.
+
+- **Model selection routes on "how much thinking is left"** — **thinker** (`sol`) / **executor**
+  (`terra`) / **ticket-runner** (`luna`) — in one table. `luna` takes work that fits on a
+  **ticket**: one bounded change, spelled out, nothing left to decide.
+- **`luna` is pinned to `--effort max`.** Its capability is an effort curve, not a fixed number
+  (≈27 on the Artificial Analysis index with reasoning off, ≈51 at `max`), so a cheap model at low
+  effort is the one combination that buys nothing. **One ticket per run** — bundling tickets into a
+  single prompt walks into Luna's long-context weakness (MRCR v2 at 512K–1M ≈41% vs `sol` ≈74%;
+  OSWorld 2.0 ≈46%, so GUI/computer-use stays on `sol`).
+- **`codex-rescue` gained a Ticket lane.** Its charter excluded simple asks, so a ticket could not
+  reach Codex at all; it now takes one and forwards it with `--model gpt-5.6-luna --effort max`.
+  This is the only case where the forwarder picks the model itself.
+- **New `references/delivery-paths.md`** — choosing *how* work reaches Codex (direct `task` ·
+  `--resume-last` · the `codex-rescue` subagent · a conversation fork) is a separate decision from
+  choosing the model, and it has measured costs: one trivial subagent forward is **20,732 tokens**,
+  because `skills:` frontmatter preloads the full skill text at every spawn. That buys proactive
+  discovery and the `tools: Bash` guardrail — **not** context isolation, which Codex's own context
+  already provides. Also documents the three-way "fork" naming trap: `context: fork` is *not* a
+  conversation fork ("It won't have access to your conversation history") and is what caused the
+  #234 recursion.
+- **Test hardening.** `fake-codex-fixture.mjs` now mirrors the live `model/list`: `gpt-5.6-luna` is
+  `hidden:false`, and the `model-unsupported` branch carries the genuinely hidden `codex-auto-review`
+  so setup's `!hidden` suggestion filter is actually exercised — previously that assertion passed
+  whether or not the filter worked. Proven non-vacuous: dropping the filter reddens exactly it.
+
+**Verified live on codex-cli 0.146.0** (not hermetically): a read-only turn and a write turn on
+`gpt-5.6-luna --effort max`, with model and effort confirmed from Codex's own rollout records; the
+write turn's diff and its generated `node:test` file independently re-run; and one real
+`codex:codex-rescue` spawn end-to-end, confirming the `--model` / `--effort` pass-through strips the
+flags from the prompt text. No runtime code changed in this release.
+
 ## 1.4.1
 
 Read the app-server's **structured** error fields instead of only its prose. The v2 `TurnError`
