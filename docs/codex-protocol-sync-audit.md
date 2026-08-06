@@ -36,6 +36,13 @@ When you want to re-check after new Codex commits land:
    so `tsc` is a real drift check), and for anything touching the error/failure paths, a
    **real-engine smoke** — a live rejected turn has twice disproved a source-plausible assumption
    that the schema alone could not settle.
+1c. **Model catalog: read `~/.codex/models_cache.json`, don't call `model/list`.** It is the raw
+   upstream catalog the CLI already fetched — every model's `slug`, `visibility`,
+   `supported_reasoning_levels`, `default_reasoning_level`, `priority`, `upgrade` — and it carries
+   its own `fetched_at` + `client_version`, so you can see how fresh it is before trusting it.
+   Offline, no account, no broker contention, no quota. (Fields are snake_case here; the
+   app-server v2 wire shape is the camelCase view of the same data.) Fall back to a live
+   `model/list` only if the cache is stale or the question is about the wire shape itself.
 2. **Re-run the two audits** (each is a multi-agent workflow that reads both repos and
    adversarially verifies every non-trivial finding — see "How the audits were run"):
    - Protocol-drift audit (11 dimensions).
@@ -56,12 +63,42 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 
 | | |
 |---|---|
-| Codex CLI HEAD | `2b5bdcf675` (main @ 2026-08-02; installed binary codex-cli 0.146.0 = `rust-v0.146.0`, still the newest **stable** tag — 0.147.0 is alpha-only) |
-| Last re-check | 2026-08-02 (wire-schema diff + schema-derived checklist assertion) |
+| Codex CLI HEAD | `57f42a8113` (main @ 2026-08-06; installed binary codex-cli **0.146.1** — no `rust-v0.146.1` tag exists, npm ships ahead of the tags, so pin diffs to `rust-v0.146.0` or to main) |
+| Last re-check | 2026-08-07 (wire-schema diff + schema-derived checklist assertion + offline model-catalog check) |
 | Last FULL 11-dimension audit | 2026-07-21 @ `d5998e7452` (codex-cli 0.144.6) → `codex@1.3.2` |
-| Plugin version now | `codex@1.4.1` |
+| Plugin version now | `codex@1.5.0` |
 | Codex repo checked | `/home/audichuang/research/codex` |
 
+> **2026-08-07 re-check (`2b5bdcf675` → main `57f42a8113`, 159 commits, 61 on protocol paths):**
+> **No drift — no plugin change needed.** Wire-schema diff: 22 files, **+249/−4**, and all four
+> deleted lines are the same `description` string being reworded. Zero method / notification /
+> item-variant removals; the whole Part-1 durable checklist re-asserted green against the
+> checked-in schema JSON (11 requests, 19 notifications, 8 declines, 10 item types,
+> `TurnStartParams{threadId,input,model,effort,outputSchema}`, `TurnError{message,codexErrorInfo,
+> additionalDetails}`). Everything new is additive and unread by the plugin:
+> `InitializeParams.extensions` (per-session MCP extension negotiation, #36910 — it *demotes*
+> `mcpServerOpenaiFormElicitation` to "legacy", but the field is still there and the plugin sends
+> neither), `ModelListResponse.modelSpecialty` (only value so far: `cyber`, used by the TUI for
+> safer defaults), `transparentBackground` on the `imageGeneration` item, `onboardingEntrypoint`
+> on account-login-completed. `ReasoningEffort` unchanged (`None…Max/Ultra/Custom`).
+> `build:codex` green against types regenerated from the installed 0.146.1 binary; full `npm test`
+> green on Node 24.
+> **One semantic change worth knowing (not drift):** #36893 made
+> `commandExecution.command` and `commandActions` **redacted display values, no longer executable
+> commands** — secrets are stripped before the item reaches the client, on live items, completed
+> items and replayed history alike. The plugin only logs/heartbeats them, so this is a free win
+> (job logs can no longer leak a secret that appeared in a command line); the thing not to do is
+> ever treat a logged command as replayable. Also landed: #37132 enforces managed-auth
+> requirements locally *before* credentials are used — no wire change to `account/read`, but on a
+> managed workspace a disallowed login method now fails earlier and harder.
+> **Model catalog re-checked offline** — no live `model/list` needed: `~/.codex/models_cache.json`
+> is the raw upstream catalog the CLI already fetched (`fetched_at` + `client_version` in the
+> file; it was 4 h old and stamped 0.146.1 at check time). `gpt-5.6-luna` is still
+> `visibility:"list"` with `supported_reasoning_levels` up to **`max`** (no `ultra`), so
+> **1.5.0's ticket-lane routing (luna @ `max`) still holds**; sol is still priority 1 with
+> `default_reasoning_level:"low"`; no newer family. Upstream independently corroborates the lane —
+> #37103 routes API-key Guardian reviews to luna, and `gpt-5.4-mini.upgrade` is still luna.
+>
 > **2026-08-02 re-check (`e363b08c91` → main `2b5bdcf675`, 352 commits; 46 past the previous
 > pass's forward-look `4642370542`, 13 of those on protocol paths):** **No drift — no plugin
 > change needed.** Schema diff: 50 files, +2450/−233, **zero** method/notification/item-variant
@@ -153,6 +190,9 @@ The plugin speaks Codex **app-server v2** over JSON-RPC (`scripts/lib/app-server
 - **item.type variants rendered:** `agentMessage`, `reasoning`, `commandExecution`,
   `fileChange`, `mcpToolCall`, `dynamicToolCall`, `collabAgentToolCall`, `webSearch`,
   `enteredReviewMode`, `exitedReviewMode`.
+  Since codex-cli 0.146.x (#36893), `commandExecution.command` and `commandActions` are
+  **redacted display strings, not executable commands** — safe to log verbatim (that is the
+  point), never safe to treat as replayable.
 - **`TurnError` fields read** (`error` notification + terminal `turn.error`): `message`,
   `willRetry` (on the notification), and — added 1.4.1 — `codexErrorInfo`, `additionalDetails`.
   `codexErrorInfo` is a string tag OR a single-key object (`{ httpConnectionFailed: {…} }`); the
@@ -271,6 +311,7 @@ that Codex diff-review before considering the pass done.
 
 | Date | Codex HEAD | Plugin | Outcome |
 |---|---|---|---|
+| 2026-08-07 | `57f42a8113` (main; installed CLI 0.146.1) | 1.5.0 (**unchanged**) | **No drift — record-only.** 159 commits past `2b5bdcf675`, 61 on protocol paths. Wire-schema diff +249/−4 with the only deletions being one reworded `description`; full durable checklist re-asserted green from the checked-in schema JSON; `build:codex` (types regenerated from the 0.146.1 binary) + full `npm test` green on Node 24. Additions are all unread: `InitializeParams.extensions`, `ModelListResponse.modelSpecialty`, `transparentBackground`, `onboardingEntrypoint`. **Two things learned, both recorded above rather than coded:** (1) #36893 makes `commandExecution.command`/`commandActions` **redacted display values** — a free secret-leak win for job logs, and a standing "never replay a logged command" rule; (2) the model catalog can be checked **offline** from `~/.codex/models_cache.json` (raw upstream catalog + `fetched_at`/`client_version`), which is how 1.5.0's luna-@-`max` ticket lane was re-confirmed (`visibility:"list"`, levels `low…max`, no `ultra`) without a live `model/list`. Recipe folded into "How to keep this current" step 1c. |
 | 2026-08-02 | installed CLI 0.146.0 (live account, no source diff) | 1.4.1 (**unchanged** — guidance-only edit) | **Live model-catalog check, prompted by OpenAI's 2026-07-30 price cut** (Luna −80% → $0.20/$1.20, Terra −20% → $2/$12, Sol unchanged; `Fast mode` replaces Priority Processing). Verdict: **no protocol drift, one guidance gap closed.** Evidence = a real `model/list {includeHidden:true}` against this machine's ChatGPT account: 8 models, `gpt-5.6-luna` **`hidden:false`** with `supportedReasoningEfforts` `low…max` (no `ultra`), `defaultReasoningEffort:"medium"`, text+image, and `gpt-5.4-mini.upgrade === "gpt-5.6-luna"` — so Luna is the supported small-model lane, not an internal tier. The `gpt-5-6-prompting` skill had it written off as "rarely the right fit" and carried Terra's **pre-cut** price; both fixed, plus the rule that **Luna is only worth delegating to at `--effort max`** (≈27 → ≈51 on the Artificial Analysis index off→max) and its two real weak spots (MRCR v2 512K–1M ≈41% vs Sol ≈74%; OSWorld 2.0 ≈46%). `codex-rescue.md` gained a "Luna lane" so a small fully-specified task can reach Codex at all (its charter previously excluded simple asks). **Verified live on 0.146.0:** read-only Q&A turn `--model gpt-5.6-luna --effort max` → correct answers with correct `file:line`, 23s; write turn in a scratch git repo → correct `slugify` hardening + a passing `node:test` file, 1m49s, `touchedFiles` exactly the two requested. **Re-run recipe:** `model/list` goes through the shared broker via `listSupportedModels`, which returns `{checked:false, detail:"Shared Codex broker is busy."}` whenever any turn holds the broker — probe with `CodexAppServerClient.connect(cwd, {disableBroker:true})` + `client.request("model/list", {includeHidden:true})` instead. **Fixture realigned to this evidence:** `fake-codex-fixture.mjs` had `gpt-5.6-luna` as `hidden:true` (wrong) and no hidden entry at all in the `model-unsupported` branch, so setup's `!hidden` suggestion filter was never exercised; it now carries the real hidden entry (`codex-auto-review`) and `runtime.test.mjs` asserts it is never suggested — proven non-vacuous (dropping the filter reddens exactly that assertion). |
 | 2026-08-02 | `2b5bdcf675` (main, 0.147-alpha era; installed CLI still 0.146.0) | 1.4.1 (**unchanged**) | **No drift — record-only.** 352 commits past `e363b08c91` (13 on protocol paths past the last forward-look). Zero method / notification / item-variant removals; all additions are surfaces the plugin never calls (`threadSection/*`, plugin search, external-agent-config import) or additive fields (`readOnlyHint`, `encrypted_function_args`, `isBlocking`). Only read-path type change is `AbsolutePathBuf` → `LegacyAppPathString` on `CommandAction.read.path` — both plain strings. Decline-reply shapes re-verified against the structs (#36365 / #36410 touched those paths but not the response types). Launch path + model catalog + `ReasoningEffort` unchanged. Details + the cheap re-run recipe in the Baseline block. |
 | 2026-07-31 | `e363b08c91` (`rust-v0.146.0`, codex-cli 0.146.0) | 1.4.0 → **1.4.1** | **No protocol drift** (details in the Baseline block: wire-schema diff of `app-server-protocol/schema/json/`, 154 commits / 59 on protocol paths, only additive changes + one deletion outside the read set; forward-checked to main `4642370542` too). **Two fixes applied, both long-standing gaps rather than adaptations.** (1) **Structured error fields were never read.** `TurnError.codexErrorInfo` + `additionalDetails` existed since before the previous baseline and the plugin used neither — every failure decision and surfaced reason came from regex-matching English. 1.4.1 tags the code and keeps the details in `errorMessage` (via `describeTurnError`, so it flows to `/codex:status`, `/codex:wait`, the persisted record, and `--json` alike), gates `isModelUnavailableFailure` on the codes a gate can arrive under, and prefers a structured `unauthorized` over the auth regex in `isTerminalTurnError` (`willRetry` still outranks it). **The live smoke earned its keep here:** the first attempt allow-listed `badRequest`, which a real rejected turn disproved — the code came back `other`, because the mapping is by error variant (`UnexpectedStatus` → `_ => Other`), so that version would have silently disabled the 1.4.0 model fallback. `fake-codex-fixture.mjs` now emits `codexErrorInfo: "other"` so the hermetic e2e reproduces the real shape and fails on exactly that mistake. (2) **A job in the wrong state was reported as missing** — `/codex:cancel <just-finished-id>` said `No job found`; `matchJobReference` could not distinguish "predicate excluded it" from "unknown id", which also left `resolveResultJob`'s "still running" message dead for an explicit reference. Both now say what is true. **Verified:** 469 codex + full chain green on Node 24, `build:codex` against types regenerated from the 0.146.0 binary, and a real-engine smoke on live 0.146.0 (launch → `wait --timeout-ms 0` 79ms → completed exit 0 → cancel → `wait` exit 2; plus the real rejected turn and the two new cancel messages). Scope: wire-schema diff + source-grounded checklist + live smoke (proportionate to a patch bump), not the full multi-agent 11-dimension pass. |
