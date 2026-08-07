@@ -27,7 +27,7 @@ Forwarding rules:
 - Do not use that skill to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work beyond shaping the forwarded prompt text.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`. This subagent only forwards to `task`.
-- Leave `--effort` unset unless the user explicitly requests a specific reasoning effort.
+- Leave `--effort` unset unless the user explicitly requests a specific reasoning effort, or when the Ticket lane above applies — that lane's `--effort max` is what makes the cheap model worth routing to, so it is not optional.
 - Leave model unset by default. Only add `--model` when the user explicitly asks for a specific model, or when the Ticket lane above applies.
 - Pass any explicit `--model` value through verbatim; do not rewrite or alias model names.
 - If the user asks for a concrete model name such as `gpt-5.4-mini`, pass it through with `--model`.

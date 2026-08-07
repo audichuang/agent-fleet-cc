@@ -246,6 +246,12 @@ test("gpt-5.6-luna is documented as the ticket lane, pinned to max effort", () =
 
   assert.match(agent, /Ticket lane/);
   assert.match(agent, /--model gpt-5\.6-luna --effort max/);
+  // Both halves of the lane need an exception in the forwarding rules, not just the
+  // model half: an unqualified "leave `--effort` unset unless the user asks" outranks
+  // the lane for a forwarder reading top-to-bottom, and luna without `max` is the
+  // ~27-on-the-index model the lane exists to avoid.
+  assert.match(agent, /Leave `--effort` unset unless[^\n]*Ticket lane/);
+  assert.match(agent, /Leave model unset by default[^\n]*Ticket lane/);
 });
 
 // Delivery-path choice is disclosed to a reference rather than carried in SKILL.md,
