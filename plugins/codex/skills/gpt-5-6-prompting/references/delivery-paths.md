@@ -46,20 +46,30 @@ spot (~41% on MRCR v2 at 512K–1M). A few related tickets on one thread is the 
 chain walks into the weakness that `SKILL.md`'s **one ticket per run** rule exists to avoid.
 Unrelated tickets get fresh threads.
 
-## Three different things are called "fork"
+## Four different things are called "fork"
 
-Version-dependent and easy to mix up. On Claude Code ≥ 2.1.212:
+Version-dependent and easy to mix up. Checked against Claude Code 2.1.223:
 
 | Name | Inherits the conversation? | Result returns to this conversation? |
 | --- | --- | --- |
 | `/subtask` | yes | yes |
 | `/fork` | yes | **no** — it becomes a separate background session |
 | `context: fork` (skill frontmatter) | **no** — "It won't have access to your conversation history" | yes |
+| `Agent(subagent_type: "fork")` | **yes** — "inherits your context" | yes |
 
-Before 2.1.212, `/fork` was the in-session fork that `/subtask` is now.
+Before 2.1.212, `/fork` was the in-session fork that `/subtask` is now. The last two rows are the
+pair that actually gets confused: near-identical spelling, opposite answer in column one.
 
 **`context: fork` is a trap in this repo.** `commands/rescue.md` once set it: a forked
 general-purpose subagent has no `Agent` tool, so the routing fell back to `Skill(codex:rescue)`
 and re-entered the command (issue #234). `tests/codex/commands.test.mjs` and
 `tests/antigravity/agent-contract.test.mjs` both pin `doesNotMatch(/^context:\s*fork\b/m)`.
 Route to a subagent with the `Agent` tool and keep the command inline.
+
+**The trap now has an escape hatch we still don't take.** `context: fork` has a sibling `agent:`
+key ("Agent type to spawn when `context: fork`"), so a fork can be pinned to `codex:codex-rescue`
+instead of landing on general-purpose — which removes #234's failure chain at the root. `rescue.md`
+stays inline anyway: the neighbouring `background:` key defaults forks to background ("report back
+as a task notification instead of blocking the turn"), and the command's `AskUserQuestion` step has
+to block. So don't "fix" the trap by reaching for `agent:` — the reason we stay inline is the
+blocking prompt, not the missing tool.

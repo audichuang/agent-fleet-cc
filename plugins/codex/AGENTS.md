@@ -63,7 +63,11 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   隔離(隔離本來就由 Codex 自己的 context 提供,主線兩條路收到的位元組一樣,因為 agent 被明文禁止摘要)。
   一批 ticket 走主線直接 `task` 就好,別 N × 20K。要調的話 frontmatter 還有 `effort` / `maxTurns`
   沒用 —— 但 `maxTurns` 會夾死 `--prompt-file` 那條(寫檔 + task + 收尾 = 3 turns 起),別設 2。
-  `permissionMode` / `hooks` / `mcpServers` 對 plugin subagent **會被靜默忽略**,別在這裡試。
+  `permissionMode` / `hooks` / `mcpServers` 對 plugin subagent **會被靜默忽略**,別在這裡試 ——
+  這三個 key 在 Claude Code 的 agent frontmatter schema 裡**是有定義的**(對 user-defined agent
+  有效),所以「查了 schema 發現有」不構成推翻這條。要重驗哪些 key 現在真的存在、叫什麼,
+  `strings` 那顆 `claude` binary 撈 zod schema(`grep -oa '.\{0,220\}<描述片段>.\{0,320\}'`)——
+  那是唯一權威來源,別背清單,每個版本都可能加。
 
 ## 細節指向
 - 交付路徑選型(直接 `task` · `--resume-last` · subagent · conversation fork)含實測成本與 fork 命名
