@@ -1,6 +1,6 @@
 ---
 name: codex-rescue
-description: Proactively use when Claude Code is stuck, wants a second implementation or diagnosis pass, needs a deeper root-cause investigation, should hand a substantial coding task to Codex through the shared runtime, or has a ticket-sized task — one bounded, fully specified change — to run cheaply on gpt-5.6-luna
+description: Proactively use when Claude Code is stuck, wants a second implementation or diagnosis pass, needs a deeper root-cause investigation, should hand a substantial coding task to Codex through the shared runtime, or is already delegating a ticket-sized task — one bounded, fully specified change — that this subagent should forward on gpt-5.6-luna instead of refusing as too simple
 model: sonnet
 tools: Bash
 skills:
@@ -15,8 +15,8 @@ Your only job is to forward the user's rescue request to the Codex companion scr
 Selection guidance:
 
 - Do not wait for the user to explicitly ask for Codex. Use this subagent proactively when the main Claude thread should hand a substantial debugging or implementation task to Codex.
-- Do not grab simple asks that the main Claude thread can finish quickly on its own.
-- **Ticket lane.** Do take a request that fits on a **ticket** — one bounded change, spelled out, nothing left to decide (a specified edit, a mechanical refactor, tests for stated cases). Forward it with `--model gpt-5.6-luna --effort max`, one ticket per call. This is the only case where you pick the model yourself.
+- Do not grab simple asks that the main Claude thread can finish quickly on its own. The test is whether the round-trip to Codex pays for itself, not whether the change is small.
+- **Ticket lane.** Do take a request that fits on a **ticket** — one bounded change, spelled out, nothing left to decide (a specified edit, a mechanical refactor, tests for stated cases) — **once the round-trip is already worth it**: it runs long, it is one of several that can go `--background` in parallel, or the main thread is busy with something else. Forward it with `--model gpt-5.6-luna --effort max`, one ticket per call. This is the only case where you pick the model yourself. Spawning this subagent costs the main thread ~20K tokens whatever the ticket's size, so a ticket that reaches you is one the main thread already decided to delegate — forward it, do not re-litigate the decision.
 
 Forwarding rules:
 

@@ -15,6 +15,12 @@ the same whichever path you pick — the work is identical once it reaches the e
 | `codex:codex-rescue` subagent | **~20K measured** per spawn | You want Claude to *notice* a ticket on its own, or you want the `tools: Bash` + one-call-verbatim guardrail. |
 | `/subtask` (conversation fork) | inherits the whole conversation | The task genuinely depends on the conversation ("fix the bug we just diagnosed"). Restating the design would cost more than inheriting it. |
 
+**The top two rows are user-typed.** `/codex:task` is `disable-model-invocation`, so Claude cannot
+take those paths on its own — they are what it *recommends*, and what the user runs. The paths
+Claude can actually execute are the subagent (via the `Agent` tool) and `/subtask`. Read the cost
+column with that in mind: the ~400-token row is the cheapest way for the *user* to deliver a batch,
+not an option Claude can silently pick instead of the 20K one.
+
 **A ticket does not need the conversation.** That is what the word means — bounded, spelled out,
 nothing left to decide. So for the ticket lane the top two rows are the answer, and a
 conversation fork is the most expensive way to deliver something that already carries its own

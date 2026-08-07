@@ -252,6 +252,12 @@ test("gpt-5.6-luna is documented as the ticket lane, pinned to max effort", () =
   // ~27-on-the-index model the lane exists to avoid.
   assert.match(agent, /Leave `--effort` unset unless[^\n]*Ticket lane/);
   assert.match(agent, /Leave model unset by default[^\n]*Ticket lane/);
+  // The lane widens the charter so a ticket can reach Codex at all; it must not read
+  // as an advert for the cheap route. Spawning this subagent costs the main thread
+  // ~20K whatever the ticket's size, so a description selling "cheap" points the main
+  // thread at the single most expensive path in delivery-paths.md.
+  assert.match(agent, /instead of refusing as too simple/);
+  assert.doesNotMatch(agent, /run cheaply/);
 });
 
 // Delivery-path choice is disclosed to a reference rather than carried in SKILL.md,
@@ -267,6 +273,11 @@ test("delivery-path reference is reachable and carries the fork trap", () => {
   // #234 is cheap to reintroduce from the name alone; the reference has to say why not.
   assert.match(deliveryPaths, /context: fork/);
   assert.match(deliveryPaths, /no `Agent` tool/i);
+  // A cost table is only actionable if it says which rows the reader can execute.
+  // Cross-checked against the command itself so the claim cannot rot silently: if
+  // `/codex:task` ever became model-invocable, this reference would be wrong.
+  assert.match(read("commands/task.md"), /^disable-model-invocation:\s*true$/m);
+  assert.match(deliveryPaths, /`\/codex:task` is `disable-model-invocation`/);
 });
 
 test("internal docs use task terminology for rescue runs", () => {

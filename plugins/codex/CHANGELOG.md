@@ -24,7 +24,10 @@ routing decision made from that table was wrong in the cheap direction.
   choosing the model, and it has measured costs: one trivial subagent forward is **20,732 tokens**,
   because `skills:` frontmatter preloads the full skill text at every spawn. That buys proactive
   discovery and the `tools: Bash` guardrail — **not** context isolation, which Codex's own context
-  already provides. Also documents the three-way "fork" naming trap: `context: fork` is *not* a
+  already provides. The two cheapest rows are both `/codex:task`, which is `disable-model-invocation`
+  — Claude can only *recommend* those; the paths it can execute itself are the subagent and
+  `/subtask`, so the cost table is a recommendation guide, not a menu Claude picks from silently.
+  Also documents the three-way "fork" naming trap: `context: fork` is *not* a
   conversation fork ("It won't have access to your conversation history") and is what caused the
   #234 recursion.
 - **Test hardening.** `fake-codex-fixture.mjs` now mirrors the live `model/list`: `gpt-5.6-luna` is
