@@ -22,7 +22,7 @@ const forwarder = installCancelForwarder({ forceExitMs: 7000 });
 runWorker({
   stateDir,
   jobId,
-  adapter: makeGrokAdapter(),
+  adapter: makeGrokAdapter({ stateDir }),
   deps: { onChild: forwarder.onChild },
 }).then(
   (code) => process.exit(code),

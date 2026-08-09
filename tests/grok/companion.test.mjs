@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { makeTempDir, makeDataRoot } from "./helpers.mjs";
 import { runCompanion } from "../../plugins/grok/scripts/grok-companion.mjs";
 import { resolveDataRoot, workspaceStateDir } from "../../plugins/grok/scripts/lib/adapter.mjs";
-import { createJob, listJobs, markJobRunning, finalizeJob, jobDir } from "../../plugins/grok/scripts/lib/shared/core/state-store.mjs";
+import { createJob, listJobs, readJob, markJobRunning, finalizeJob, jobDir } from "../../plugins/grok/scripts/lib/shared/core/state-store.mjs";
 import { createJobRecord } from "../../plugins/grok/scripts/lib/shared/core/job.mjs";
 import { appendEvent } from "../../plugins/grok/scripts/lib/shared/core/events.mjs";
 
@@ -74,6 +74,77 @@ test("task (foreground) runs a job to completion via the fake engine and emits -
   assert.equal(json.engine, "grok");
   assert.equal(json.status, "completed");
   assert.match(json.resultText, /^echo:hello there/);
+});
+
+// The load-bearing test for the --prompt-file swap: it drives the REAL worker and a
+// REAL spawn, so it fails if the prompt file the adapter points at does not exist, is
+// incomplete, or is never read. A pure buildInvocation assertion cannot catch any of
+// those. Before the swap this job died with a bare `spawn E2BIG` bucketed as `unknown`.
+test("task --prompt-file: a prompt past MAX_ARG_STRLEN still reaches the engine (no E2BIG)", async () => {
+  const dir = makeTempDir("grok-bigprompt-");
+  const promptPath = path.join(dir, "big-plan.md");
+  // Past MAX_ARG_STRLEN on a 64 KiB-page kernel too (PAGE_SIZE * 32 = 2 MiB there),
+  // so disabling the swap fails this test on any page size — not just 4 KiB ones.
+  const body = `MARKER-BIG-PROMPT\n${"x".repeat(3 * 1024 * 1024)}`;
+  fs.writeFileSync(promptPath, body);
+  const bytes = Buffer.byteLength(body);
+  assert.ok(bytes > 2 * 1024 * 1024);
+
+  const { out, lines } = collect();
+  const code = await runCompanion(
+    ["task", "--prompt-file", promptPath, "--wait", "--json"],
+    {
+      env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, GROK_BIN: `${process.execPath}` },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(code, 0, `oversized prompt must not fail: ${json.error ?? ""}`);
+  assert.equal(json.status, "completed");
+  // The fake echoes the head of what it received AND the exact byte count. The head
+  // alone would pass on a TRUNCATED prompt (it only echoes 60 chars); the count is
+  // what proves every byte survived the file round-trip.
+  assert.match(json.resultText, /^echo:MARKER-BIG-PROMPT/);
+  assert.match(json.resultText, new RegExp(`\\|bytes:${bytes}$`));
+});
+
+// Worker-level, because the defect is in what gets PERSISTED: grok exits 0, so
+// without the adapter reporting the reason the job record would read
+// `error: "engine exited nonzero"` / `errorKind: "unknown"` on an exit-0 job.
+test("--schema: a run with no structured output fails with the real reason, session and usage intact", async () => {
+  const dir = makeTempDir("grok-schema-");
+  const schemaPath = path.join(dir, "s.json");
+  fs.writeFileSync(schemaPath, JSON.stringify({ type: "object" }));
+
+  const { out, lines } = collect();
+  const code = await runCompanion(
+    ["task", "extract the fields", "--schema", schemaPath, "--wait", "--json"],
+    {
+      env: {
+        GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA,
+        GROK_BIN: `${process.execPath}`,
+        FAKE_GROK_MODE: "schema-no-structured",
+      },
+      cwd: process.env.GROK_PLUGIN_DATA,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    },
+  );
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(code, 1);
+  assert.equal(json.status, "failed", "prose instead of schema output must not read as success");
+  assert.equal(json.resultText, null, "the un-schema'd prose must never surface as the result");
+  assert.equal(json.exitCode, 0, "grok really did exit 0 — that is why the reason must come from the stream");
+  assert.equal(json.error, "model did not produce structured output");
+  assert.equal(json.errorKind, "config");
+  // Resumable, and the spend is still recorded. usage is not in the CLI projection,
+  // so assert it on the persisted record — that is where it has to survive.
+  assert.equal(json.sessionId, "fake-session-json");
+  const stateDir = workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA }), process.env.GROK_PLUGIN_DATA);
+  const record = readJob(stateDir, json.jobId);
+  assert.deepEqual(record.usage, { inputTokens: 11, outputTokens: 22 });
 });
 
 test("task --live streams the raw engine log (incl. the terminal event) to stderr, with a clean one-line stdout result", async () => {

@@ -1,5 +1,66 @@
 # grok — changelog
 
+## 0.6.0
+Sync pass against **released `grok 1.0.0`** and grok-build `8a14c91` (the plugin had
+been audited against `0.2.111` / `c68e39f`). No flag we send is rejected and no field
+we read was renamed — the whole `headless/reducer/` refactor is invisible to us. What
+changed is what we *claimed*:
+
+- **`--read-only` now needs bubblewrap on Linux, starting is still not proof it is
+  enforcing, and on Windows it does nothing at all.** Three distinct modes, and the
+  plugin described none of them correctly:
+  *startup* became fail-**closed** (read-only is a hook-write-deny-enforcing profile,
+  so grok re-execs under bwrap and prints `Refusing to start …` + **exit 1** when bwrap
+  is missing or a hook plan cannot be prepared), while *enforcement* is still
+  fail-**open** (bwrap binds `/` read-write and only protects grok's own hook paths;
+  the layer that actually blocks writes is Landlock, which warns "continuing without
+  sandbox" and runs writable on a kernel that lacks it — and the refusal that would
+  catch that is skipped once inside bwrap); and on **Windows** the sandbox `apply` is a
+  no-op stub and the refusal path is not even compiled, so a fresh run starts and
+  enforces nothing (the resume-conflict exit still fires on every OS).
+  `adapter.mjs`, `AGENTS.md`, `commands/task.md`, `commands/live.md` all
+  previously promised plain "warns and runs writable" and are corrected.
+  `--read-only` stays **opt-in**: it can refuse to start, it can silently not enforce,
+  and a managed `requirements.toml` still outranks it.
+  Mechanism + anchors: `docs/grok-cli-contract-audit.md` Part 3 caveat 2a/2b/2c.
+- **`classifyError` buckets grok's sandbox refusals as `config`.** They exit 1 with
+  "No such file or directory" (never the token `ENOENT`), so they used to fall through
+  to `unknown` — hiding a one-command fix (`apt install -y bubblewrap`) behind a
+  mystery failure. Two tiers, because the refusal text embeds user-controlled paths
+  verbatim: the unambiguous `Refusing to start` phrase is matched **first**, above
+  every other bucket (a configured hooks-path of `/tmp/quota` would otherwise be read
+  as a quota error), while the broad `bwrap|bubblewrap|write-deny|…` net stays **last**
+  as a wording-change fallback — those words also appear in ordinary paths
+  (`GROK_BIN=/opt/bwrap/grok` → `spawn … ENOENT` is `not-installed`, not `config`).
+- **The shared runtime can now take a failure reason from the adapter.**
+  `extractResult` gained an optional `error`, which the worker prefers over the stderr
+  tail (`shared/lib/runtime/worker.mjs`). Purely additive — no other engine sets it, so
+  `cc`/`codex`/`antigravity` behavior is unchanged. Needed because grok exits **0** on a
+  schema failure, so the old fallback persisted "engine exited nonzero" on an exit-0 job.
+- **`--effort` no longer advertises levels the model rejects.** The catalog decides:
+  `grok-4.5` offers only `low|medium|high`, and a canonical-but-unoffered level
+  (`none`, `minimal`, `xhigh`, `max`) kills the job *after* the session opens. The
+  usage line and both command docs now say `low|medium|high` and defer to
+  `grok models`. No client-side allowlist — the catalog is fetched at runtime and any
+  hard-coded list rots.
+- **`commands/task.md` no longer advertises `grok-composer-2.5-fast`** — no such model
+  id exists.
+- **A `--json-schema` job that produced no structured output now fails.** grok exits 0
+  and signals it only via `structuredOutputError`; we were recording the job as
+  `completed` with the un-schema'd prose as `resultText`, so a caller parsing it as
+  JSON failed far from the cause. The failure keeps `sessionId` and `usage` so the job
+  stays resumable and its cost recorded.
+- **Oversized prompts no longer die as `spawn E2BIG`.** The real ceiling is
+  MAX_ARG_STRLEN — 131071 bytes for a *single* argv element — not ARG_MAX (~2MB), as
+  the old comment claimed; `/grok:task --prompt-file` reaches it with a ~128 KB file.
+  Past `PROMPT_ARGV_LIMIT` the adapter now passes `--prompt-file` pointing at the
+  `prompt.txt` the worker already wrote (no new file, nothing to clean up).
+- **The fake engine stopped lying.** `tests/grok/fake-grok.mjs` emitted CamelCase
+  `stopReason: "EndTurn"` where 1.0.0 emits snake_case `end_turn` — harmless today
+  only because `extractResult` deliberately never compares it, but it is the repo's
+  only written record of grok's stdout. It now also emits real `tool_call` /
+  `tool_call_update` lines so `parseEvent`'s tolerance of them is a test, not a claim.
+
 ## 0.5.0
 - **Crash-safe resume: session id is minted before spawn, not scraped after.**
   A new-conversation job now generates its session id client-side

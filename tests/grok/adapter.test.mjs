@@ -2,8 +2,10 @@
 import "./helpers.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { validateProcessAdapter } from "../../plugins/grok/scripts/lib/shared/adapter-api.mjs";
-import { makeGrokAdapter } from "../../plugins/grok/scripts/lib/adapter.mjs";
+import { promptFilePath } from "../../plugins/grok/scripts/lib/shared/core/state-store.mjs";
+import { makeGrokAdapter, PROMPT_ARGV_LIMIT } from "../../plugins/grok/scripts/lib/adapter.mjs";
 
 test("adapter satisfies the ProcessAdapter contract", () => {
   assert.deepEqual(validateProcessAdapter(makeGrokAdapter()), []);
@@ -110,6 +112,37 @@ test("buildInvocation: --research / --max-turns / --no-memory compose freely wit
   assert.deepEqual(argv.slice(-2), ["-r", "s1"]);
 });
 
+// The ceiling is MAX_ARG_STRLEN (one argv element), NOT ARG_MAX. Prove the cliff is
+// real before asserting the adapter steers around it — a guard whose failure mode was
+// never observed is a guard nobody can trust. Deliberately NOT pinned to 131072:
+// MAX_ARG_STRLEN is PAGE_SIZE * 32, so the exact cliff is 128 KiB on a 4 KiB-page
+// kernel but 2 MiB on a 64 KiB-page one. 4 MiB is over it on both; PROMPT_ARGV_LIMIT
+// stays sized for the smaller page (conservative, never wrong).
+test("oversized prompt: a single huge argv element really throws E2BIG (linux)", { skip: process.platform !== "linux" && "MAX_ARG_STRLEN is linux-specific" }, () => {
+  const under = spawnSync(process.execPath, ["-e", "0", "x".repeat(PROMPT_ARGV_LIMIT)]);
+  assert.equal(under.error, undefined, "a prompt at the adapter's limit must still spawn");
+  const over = spawnSync(process.execPath, ["-e", "0", "x".repeat(4 * 1024 * 1024)]);
+  assert.equal(over.error?.code, "E2BIG", "4 MiB in one argv element must fail on any page size");
+});
+
+test("oversized prompt: buildInvocation swaps -p for the prompt file the worker already wrote", () => {
+  const a = makeGrokAdapter({ stateDir: "/state" });
+  const job = { id: "grok-1", cwd: "/w", request: {} };
+
+  const small = a.buildInvocation({ job, prompt: "hi" }).argv;
+  assert.deepEqual(small.slice(0, 3), ["grok", "-p", "hi"]);
+
+  const big = a.buildInvocation({ job, prompt: "x".repeat(PROMPT_ARGV_LIMIT + 1) }).argv;
+  assert.deepEqual(big.slice(0, 3), ["grok", "--prompt-file", promptFilePath("/state", "grok-1")]);
+  assert.ok(!big.includes("-p"), "--prompt-file conflicts_with -p; it is a swap, not an addition");
+  // .txt matters: grok parses a .json prompt file as ACP content blocks instead.
+  assert.ok(big[2].endsWith(".txt"));
+
+  // No stateDir (nothing to point at) → unchanged inline behavior, never a bad path.
+  const noState = makeGrokAdapter().buildInvocation({ job, prompt: "x".repeat(PROMPT_ARGV_LIMIT + 1) }).argv;
+  assert.equal(noState[1], "-p");
+});
+
 test("json-schema mode: buildInvocation switches to --json-schema (not streaming-json)", () => {
   const a = makeGrokAdapter();
   const { argv } = a.buildInvocation({ job: { cwd: "/w", request: { jsonSchema: '{"type":"object"}' } }, prompt: "p" });
@@ -124,7 +157,7 @@ test("json-schema mode: parseEvent buffers the multi-line result object; extract
   const objLines = [
     "{",
     '  "text": "{\\"ok\\": true}",',
-    '  "stopReason": "EndTurn",',
+    '  "stopReason": "end_turn",',
     '  "sessionId": "s1",',
     '  "structuredOutput": {',
     '    "ok": true',
@@ -138,6 +171,35 @@ test("json-schema mode: parseEvent buffers the multi-line result object; extract
   assert.equal(events[0].sessionId, "s1");
   const res = a.extractResult(events, 0);
   assert.deepEqual(res, { ok: true, resultText: '{"ok": true}', sessionId: "s1", usage: null });
+});
+
+// grok exits 0 when a --json-schema run produced no structured output; it signals
+// the failure ONLY via structuredOutputError. Without this the job is recorded
+// completed and resultText is the un-schema'd prose.
+test("json-schema mode: structuredOutputError fails the job but keeps sessionId and usage", () => {
+  const a = makeGrokAdapter();
+  a.buildInvocation({ job: { request: { jsonSchema: "{}" } }, prompt: "p" });
+  const lines = [
+    "{",
+    '  "text": "Sure! Here is a summary in plain prose.",',
+    '  "stopReason": "end_turn",',
+    '  "sessionId": "s1",',
+    '  "usage": { "input_tokens": 11, "output_tokens": 22 },',
+    '  "structuredOutput": null,',
+    '  "structuredOutputError": "model did not produce structured output"',
+    "}",
+  ];
+  const events = lines.map((l) => a.parseEvent(l)).filter(Boolean);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, "json", "must stay a json event — an error event drops sessionId/usage");
+  assert.equal(events[0].structuredError, "model did not produce structured output");
+  // exit 0 must NOT make this ok, and the prose must never surface as the result…
+  const res = a.extractResult(events, 0);
+  assert.equal(res.ok, false);
+  assert.equal(res.resultText, null);
+  // …but the job must stay resumable and its cost recorded.
+  assert.equal(res.sessionId, "s1");
+  assert.deepEqual(res.usage, { inputTokens: 11, outputTokens: 22 });
 });
 
 test("json-schema mode: a {type:error} object fails the job", () => {
@@ -154,8 +216,8 @@ test("parseEvent maps grok events and tolerates junk", () => {
   assert.equal(a.parseEvent('{"type":"thought","data":"hmm"}'), null);
   assert.deepEqual(a.parseEvent('{"type":"text","data":"pong"}'), { kind: "text", text: "pong" });
   assert.deepEqual(
-    a.parseEvent('{"type":"end","stopReason":"EndTurn","sessionId":"abc","requestId":"r"}'),
-    { kind: "end", sessionId: "abc", stopReason: "EndTurn", usage: null },
+    a.parseEvent('{"type":"end","stopReason":"end_turn","sessionId":"abc","requestId":"r"}'),
+    { kind: "end", sessionId: "abc", stopReason: "end_turn", usage: null },
   );
   // grok emits {type:error,message} on stdout for bad model / bad effort / no-auth
   assert.deepEqual(a.parseEvent('{"type":"error","message":"unknown model id"}'), { kind: "error", message: "unknown model id" });
@@ -167,13 +229,13 @@ test("extractResult joins text deltas; ok = exit 0 + terminal end (not a specifi
   const events = [
     { kind: "text", text: "po" },
     { kind: "text", text: "ng" },
-    { kind: "end", sessionId: "abc", stopReason: "EndTurn" },
+    { kind: "end", sessionId: "abc", stopReason: "end_turn" },
   ];
   assert.deepEqual(a.extractResult(events, 0), { ok: true, resultText: "pong", sessionId: "abc", usage: null });
-  // exit 0 + end present with a NON-EndTurn stopReason (e.g. MaxTokens) → still ok:
-  // the answer is usable; the old EndTurn-only gate wrongly failed these.
+  // exit 0 + end present with a NON-end_turn stopReason (e.g. max_tokens) → still ok:
+  // the answer is usable; the old end_turn-only gate wrongly failed these.
   assert.equal(
-    a.extractResult([{ kind: "text", text: "partial" }, { kind: "end", sessionId: "x", stopReason: "MaxTokens" }], 0).ok,
+    a.extractResult([{ kind: "text", text: "partial" }, { kind: "end", sessionId: "x", stopReason: "max_tokens" }], 0).ok,
     true,
   );
   // non-zero exit → not ok even with a clean end
@@ -182,18 +244,18 @@ test("extractResult joins text deltas; ok = exit 0 + terminal end (not a specifi
   assert.equal(a.extractResult([{ kind: "text", text: "hi" }], 0).ok, false);
   // a stdout error event → not ok even on exit 0 + end
   assert.equal(
-    a.extractResult([{ kind: "error", message: "boom" }, { kind: "end", sessionId: "x", stopReason: "EndTurn" }], 0).ok,
+    a.extractResult([{ kind: "error", message: "boom" }, { kind: "end", sessionId: "x", stopReason: "end_turn" }], 0).ok,
     false,
   );
   // no text at all → null resultText
-  assert.equal(a.extractResult([{ kind: "end", sessionId: "x", stopReason: "EndTurn" }], 0).resultText, null);
+  assert.equal(a.extractResult([{ kind: "end", sessionId: "x", stopReason: "end_turn" }], 0).resultText, null);
 });
 
 test("usage: captured from the end event (streaming) and the json result", () => {
   const a = makeGrokAdapter();
   // streaming-json: grok now stamps usage on `end` (snake_case) → normalized shape
   const end = a.parseEvent(
-    '{"type":"end","stopReason":"EndTurn","sessionId":"abc","usage":{"input_tokens":7210,"output_tokens":1893,"total_tokens":50103}}',
+    '{"type":"end","stopReason":"end_turn","sessionId":"abc","usage":{"input_tokens":7210,"output_tokens":1893,"total_tokens":50103}}',
   );
   assert.deepEqual(end.usage, { inputTokens: 7210, outputTokens: 1893 });
   assert.deepEqual(
@@ -211,7 +273,7 @@ test("usage: captured from the end event (streaming) and the json result", () =>
 
 test("extractResult fences the final report on the sentinels (fan-out cleanup)", () => {
   const a = makeGrokAdapter();
-  const end = { kind: "end", sessionId: "s", stopReason: "EndTurn" };
+  const end = { kind: "end", sessionId: "s", stopReason: "end_turn" };
   // subagent chatter leaks before the fence (real grok multi-agent behavior);
   // only the fenced report survives, trimmed.
   const leaked = [
@@ -248,6 +310,56 @@ test("classifyError maps auth / quota / config / endpoint / not-installed / unkn
   assert.equal(a.classifyError("fetch failed ECONNREFUSED", 1), "endpoint");
   assert.equal(a.classifyError("command not found", 127), "not-installed");
   assert.equal(a.classifyError("boom", 1), "unknown");
+});
+
+// grok 1.0.0's read-only sandbox fails CLOSED (exit 1, not 127, and the OS text is
+// "No such file or directory", never the token ENOENT) — without a dedicated regex
+// these actionable failures fall through to "unknown".
+test("classifyError buckets grok 1.0.0 sandbox refusals as config, not unknown", () => {
+  const a = makeGrokAdapter();
+  assert.equal(
+    a.classifyError(
+      "error: this sandbox could not enforce its deny list on Linux: bwrap exec failed: "
+      + "No such file or directory (os error 2). Install bubblewrap with `apt install -y bubblewrap`. "
+      + "Refusing to start with denied paths unprotected.",
+      1,
+    ),
+    "config",
+  );
+  assert.equal(a.classifyError("error: hook write-deny is required but no plan was prepared", 1), "config");
+  assert.equal(
+    a.classifyError("error: could not apply the 'read-only' sandbox profile; Refusing to start with its protections missing.", 1),
+    "config",
+  );
+  assert.equal(a.classifyError("error: sandbox profile resolve failed: bad toml", 1), "config");
+  assert.equal(a.classifyError("error: sandbox deny glob could not be enforced on Linux: too many entries", 1), "config");
+  // …and must NOT steal a failure that merely contains one of those words. The check
+  // runs LAST for exactly this reason: every earlier bucket is a more specific claim.
+  assert.equal(a.classifyError("spawn /opt/sandbox/grok ENOENT", 1), "not-installed");
+  assert.equal(a.classifyError("spawn /opt/bwrap/grok ENOENT", 1), "not-installed");
+  assert.equal(a.classifyError("fetch failed ECONNREFUSED bubblewrap-relay.internal", 1), "endpoint");
+  // …but the real refusal must still win, even when its text embeds a user path that
+  // looks like another bucket. grok stamps the configured hooks-path verbatim into
+  // HookWriteDenyError::MissingConfigured, so a path named /tmp/quota or /srv/relay
+  // would be stolen by the quota/endpoint regexes without the "Refusing to start" tier.
+  assert.equal(
+    a.classifyError(
+      "error: this sandbox could not enforce its deny list on Linux: hook write-deny plan failed: "
+      + "configured absolute hooks-paths target(s) do not exist: /tmp/quota. "
+      + "Refusing to start with denied paths unprotected.",
+      1,
+    ),
+    "config",
+  );
+  assert.equal(
+    a.classifyError(
+      "error: this sandbox could not enforce its deny list on Linux: hook write-deny plan failed: "
+      + "configured absolute hooks-paths target(s) do not exist: /srv/relay. "
+      + "Refusing to start with denied paths unprotected.",
+      1,
+    ),
+    "config",
+  );
 });
 
 test("resumeArgs yields -r <id>", () => {

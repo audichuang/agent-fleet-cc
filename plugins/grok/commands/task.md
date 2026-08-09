@@ -1,6 +1,6 @@
 ---
 description: Run a headless Grok Build task (grok-4.5) — launch, then wait/poll for the result
-argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort low|medium|high] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 ---
 
 Run the grok companion with the user's arguments and relay its output:
@@ -18,9 +18,17 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
   it blocks file writes (only `~/.grok` + temp stay writable). Web research is **not**
   affected — `web_search`/`web_fetch` run in Grok's own process and stay online; only
   network from commands Grok *spawns* in a terminal (a `curl` in bash) is blocked.
-  **Best-effort, not a hard jail:** a managed `requirements.toml` profile can override
-  it, and where no OS sandbox backend is available Grok *warns and runs writable* rather
-  than failing — so treat it as hardening, not a guarantee. **Resume:** `--read-only`
+  **Needs bubblewrap on Linux.** As of Grok 1.0.0 read-only requires a bwrap re-exec:
+  with no `bubblewrap` installed (or an unappliable macOS Seatbelt profile) Grok prints
+  `Refusing to start …` and exits 1. If a `--read-only` job dies instantly with a
+  `config` error, that is the first thing to check — `apt install -y bubblewrap`.
+  **Still not a hard jail.** Starting successfully does not prove writes are blocked:
+  bwrap only protects Grok's own hook paths, and the layer that actually blocks writes
+  (Linux Landlock) warns and continues *writable* when the kernel doesn't support it.
+  On **Windows** the flag does nothing at all for a fresh run — no sandbox, and no
+  refusal either (the resume-conflict exit below still applies on every OS).
+  A managed `requirements.toml` profile also outranks the flag. Treat `--read-only` as
+  hardening, not a guarantee. **Resume:** `--read-only`
   can't be added to a session already created writable (Grok exits 1 rather than
   silently granting writes) — launch a fresh `--read-only` job instead.
 - **Grok is cheap (grok-4.5) — fan out, but fence the final report.** For
@@ -61,8 +69,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
   same liveness line for any running job if you want a one-off check.
 - Use `--json` for machine-readable output (job id, status, exit code).
 - Use `--prompt-file <path>` to pass a prompt stored in a file.
-- Use `--model <id>` (only `grok-4.5` and `grok-composer-2.5-fast` exist — see
-  `grok models`) or `--effort` (`none|minimal|low|medium|high|xhigh|max`) to tune the run.
+- Use `--model <id>` or `--effort` to tune the run. Both are validated against a
+  catalog Grok fetches at runtime, so `grok models` is the only authority — do not
+  trust a list written down anywhere (including here). Today that catalog holds one
+  model, `grok-4.5` (the plugin default), offering `low|medium|high` effort. A
+  canonical-looking level the model does not offer (`none`, `xhigh`, `max`, …) is
+  **rejected**: the job spawns, then dies with `unknown effort level`.
 - **Structured output**: pass `--schema <path>` (a JSON Schema file) to constrain
   the answer to that shape — `resultText` comes back as JSON matching the schema,
   ready to `JSON.parse`. This runs Grok non-streaming (no live `/grok:logs` for

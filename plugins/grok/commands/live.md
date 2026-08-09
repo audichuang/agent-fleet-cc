@@ -1,6 +1,6 @@
 ---
 description: Run a Grok Build task (grok-4.5) as a VISIBLE live shell — a background streaming shell you watch run and see fail, instead of a silent detached job
-argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort low|medium|high] [--no-subagents] [--schema <path>] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 allowed-tools: Bash(node:*)
 ---
 
@@ -54,9 +54,15 @@ memory or another context (it drifts every release), and do not paste an unexpan
   `--max-turns`, `--no-memory`, `--model`, `--effort`, `--no-subagents`,
   `--resume-job` / `--resume-last`, `--timeout-ms`, `--json`). `--live` is
   foreground-only — it cannot combine with `--background` or `--wait`.
-- **`--read-only` for a hardened run** (same as `/grok:task`) — opt-in no-write sandbox
-  (best-effort, not a hard jail). Web research still works (in-process web tools stay
-  online; only spawned-command network is blocked).
+- **`--read-only` for a hardened run** (same as `/grok:task`) — opt-in no-write sandbox.
+  Web research still works (in-process web tools stay online; only spawned-command
+  network is blocked). Needs `bubblewrap` on Linux — as of Grok 1.0.0 it refuses to
+  start without it (`Refusing to start …`, exit 1). Starting is not proof of
+  enforcement: the write-blocking layer (Landlock) still warns and runs writable on a
+  kernel that lacks it, on Windows the flag does nothing at all for a fresh or
+  same-profile session, and a managed `requirements.toml` outranks it. (The
+  resume-conflict exit 1 — `--read-only` onto a session created writable — still fires
+  on every OS.) Hardening, not a hard jail.
 - **`--research` for a curated tool set** (same as `/grok:task`) — restricts to
   `x_search`/`web_search`/`web_fetch`; every other built-in tool is authoritatively
   absent (harder than `--read-only`), MCP tools only get a cooperative `--deny`

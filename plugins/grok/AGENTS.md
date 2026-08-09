@@ -26,10 +26,10 @@
 - **`--json-schema` 走非串流**(單一結果物件、無 live `/grok:logs`);一般模式是 `streaming-json`
   (text / end / error 事件;thought / tool 只留在 raw log,不進正規化事件)。
 - **`--read-only` 是 opt-in,不是預設**(預設維持 `off`:可讀寫可連網)。刻意做成旗標、不對齊
-  codex/antigravity 的預設唯讀,因為 grok 的 read-only 是 **best-effort**(受管 requirements 會蓋過、
-  無 OS 後端時 fail-open 成可寫)——把會靜默失效的保證設成預設=假安全感。它**不會**打死網路研究
-  (只擋子行程網路,主行程的 web 工具照常)。機制、源碼錨點、resume 行為見
-  `docs/grok-cli-contract-audit.md` Part 3(單一正本,別在此重抄)。
+  codex/antigravity 的預設唯讀,因為它**既可能拒絕啟動、也可能靜默不生效**——把這種保證設成
+  預設 = 假安全感。它**不會**打死網路研究(只擋子行程網路,主行程的 web 工具照常)。
+  兩種失效各自的機制、宿主前置條件、源碼錨點與 resume 行為是**版本相關**的,正本在
+  `docs/grok-cli-contract-audit.md` Part 3 —— 學到新東西改那份,別在此重抄(root `AGENTS.md`)。
 - **`wantsWatchdog: false`**。
 - **Session id 是 spawn 前預 mint、先持久化才 spawn 的**(crash-safe resume),且與 resume 路徑
   **互斥**(兩旗標絕不同送)。機制與源碼錨點見 `docs/grok-cli-contract-audit.md` Part 1 的 `-s` 列(單一正本,別在此重抄)。

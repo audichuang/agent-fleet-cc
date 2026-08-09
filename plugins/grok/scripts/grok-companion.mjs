@@ -36,7 +36,7 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: grok-companion <command> [...]
   setup
-  task <prompt...>|--prompt-file <path> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--model <id>] [--effort none|minimal|low|medium|high|xhigh|max] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
+  task <prompt...>|--prompt-file <path> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--model <id>] [--effort low|medium|high] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status [--json]
   result [<job-id>|--last] [--json]
   cancel <job-id> [--json]
@@ -100,7 +100,7 @@ function parseTimeoutMs(value, env) {
   return n;
 }
 
-// --max-turns <n>: a runaway-cost fuse (grok's own clap range is 1.., cli.rs:627).
+// --max-turns <n>: a runaway-cost fuse (grok's own clap range is 1.., cli.rs:669).
 // Validate here so a typo/negative value fails fast instead of at engine spawn.
 function parseMaxTurns(value) {
   if (value === undefined) return null;
@@ -300,7 +300,7 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
     await runWorker({
       stateDir,
       jobId: record.id,
-      adapter: makeGrokAdapter(),
+      adapter: makeGrokAdapter({ stateDir }),
       deps: {
         spawnImpl: deps.grokSpawnImpl,
         baseEnv: env,

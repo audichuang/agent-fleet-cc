@@ -19,6 +19,6 @@
 | wantsWatchdog | boolean | reconcile 雙保險的 watchdog 開關宣告(藍圖 §5.7) |
 | buildInvocation({job, prompt}) | fn | → { argv, env, stdinPayload } — env 只放顯式注入(profile 等),消毒由 worker 強制 |
 | parseEvent(rawLine) | fn | → 正規化事件 \| null;junk 行回 null,永不 throw |
-| extractResult(events, exitCode) | fn | → { ok, resultText, sessionId, usage? } |
+| extractResult(events, exitCode) | fn | → { ok, resultText, sessionId, usage?, error? } — `error` 選填:adapter 從串流解析出的失敗原因,worker 拿它蓋過 stderrTail(供 exit 0 卻在 stdout 宣告失敗的引擎用);沒設就維持原行為 |
 | classifyError(stderrTail, exitCode) | fn | → errorKind('auth' \| 'not-installed' \| 'endpoint' \| 'unknown' …) |
 | resumeArgs(sessionId) | fn | → 追加 argv 片段(claude:`-r <id>`;agy:`--conversation <id>`) |

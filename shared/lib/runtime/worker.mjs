@@ -284,13 +284,18 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
   let error = null;
   let errorKind = null;
   if (status !== "completed") {
+    // result.error(選填)是 adapter 從**串流**解析出的失敗原因。優先於 stderrTail:
+    // 引擎可能 exit 0 卻只在 stdout 宣告失敗,此時 stderr 是空的,退回
+    // "engine exited nonzero" 會持久化一句與 exitCode 矛盾的假話。沒設這欄的
+    // adapter 拿到 undefined → 行為完全不變。
+    const adapterError = typeof result.error === "string" && result.error ? result.error : null;
     error = stdinFailed
       ? `stdin: ${outcome.stdinError.code ?? outcome.stdinError.message}`
-      : (outcome.spawnError || outcome.stderrTail || "engine exited nonzero").slice(-500);
+      : (outcome.spawnError || adapterError || outcome.stderrTail || "engine exited nonzero").slice(-500);
     try {
       errorKind = outcome.timedOut
         ? "timeout"
-        : adapter.classifyError(outcome.spawnError || outcome.stderrTail, outcome.exitCode);
+        : adapter.classifyError(outcome.spawnError || adapterError || outcome.stderrTail, outcome.exitCode);
     } catch {
       errorKind = "unknown";
     }
