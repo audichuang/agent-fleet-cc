@@ -63,12 +63,50 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 
 | | |
 |---|---|
-| Codex CLI HEAD | `57f42a8113` (main @ 2026-08-06; installed binary codex-cli **0.146.1** — no `rust-v0.146.1` tag exists, npm ships ahead of the tags, so pin diffs to `rust-v0.146.0` or to main) |
-| Last re-check | 2026-08-07 (wire-schema diff + schema-derived checklist assertion + offline model-catalog check) |
+| Codex CLI HEAD | `646f7c0a91` (main @ 2026-08-09; installed binary codex-cli **0.147.0** — no `rust-v0.147.0` tag exists either, only `rust-v0.147.0-alpha.*`, so keep pinning diffs to main) |
+| Last re-check | 2026-08-09 (wire-schema diff + managed auto-review behaviour read from the app-server tests + offline model-catalog check) |
 | Last FULL 11-dimension audit | 2026-07-21 @ `d5998e7452` (codex-cli 0.144.6) → `codex@1.3.2` |
 | Plugin version now | `codex@1.5.0` |
 | Codex repo checked | `/home/audichuang/research/codex` |
 
+> **2026-08-09 re-check (`57f42a8113` → main `646f7c0a91`, 80 commits, 20 on protocol paths;
+> installed CLI 0.146.1 → **0.147.0**):** **No drift — no plugin change needed.** Cheapest possible
+> pass this time: the wire-schema diff is **5 files, +411/−0 — zero deletions anywhere** — and the
+> diffstat for `ServerNotification.json`, `ClientRequest.json`, `ServerRequest.json`,
+> `v2/item.rs` and `core/src/protocol` is **empty**, i.e. the plugin's entire dependency surface
+> (notifications, methods, declines, item variants) is byte-untouched; no checklist re-assertion
+> needed. The only two non-comment deletions in `app-server-protocol/src` are both non-wire: the
+> broker concurrency-lane label on `externalAgentConfig/detect` (`global("config")` →
+> `global("external-agent-detect")`, a method the plugin never calls) and `HookExecutionMode`
+> gaining `#[derive(Default)]`. New and unread: `ModelListResponse.multiAgentVersion` (#37433),
+> `HooksListResponse` execution mode (#37538), `auto_review.ignore_rules` + `required_on_models` on
+> `configRequirements/read` (#37519, #37511). `build:codex` green against types regenerated from
+> the installed **0.147.0** binary; full `npm test` exit 0 (twice) on Node 24.16.
+> **The one thing worth knowing (behaviour, not drift):** #37511 lets a **managed** workspace
+> require auto-review per model, and the plugin's exact `thread/start` pair —
+> `approvalPolicy:"never"` + `sandbox:"danger-full-access"` — is literally the tested case at
+> `app-server/tests/suite/v2/model_auto_review.rs:119-136`: it **succeeds**, silently coerced to
+> `on-request` + `auto_review`, sandbox downgraded to **`workspace-write`**. Two consequences.
+> (a) The plugin deliberately picks `danger-full-access` because its target hosts cannot start
+> bwrap (`codex.mjs:60-81`), and it does **not** read `thread/started.sandbox`
+> (`codex.mjs:574-581` takes only id/name/agentNickname/agentRole) — so on that narrow
+> intersection (managed workspace + protected model + bwrap-incapable host) a job would fail as an
+> opaque turn error with the cause invisible. Recorded, not coded: the trigger needs an enterprise
+> config this plugin's users mostly don't have, and the fix would be dead weight until one hits it.
+> (b) The **reject** path (`-32600` "you need to use auto review") is reachable only from
+> thread-settings updates and turn overrides (`:166-203`) — which the plugin never sends, since
+> `turn/start` carries only `threadId/input/model/effort/outputSchema`. Also hard-errors: protected
+> model while auto-review is disabled outright (`:137-150`), with a clear message.
+> **Model catalog re-checked offline** (`~/.codex/models_cache.json`, fetched 2026-08-09, stamped
+> `client_version` 0.146.0): **1.5.0's ticket lane still holds** — `gpt-5.6-luna` is
+> `visibility:"list"`, levels `low…max` with **no `ultra`**, `default_reasoning_level:"medium"`,
+> priority 3; sol priority 1 / default `low`; no newer family. The catalog also now carries
+> #37433's field, and it **corroborates a rule the plugin already had**: `multi_agent_version` is
+> `v2` on sol/terra (the two that offer `ultra`) and `v1` on luna — which is exactly why
+> `gpt-5-6-prompting/SKILL.md` refuses to pass `ultra` ("triggers proactive multi-agent delegation
+> this single-agent runner can't observe"). Upstream made that reasoning machine-readable; the
+> guidance needs no edit.
+>
 > **2026-08-07 re-check (`2b5bdcf675` → main `57f42a8113`, 159 commits, 61 on protocol paths):**
 > **No drift — no plugin change needed.** Wire-schema diff: 22 files, **+249/−4**, and all four
 > deleted lines are the same `description` string being reworded. Zero method / notification /
@@ -175,7 +213,17 @@ The plugin speaks Codex **app-server v2** over JSON-RPC (`scripts/lib/app-server
   optOutNotificationMethods:[ item/agentMessage/delta, item/reasoning/summaryTextDelta,
   item/reasoning/summaryPartAdded, item/reasoning/textDelta ] }`.
 - **turn/start params:** `{ threadId, input:[{type:"text",text,text_elements:[]}], model|null,
-  effort|null, outputSchema|null }`.
+  effort|null, outputSchema|null }`. Note it carries **no** approval/sandbox override — that
+  matters, see next item.
+- **thread/start settings:** `{ approvalPolicy:"never", sandbox: resolveSandboxMode() }`
+  (`codex.mjs:89-90,102-103`; sandbox defaults to `danger-full-access` because target hosts
+  cannot start Codex's bwrap sandbox). Since 0.147.0 (#37511) a **managed** workspace with
+  `auto_review.required_on_models` **silently coerces** exactly this pair at `thread/start` —
+  `on-request` + `auto_review` reviewer, sandbox downgraded to `workspace-write`
+  (`app-server/tests/suite/v2/model_auto_review.rs:119-136`). Sending the same unsafe values on a
+  **thread-settings update or a turn override** is a hard `-32600` "you need to use auto review"
+  (`:166-203`) — the plugin stays on the coerced path only because `turn/start` carries no such
+  fields. Keep it that way.
 - **Server→client requests it auto-declines** (`SERVER_REQUEST_REPLIES`):
   `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`,
   `item/permissions/requestApproval`, `item/tool/requestUserInput`,
@@ -311,6 +359,7 @@ that Codex diff-review before considering the pass done.
 
 | Date | Codex HEAD | Plugin | Outcome |
 |---|---|---|---|
+| 2026-08-09 | `646f7c0a91` (main; installed CLI 0.147.0) | 1.5.0 (**unchanged**) | **No drift — record-only.** 80 commits past `57f42a8113`, 20 on protocol paths. Cheapest pass yet: wire-schema diff is **+411/−0 (zero deletions)** and the diffstat for `ServerNotification.json` / `ClientRequest.json` / `ServerRequest.json` / `v2/item.rs` / `core/src/protocol` is **empty** — the plugin's whole dependency surface is byte-untouched, so no checklist re-assertion was needed. The two `app-server-protocol/src` deletions are non-wire (a broker lane label on the never-called `externalAgentConfig/detect`; `#[derive(Default)]` on `HookExecutionMode`). `build:codex` green against types regenerated from the installed 0.147.0 binary; `npm test` exit 0 twice on Node 24.16. **One behaviour learned, recorded not coded:** #37511's managed `auto_review.required_on_models` **silently coerces** the plugin's `thread/start` pair (`approvalPolicy:"never"` + `danger-full-access`) to `on-request` + `auto_review` + **`workspace-write`** — the tested case at `model_auto_review.rs:119-136`. The plugin picks full-access precisely because its hosts can't run bwrap and never reads `thread/started.sandbox`, so on managed-workspace + protected-model + bwrap-incapable hosts a job fails opaquely; too narrow an intersection to carry code for. The hard `-32600` "you need to use auto review" path is unreachable from the plugin (settings-update / turn-override only; `turn/start` carries no approval or sandbox fields — the durable checklist now says so). **Catalog re-checked offline:** luna still `visibility:"list"`, `low…max`, no `ultra` → **ticket lane holds**; and #37433's new `multi_agent_version` (`v2` on sol/terra, `v1` on luna) independently corroborates why `gpt-5-6-prompting` refuses to pass `ultra`. |
 | 2026-08-07 | `57f42a8113` (main; installed CLI 0.146.1) | 1.5.0 (**unchanged**) | **No drift — record-only.** 159 commits past `2b5bdcf675`, 61 on protocol paths. Wire-schema diff +249/−4 with the only deletions being one reworded `description`; full durable checklist re-asserted green from the checked-in schema JSON; `build:codex` (types regenerated from the 0.146.1 binary) + full `npm test` green on Node 24. Additions are all unread: `InitializeParams.extensions`, `ModelListResponse.modelSpecialty`, `transparentBackground`, `onboardingEntrypoint`. **Two things learned, both recorded above rather than coded:** (1) #36893 makes `commandExecution.command`/`commandActions` **redacted display values** — a free secret-leak win for job logs, and a standing "never replay a logged command" rule; (2) the model catalog can be checked **offline** from `~/.codex/models_cache.json` (raw upstream catalog + `fetched_at`/`client_version`), which is how 1.5.0's luna-@-`max` ticket lane was re-confirmed (`visibility:"list"`, levels `low…max`, no `ultra`) without a live `model/list`. Recipe folded into "How to keep this current" step 1c. |
 | 2026-08-02 | installed CLI 0.146.0 (live account, no source diff) | 1.4.1 (**unchanged** — guidance-only edit) | **Live model-catalog check, prompted by OpenAI's 2026-07-30 price cut** (Luna −80% → $0.20/$1.20, Terra −20% → $2/$12, Sol unchanged; `Fast mode` replaces Priority Processing). Verdict: **no protocol drift, one guidance gap closed.** Evidence = a real `model/list {includeHidden:true}` against this machine's ChatGPT account: 8 models, `gpt-5.6-luna` **`hidden:false`** with `supportedReasoningEfforts` `low…max` (no `ultra`), `defaultReasoningEffort:"medium"`, text+image, and `gpt-5.4-mini.upgrade === "gpt-5.6-luna"` — so Luna is the supported small-model lane, not an internal tier. The `gpt-5-6-prompting` skill had it written off as "rarely the right fit" and carried Terra's **pre-cut** price; both fixed, plus the rule that **Luna is only worth delegating to at `--effort max`** (≈27 → ≈51 on the Artificial Analysis index off→max) and its two real weak spots (MRCR v2 512K–1M ≈41% vs Sol ≈74%; OSWorld 2.0 ≈46%). `codex-rescue.md` gained a "Luna lane" so a small fully-specified task can reach Codex at all (its charter previously excluded simple asks). **Verified live on 0.146.0:** read-only Q&A turn `--model gpt-5.6-luna --effort max` → correct answers with correct `file:line`, 23s; write turn in a scratch git repo → correct `slugify` hardening + a passing `node:test` file, 1m49s, `touchedFiles` exactly the two requested. **Re-run recipe:** `model/list` goes through the shared broker via `listSupportedModels`, which returns `{checked:false, detail:"Shared Codex broker is busy."}` whenever any turn holds the broker — probe with `CodexAppServerClient.connect(cwd, {disableBroker:true})` + `client.request("model/list", {includeHidden:true})` instead. **Fixture realigned to this evidence:** `fake-codex-fixture.mjs` had `gpt-5.6-luna` as `hidden:true` (wrong) and no hidden entry at all in the `model-unsupported` branch, so setup's `!hidden` suggestion filter was never exercised; it now carries the real hidden entry (`codex-auto-review`) and `runtime.test.mjs` asserts it is never suggested — proven non-vacuous (dropping the filter reddens exactly that assertion). |
 | 2026-08-02 | `2b5bdcf675` (main, 0.147-alpha era; installed CLI still 0.146.0) | 1.4.1 (**unchanged**) | **No drift — record-only.** 352 commits past `e363b08c91` (13 on protocol paths past the last forward-look). Zero method / notification / item-variant removals; all additions are surfaces the plugin never calls (`threadSection/*`, plugin search, external-agent-config import) or additive fields (`readOnlyHint`, `encrypted_function_args`, `isBlocking`). Only read-path type change is `AbsolutePathBuf` → `LegacyAppPathString` on `CommandAction.read.path` — both plain strings. Decline-reply shapes re-verified against the structs (#36365 / #36410 touched those paths but not the response types). Launch path + model catalog + `ReasoningEffort` unchanged. Details + the cheap re-run recipe in the Baseline block. |
