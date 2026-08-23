@@ -297,9 +297,15 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
   const maxTurns = parseMaxTurns(flags["max-turns"]); // UsageError on non-positive-integer
   // No auth preflight on purpose: grok's headless path fails CLOSED in milliseconds
   // (xai-grok-pager/src/headless.rs:459-480 fn `authenticate` — bails via
-  // `auth_required_message` when no non-interactive method resolves; interactive
-  // login is never attempted headless), and its message names `grok login
-  // --device-code` + XAI_API_KEY. classifyError buckets that as `auth`, so the job
+  // `auth_required_message` when no non-interactive method resolves), and its message names
+  // `grok login --device-code` + XAI_API_KEY. classifyError buckets that as `auth`, so the job
+  // NOTE — that fail-closed guarantee covers **method selection only**. An advertised-but-dead
+  // cached_token (expired / legacy WebLogin) passes it, then acp_agent.rs:704-732 falls through
+  // to authenticate_after_cached_token_unavailable, which on grok.com swaps the meta for
+  // {"use_oauth": true} (agent_ops.rs:1412-1416) and waits 600s. Interactive login IS reachable
+  // headless on that path. A preflight would not have caught it either (the deleted one only
+  // called existsSync, so a stale auth.json sailed through) — the opt-in stall guard is the
+  // cover, see adapter.mjs firstEventTimeoutMs. So the job
   // lands failed/auth with the ENGINE's message — strictly better than guessing at
   // grok's credential resolution (per-model api_key/env_key, OS-resolved home, …).
   const source = resolveResumeSource({ flags, stateDir });

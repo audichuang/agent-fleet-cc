@@ -477,6 +477,26 @@ everything the verb depends on is engine contract that the next pass has to re-d
   `du … [aliases: disk-usage]`. The old "not even in the shipped binary" was true of `1.0.0` and
   is now dead; the skip stands on its own merits, not on absence), `export`, `sessions`, `trace`,
   `models`, `doctor`, `inspect`, `update`, `plugin`, `worktree`.
+- **Startup silence on stdout — why no stall-guard default is safe (new 2026-08-23, fourth pass).**
+  A stall guard that kills a job for being quiet needs to know how long a *healthy* run may
+  legitimately stay quiet. On grok, the answer is "longer than anything we dare hard-code", and
+  it is deliberate:
+  · `xai-grok-pager/src/headless.rs` fn `headless_materialize_ctx` sets
+    **`restore_progress_on_stdout: false`** — remote-restore progress goes to **stderr only**.
+  · `xai-grok-pager/src/app/session_startup.rs` pins
+    **`REMOTE_RESTORE_TIMEOUT = 90s`** for pre-TUI remote restore (session state + memory).
+  · Session opening and model-catalog work happen **after** that, with no source-proven ceiling;
+    the engine's own inference idle bound is 600s, so 120s is not an engine contract.
+  · The streaming reducer emits nothing at session open (`headless/reducer/mod.rs`, the
+    `Reducer::begin` default returns no lines), so there is **no early stdout event to rely on**.
+  Consequence for the plugin: `plugins/grok/scripts/lib/adapter.mjs` declares
+  `firstEventTimeoutMs` as a getter that returns `null` unless the user sets
+  `GROK_FIRST_EVENT_TIMEOUT_MS`, and returns `null` in `--json-schema` mode **even when opted
+  in** (non-streaming writes nothing until its terminal object — a healthy schema run was killed
+  by a 15s budget, verified live). A 120s default was shipped and reverted; if a future pass is
+  tempted to restore one, this row is the reason not to.
+  Re-check recipe: `rg -n 'restore_progress_on_stdout' crates/codegen/xai-grok-pager/src/headless.rs`
+  · `rg -n 'REMOTE_RESTORE_TIMEOUT' crates/codegen/xai-grok-pager/src/app/session_startup.rs`.
 - **Auth — grok's headless path FAILS CLOSED, so the plugin inherits it for free
   (row re-inverted 2026-08-23, second pass).** This row has now been written three ways; the
   history is the lesson, so it is kept.
@@ -490,6 +510,21 @@ everything the verb depends on is engine contract that the next pass has to re-d
      the 1 h job timeout, and **that hang does not exist on the binary we run.** So the guard
      was deleted; auth detection survives only as `/grok:setup`'s **advisory** report
      (`cmdSetup` in `grok-companion.mjs` — it prints what it found and never blocks).
+  4. **Fourth pass 2026-08-23: (3) is right about the guard and TOO STRONG about the engine.**
+     The fail-closed guarantee holds at **method selection only**. An *advertised but dead*
+     `cached_token` — expired, or a legacy `WebLogin` — passes that gate, and then
+     `xai-grok-shell/src/agent/mvp_agent/acp_agent.rs:704-732` hands off to
+     `authenticate_after_cached_token_unavailable`, which (landing on grok.com) **replaces the
+     request meta** with `{"use_oauth": true}`
+     (`.../agent_ops.rs:1412-1416`, destroying the headless marker) and then waits out
+     `AUTH_CALLBACK_TIMEOUT = 600s` (`xai-grok-shell/src/auth/oidc/login.rs`, enforced by
+     `tokio::time::timeout` → `OidcError::CallbackTimeout`). **So interactive login IS reachable
+     headless**, bounded at 10 minutes and invisible under `--background`.
+     Deleting the guard did not open this: the deleted guard only called `existsSync`, so a
+     stale `auth.json` passed it and hung anyway. It is covered instead by the **opt-in** stall
+     guard (`firstEventTimeoutMs`, see the startup-silence row below) — opt-in because, as that
+     row shows, no default constant is safe. Do not re-read (3) as "interactive login is never
+     attempted": that sentence was on four surfaces and all four are now corrected.
 
   **Engine evidence, all read at `9fabade` (= installed `grok 1.0.5`):**
   `xai-grok-pager/src/headless.rs` fn `authenticate` is documented "failing closed when none is

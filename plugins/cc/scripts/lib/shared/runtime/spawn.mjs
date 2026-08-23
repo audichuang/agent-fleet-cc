@@ -24,7 +24,13 @@ export function killProcessGroup(pid, signal = "SIGTERM", killImpl = process.kil
 }
 
 // TERM 先禮後兵,grace 後 KILL。timer unref — 不留住 event loop。
+// 回傳 SIGKILL 升級的 timer handle,讓呼叫端在 child 已經自己收乾淨之後取消它。
+// 不取消的話,那個 callback 仍會在 graceMs 後對 pgid 開槍 —— pid 已死且 pgid 被系統回收時,
+// 那一槍會打到不相干的 process group。handle 仍然 unref(不該讓它把 process 撐著),
+// 但現在「可取消」是結構上成立的,而不是靠它剛好沒事。
 export function killGroupWithGrace(pid, { graceMs = 5000, scheduleImpl = setTimeout, killImpl = process.kill } = {}) {
   killProcessGroup(pid, "SIGTERM", killImpl);
-  scheduleImpl(() => killProcessGroup(pid, "SIGKILL", killImpl), graceMs)?.unref?.();
+  const escalation = scheduleImpl(() => killProcessGroup(pid, "SIGKILL", killImpl), graceMs);
+  escalation?.unref?.();
+  return escalation;
 }

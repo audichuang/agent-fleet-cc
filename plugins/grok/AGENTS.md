@@ -24,6 +24,12 @@
   bail(`xai-grok-pager/src/headless.rs:459-480`,doc comment 明寫 "failing closed";訊息在
   `:445-457` `auth_required_message`),毫秒級失敗且訊息比我們自己寫的更可用(指名
   `grok login --device-code` / `XAI_API_KEY`),`classifyError` 也照樣標成 `auth`。
+  **但那個 fail-closed 只管「方法選擇」那一層**:一個 advertised 但已死的 `cached_token`
+  (過期或 legacy WebLogin)過得了那道關,接著 `acp_agent.rs:704-732` 轉進
+  `authenticate_after_cached_token_unavailable`,它若選到 grok.com 就把 meta 換成
+  `{"use_oauth": true}`(`agent_ops.rs:1412-1416`)並等 600s —— 所以 headless **是**碰得到
+  互動式登入的。這個洞由 opt-in 的 stall guard 蓋(見 `adapter.mjs` 的 `firstEventTimeoutMs`),
+  加 preflight 也蓋不到(舊的那顆只做 `existsSync`,過期的 auth.json 照樣通過)。
   **不要再加 gate**:grok 的憑證解析包含 per-model `api_key`/`env_key`、OS 解析的 home 等,
   重寫一遍只會誤拒有效設定又放行 grok 用不了的憑證(0.6.0 那顆 preflight 兩件都犯了)。
   `setup` 只**報告**看得見的來源(env keys + auth 檔),**不 gate 任何東西**。

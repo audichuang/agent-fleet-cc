@@ -1238,25 +1238,96 @@ test("stalled message: a long stderr tail must not swallow the explanation", asy
 // getter 語意:worker 必須在 buildInvocation **之後**才讀 firstEventTimeoutMs,否則
 // 按 invocation 關閉(grok 的 --json-schema 豁免)會失效。把讀取移早會讓 adapter 自己的
 // 單元測試照樣綠,所以這條要在 worker 層釘住。
-test("firstEventTimeoutMs is read AFTER buildInvocation, so a per-run getter can disable it", async () => {
+test("firstEventTimeoutMs is read AFTER buildInvocation, and the ARMED value is what gets reported", async () => {
   const stateDir = tmp();
-  const record = createJobRecord({ engine: "fake", timeoutMs: 200 });
+  const record = createJobRecord({ engine: "fake", timeoutMs: 400 });
   createJob(stateDir, record, "the prompt");
-  let armedValue = "never-read";
+  // 這條要釘兩件事,而先前的版本兩件都沒釘住(getter 前後都回同一個值,而且斷言被
+  // 後來的錯誤格式化重讀覆蓋掉 —— 空心測試):
+  //   (1) worker 必須在 buildInvocation 之後才讀 → 才能支援 per-invocation 關閉;
+  //   (2) 報出來的數字必須是**武裝當時**看到的,不是事後重讀的。
+  // 所以 getter 回可區分的值,而且在武裝後就翻臉變 null(模擬下一次 buildInvocation)。
   const adapter = makeAdapter();
   let built = false;
+  let reads = 0;
   adapter.buildInvocation = ({ prompt }) => {
     built = true;
     return { argv: ["fake-bin"], env: {}, stdinPayload: prompt };
   };
   Object.defineProperty(adapter, "firstEventTimeoutMs", {
     get() {
-      armedValue = built ? 40 : "read-too-early";
-      return built ? 40 : 40;
+      reads += 1;
+      if (!built) return 999_999;   // 讀太早 → 大到不會開火,測試就會看到 timed-out
+      if (reads > 1) return null;   // 事後重讀 → null,會讓訊息變成 "within nullms"
+      return 40;
     },
   });
   const child = silentChild();
   await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
-  assert.equal(armedValue, 40, "the worker read the getter before buildInvocation ran");
-  assert.equal(readJob(stateDir, record.id).errorKind, "stalled");
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.errorKind, "stalled", "read too early → 999999ms budget → would have timed out instead");
+  assert.match(job.error, /within 40ms/, "must report the value seen at arming time, not a re-read");
+  assert.doesNotMatch(job.error, /nullms/);
+});
+
+// 宣告了一個用不了的預算(0 / NaN / Infinity / 字串)絕不能安靜等於「沒宣告」——
+// 使用者會以為自己開了防護,而 OAuth 那 600 秒照樣在等。至少要留下可查的痕跡。
+test("a declared-but-unusable firstEventTimeoutMs does not arm, and says so in the event log", async () => {
+  for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, "40"]) {
+    const stateDir = tmp();
+    const record = createJobRecord({ engine: "fake", timeoutMs: 120 });
+    createJob(stateDir, record, "the prompt");
+    const adapter = makeAdapter({ firstEventTimeoutMs: bad });
+    const child = silentChild();
+    await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+    const job = readJob(stateDir, record.id);
+    assert.notEqual(job.errorKind, "stalled", `${String(bad)} must not arm the guard`);
+    const log = fs.readFileSync(logFilePath(stateDir, record.id), "utf8");
+    assert.match(log, /firstEventTimeoutMs was declared as/, `${String(bad)} must be reported, not vanish silently`);
+    assert.match(log, /NOT armed/);
+  }
+});
+
+// 相對照:真的沒宣告(null / 缺欄位)是合約允許的「不啟用」,不該警告。
+test("an absent or null firstEventTimeoutMs is the documented opt-out — no warning", async () => {
+  for (const value of [undefined, null]) {
+    const stateDir = tmp();
+    const record = createJobRecord({ engine: "fake", timeoutMs: 120 });
+    createJob(stateDir, record, "the prompt");
+    const adapter = makeAdapter(value === undefined ? {} : { firstEventTimeoutMs: null });
+    const child = silentChild();
+    await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+    const log = fs.readFileSync(logFilePath(stateDir, record.id), "utf8");
+    assert.doesNotMatch(log, /firstEventTimeoutMs was declared/, "not declaring it is legitimate, not a misconfiguration");
+  }
+});
+
+// SIGKILL 升級必須可取消。child 已經自己收乾淨之後,那個 callback 仍會在 graceMs 後對 pgid
+// 開槍 —— pid 已死、pgid 被系統回收時,那一槍會打到不相干的 process group。
+test("kill escalation is cancelled once the child has settled", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 30 });
+  createJob(stateDir, record, "the prompt");
+  // 觀察的是「升級的 callback 有沒有真的跑」。先前的版本斷言 hasRef(),那是空心的 ——
+  // 這些 timer 本來就 unref,所以無論有沒有取消都是 false(mutation 驗證抓到)。
+  const GRACE = 200;
+  let escalationsFired = 0;
+  const scheduleImpl = (fn, ms) => setTimeout(() => {
+    if (ms === GRACE) escalationsFired += 1;   // killGroupWithGrace 的 SIGKILL 升級
+    fn();
+  }, ms);
+  const adapter = makeAdapter();
+  const child = silentChild();
+  // child 在整體 timeout 開火之後、grace 到期之前關閉 —— 正是升級該被取消的形狀。
+  setTimeout(() => {
+    child.stdout.on("end", () => setImmediate(() => child.emit("close", 143, "SIGTERM")));
+    child.stdout.end();
+  }, 45);
+  await runWorker({
+    stateDir, jobId: record.id, adapter,
+    deps: { spawnImpl: () => child, graceMs: GRACE, forceResolveExtraMs: 400, scheduleImpl },
+  });
+  await new Promise((r) => setTimeout(r, 400)); // 撐過 grace,讓沒被取消的升級有機會開槍
+  assert.equal(escalationsFired, 0, "a settled job must not still fire SIGKILL at a recycled pgid");
+  assert.equal(readJob(stateDir, record.id).status, "timed-out");
 });

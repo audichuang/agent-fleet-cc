@@ -32,12 +32,14 @@ pre-existing defects the durable checklist had been carrying as verified, plus a
   prose ("Grok is temporarily overloaded … (HTTP 529)", "Model is temporarily overloaded. Try
   again in a moment.", "http client init failed: …"), so every transient failure was labelled
   `unknown`. Now matched on the real copy — using the full phrase `grok is temporarily
-  unavailable`, because the binary also carries "Authentication temporarily unavailable" and the
-  auth bucket does not catch it. The `config` bucket also gained a failed `-r` resume, which
+  unavailable`, because the binary also carries "Authentication temporarily unavailable" — which
+  the auth bucket now catches, via `authenticat`. The `config` bucket also gained a failed `-r` resume, which
   reported `unknown` until now.
-- **The auth preflight is DELETED — the hang it was written for does not exist.** Its whole
-  rationale was that a headless run with no auth prints a device-code URL and blocks on "Waiting
-  for authorization" until the 1h job timeout. grok 1.0.5 does the opposite: `authenticate` is
+- **The auth preflight is DELETED — the hang it was written for is not the one it described.**
+  (Read this together with the stall-guard entry below: the two were written a round apart and
+  the second one narrows this one.) Its rationale was that a headless run with no auth prints a
+  device-code URL and blocks until the 1h job timeout. For a run where NO auth method resolves,
+  grok 1.0.5 does the opposite: `authenticate` is
   documented as *"failing closed when none is available"* and bails in milliseconds — no eager
   non-interactive method → `auth_required_message`; a method that needs interactive login →
   `bail!`, *"interactive login is not usable headless"*

@@ -174,9 +174,13 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       clearTimeout(forceTimer);
       clearTimeout(firstEventTimer);
       clearTimeout(stalledForceTimer);
+      // child 已經收乾淨了就別再讓 SIGKILL 升級開槍:pid 死了、pgid 被回收之後,
+      // 那一槍會打到不相干的 process group(spawn.mjs killGroupWithGrace 的註解)。
+      for (const t of escalationTimers) clearTimeout(t);
       resolve(state);
     };
     let forceTimer = null;
+    const escalationTimers = [];
     // 首輸出看門狗(adapter 選填 firstEventTimeoutMs)。要防的不是「跑太久」——
     // 那是下面的 timeoutMs——而是「headless 的 run 被互動式提示卡住」:引擎沒死、
     // 沒報錯、stdout 一個位元組都不吐,只是在等一個永遠不會來的人類。引擎特定的
@@ -198,16 +202,34 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     // 互動式提示最可能就印在那裡。adapter 沒宣告這個欄位 → 完全不啟用。
     let firstEventTimer = null;
     let stalledForceTimer = null;
+    // 只讀一次並記進 state:firstEventTimeoutMs 允許是 per-invocation 的 getter,
+    // 事後重讀可能拿到不同的值(下一次 buildInvocation 之後就變了),於是錯誤訊息會印出
+    // 「within nullms」這種東西。武裝時看到的數字才是該報的數字。
     const firstEventTimeoutMs = adapter.firstEventTimeoutMs;
+    state.armedFirstEventTimeoutMs = null;
     const armFirstEventWatchdog = () => {
-      if (!Number.isFinite(firstEventTimeoutMs) || firstEventTimeoutMs <= 0) return;
+      // null/undefined = 沒宣告 = 不啟用,這是合約。但宣告了一個「用不了」的值(0、NaN、
+      // Infinity、字串)絕不能安靜當成沒宣告 —— 使用者會以為自己開了防護。記一筆事件,
+      // 讓它至少查得到,而不是無聲無息。
+      if (firstEventTimeoutMs === null || firstEventTimeoutMs === undefined) return;
+      if (!Number.isFinite(firstEventTimeoutMs) || firstEventTimeoutMs <= 0) {
+        // 寫 job log,不是 appendEvent:EVENT_TYPES 是 spec §3 的最小正規化集(還被
+        // deepEqual 釘住,且 readEvents 會過濾未知型別),不該為一句診斷去擴充它 ——
+        // 而 appendEvent 對未知型別是 throw 的,在這裡等於炸掉整個 job。
+        logStream.write(
+          `[worker] firstEventTimeoutMs was declared as ${JSON.stringify(String(firstEventTimeoutMs))} ` +
+            "but is not a positive finite number of ms — the stall guard is NOT armed for this job.\n",
+        );
+        return;
+      }
       firstEventTimer = (deps.scheduleImpl ?? setTimeout)(() => {
         state.stalledBeforeFirstEvent = true;
+        state.armedFirstEventTimeoutMs = firstEventTimeoutMs;
         // 這道關開火就代表整體 timeoutMs 沒有意義了(引擎連話都沒講),而且兩個計時器都
         // 活著會讓終態自相矛盾:status 說 timed-out、errorKind 說 stalled。先把它拆掉。
         clearTimeout(timer);
         const graceMs = deps.graceMs ?? 5000;
-        killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
+        escalationTimers.push(killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout }));
         const forceMs = graceMs + (deps.forceResolveExtraMs ?? 200);
         // 這個 force-resolve 刻意**不** unref(與上面 timeoutMs 路徑不同)。一個真的卡住的
         // 引擎不會關 stdout,所以 'close' 永遠不來 —— 這個計時器是唯一能讓 job 落終態的
@@ -233,7 +255,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       // status 是 timed-out 而 error/errorKind 是 stalled —— 持久化的終態自相矛盾。
       disarmFirstEventWatchdog();
       const graceMs = deps.graceMs ?? 5000;
-      killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
+      escalationTimers.push(killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout }));
       // Force-resolve after kill+grace+buffer even when a grandchild holding stdout
       // prevents the 'close' event from ever firing (spec §5 invariant 1: job 必達終態).
       // This mirrors the forceExitMs escape hatch in installCancelForwarder.
@@ -354,7 +376,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     const adapterError = typeof result.error === "string" && result.error ? result.error : null;
     // 首事件看門狗開火時,引擎的 stderr 常常正是最有用的線索(例如那個沒人會去點的
     // OAuth 授權 URL),所以保留它,只在前面說清楚我們為什麼把它殺掉。
-    const stalledPrefix = `engine wrote nothing to stdout within ${adapter.firstEventTimeoutMs}ms and was killed — a headless run should not be silent this long; the usual cause is the engine blocking on an interactive prompt (e.g. an expired credential falling through to browser OAuth)`;
+    const stalledPrefix = `engine wrote nothing to stdout within ${outcome.armedFirstEventTimeoutMs}ms and was killed — a headless run should not be silent this long; the usual cause is the engine blocking on an interactive prompt (e.g. an expired credential falling through to browser OAuth)`;
     error = stdinFailed
       ? `stdin: ${outcome.stdinError.code ?? outcome.stdinError.message}`
       // 只截 stderr,不截前綴。整串一起 .slice(-500) 的話,夠長的 stderr 會把「我們為什麼

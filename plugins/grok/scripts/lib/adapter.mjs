@@ -104,8 +104,11 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
     //      只會誤殺。jsonMode 由 buildInvocation 設定,worker 在那之後才讀這個 getter。
     get firstEventTimeoutMs() {
       if (jsonMode) return null;
-      const optIn = Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS);
-      return optIn > 0 ? optIn : null;
+      const raw = process.env.GROK_FIRST_EVENT_TIMEOUT_MS;
+      if (raw === undefined || raw.trim() === "") return null; // 沒 opt-in
+      // 有設但解不出正有限數(`abc`、`30s`、`0`、`Infinity`)→ 回那個壞值,不要回 null。
+      // 回 null 等於安靜關掉,使用者會以為自己開了防護;交給 worker 記一筆 adapter-warning。
+      return Number(raw);
     },
     buildInvocation({ job, prompt }) {
       const r = job.request ?? {};
