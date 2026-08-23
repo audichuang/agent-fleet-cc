@@ -7,9 +7,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../plugins/grok");
 
-test("plugin exposes the nine fleet commands (incl. the live-shell + image verbs)", () => {
+test("plugin exposes the eight fleet commands (incl. the live-shell verb)", () => {
   const cmds = fs.readdirSync(path.join(ROOT, "commands")).filter((f) => f.endsWith(".md")).sort();
-  assert.deepEqual(cmds, ["cancel.md", "image.md", "live.md", "logs.md", "result.md", "setup.md", "status.md", "task.md", "wait.md"]);
+  // image.md is deliberately absent: generation moved to the `imagine` plugin in 0.8.0.
+  assert.deepEqual(cmds, ["cancel.md", "live.md", "logs.md", "result.md", "setup.md", "status.md", "task.md", "wait.md"]);
 });
 
 test("every command shells the grok companion", () => {
@@ -25,8 +26,8 @@ const frontmatter = (name) => {
   return m ? m[1] : "";
 };
 
-test("delegation-entry verbs (task, live, image) are model-invocable; lifecycle/query verbs are user-run", () => {
-  // The delegation-entry verbs (task, live, image) stay model-invocable so the commander
+test("delegation-entry verbs (task, live) are model-invocable; lifecycle/query verbs are user-run", () => {
+  // The delegation-entry verbs (task, live) stay model-invocable so the commander
   // can reach for grok itself; the lifecycle/query verbs are gated to user-run so
   // the model cannot auto-fire them (matches codex/antigravity). The watch loop
   // still drives wait/status by shelling the companion, which the flag does not block.
@@ -38,7 +39,7 @@ test("delegation-entry verbs (task, live, image) are model-invocable; lifecycle/
       `${name} must be user-run (disable-model-invocation: true)`,
     );
   }
-  for (const name of ["task", "live", "image"]) {
+  for (const name of ["task", "live"]) {
     assert.doesNotMatch(
       frontmatter(name),
       /disable-model-invocation/,

@@ -1,5 +1,23 @@
 # grok — changelog
 
+## 0.8.0
+**`/grok:image` removed.** Image generation moved to the separate `imagine` plugin, which calls
+xAI's `POST /v1/images/generations` directly and never involves this CLI.
+
+Not a contract failure: `image_gen` works, and 0.7.0's live run proved it. It is an
+**observability** verdict. The companion path's only success signal is prose in a raw event
+stream, and a tier-restricted account gets its upsell back as a **successful** tool result — so
+0.7.0 shipped a verb whose pass/fail gate was "a file appeared on disk" plus a `SuperGrok`
+substring hunt that had to be narrowed once within the same day (it was matching the user's own
+prompt text). An HTTP call returns bytes or a status; there is nothing to triage. Generation also
+does not belong in a delegation-engine plugin — grok is the "hand a coding task to another agent"
+surface, and drawing a picture is a different need.
+
+The engine facts stay documented: `docs/grok-cli-contract-audit.md` Part 4 keeps the whole
+`image_gen` bullet, marked superseded, so a future pass that reconsiders this does not have to
+re-discover the wire shape. If you were using `/grok:image`, install `imagine` and use
+`/imagine:image` — it reuses the same grok login (read-only) and needs no extra setup.
+
 ## 0.7.0
 Sync pass against **released `grok 1.0.5`** (upstream `9fabade`; the plugin had been audited
 against `1.0.0` / `8a14c91`). Nothing we send is rejected and nothing we read was renamed —

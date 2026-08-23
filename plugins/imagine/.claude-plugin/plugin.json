@@ -1,0 +1,5 @@
+{
+  "name": "imagine",
+  "version": "0.1.0",
+  "description": "Generate images with xAI Grok Imagine — direct API call, prompt-craft guidance, verified output path"
+}

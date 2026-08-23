@@ -1,7 +1,7 @@
 # agent-fleet-cc — agent working rules
 
-A Claude Code plugin marketplace: 5 plugins (`codex`, `antigravity`, `cc`, `grok`,
-`fleet`). Each `plugins/<name>/` is the exact install payload; engine knowledge lives
+A Claude Code plugin marketplace: 6 plugins (`codex`, `antigravity`, `cc`, `grok`,
+`fleet`, `imagine`). Each `plugins/<name>/` is the exact install payload; engine knowledge lives
 per plugin, the job runtime is shared in `shared/lib/`. Tests mirror each plugin under
 `tests/<name>/`.
 
@@ -13,7 +13,7 @@ memory — that helps one session on one machine, and users never see it.
 
 ## IRONCLAD — do not touch siblings
 When working on one plugin, do **NOT** modify other plugins or their tests
-(`plugins/{codex,antigravity,cc,grok,fleet}/`, `tests/{codex,antigravity,cc,grok,fleet}/`).
+(`plugins/{codex,antigravity,cc,grok,fleet,imagine}/`, `tests/{codex,antigravity,cc,grok,fleet,imagine}/`).
 When **adding** a sibling plugin, the only existing files you may edit are:
 `.claude-plugin/marketplace.json`, `tests/fleet-structure.test.mjs` (the marketplace
 consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-shared.mjs`

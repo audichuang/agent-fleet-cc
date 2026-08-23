@@ -10,8 +10,8 @@
 ## 結構角色(判斷,不是清單)
 - **無 `SKILL.md` / `README`** —— grok 沒有自我推薦 surface;commander 靠 fleet 的
   `delegating-to-fleet` 路由 + model-invocable `/grok:task` / `/grok:live` 才找得到它
-  (見 `docs/adr/0001`)。`/grok:image` 雖然也是 model-invocable,但 fleet 的路由表還沒
-  指過來(raster 生圖仍指 `/antigravity:image`),所以目前只是使用者手打的 convenience。
+  (見 `docs/adr/0001`)。**生圖不在這顆**:`/grok:image` 已於 0.8.0 移除,搬去 `imagine`
+  plugin 直接打 xAI 的 HTTP API(理由見那顆的 `AGENTS.md`)。
 - `commands/*.md` — slash verb 的薄殼,每支 shell `scripts/grok-companion.mjs <verb>`。
 - `scripts/grok-companion.mjs` — CLI 入口(`runCompanion(argv, deps)`,deps 可注入 seam 測);
   `bin/grok-companion` 是啟動器。
@@ -33,8 +33,7 @@
   **不要再加 gate**:grok 的憑證解析包含 per-model `api_key`/`env_key`、OS 解析的 home 等,
   重寫一遍只會誤拒有效設定又放行 grok 用不了的憑證(0.6.0 那顆 preflight 兩件都犯了)。
   `setup` 只**報告**看得見的來源(env keys + auth 檔),**不 gate 任何東西**。
-- **`task`、`live`、`image` 是 model-invocable**(三支 delegation entry;`image` 是純 prose 疊在
-  `task` 上的生圖 verb,沒有自己的 script);`cancel/logs/result/status/wait/setup`
+- **`task`、`live` 是 model-invocable**(兩支 delegation entry);`cancel/logs/result/status/wait/setup`
   是 user-run(`disable-model-invocation`)。長任務 watch loop 靠**直接 shell companion** 跑 `wait`,
   不靠 model 觸發那些 verb。
 - **`--json-schema` 走非串流**(單一結果物件、無 live `/grok:logs`);一般模式是 `streaming-json`
@@ -55,15 +54,13 @@
 - **fan-out 會洩漏 subagent 文字**:多 agent 跑會把每個 agent 的 text 併成一串、無法 demux
   (實測無論怎麼交代都會漏)。唯一可靠解 —— 叫 leader 用 `<<<GROK_FINAL>>>` / `<<<GROK_END>>>`
   圍住最終報告(見 `commands/task.md`),companion 只取圍欄內的;或 `--no-subagents` 關掉 fan-out。
-- **`image_gen` 的失敗長得像成功**:free / X Basic 這種 tier 在伺服器端被歸零,`image_gen` 直接
-  短路、把「升級 SuperGrok」的推銷文當成**成功的** tool result 回來(錨點見
-  `docs/grok-cli-contract-audit.md` Part 4)。所以 `/grok:image` 的成功判準是**磁碟上的檔案**
-  (存在且非空),不是 grok 說它做完了。2026-08-23 對真 `grok 1.0.5` 實跑過一次(35s、exit 0、
-  431KB JPEG):快樂路徑、headless 的 `image_gen` 註冊(出現在 `available_commands`)、tool 事件
-  進得了 raw job log、`tool_call_update` **沒有 `toolName`** 欄位、`rawOutput` 是
-  `{type:"ImageGen", path, filename, session_folder}` —— 全部核實。**唯一還沒實跑到的**是 tier
-  被歸零那條分支(測試帳號有 SuperGrok),所以「短路是否真的讓 job exit 0、沒有 error event」
-  仍只有源碼證據;triage 靠 grep `SuperGrok` 子字串(見 `commands/image.md`)。
+- **`image_gen` 的失敗長得像成功** —— 這顆已經不用它了(生圖搬去 `imagine` plugin),但如果你
+  想再從 companion 走生圖:free / X Basic 那種 tier 在伺服器端被歸零,`image_gen` 會短路、把
+  「升級 SuperGrok」的推銷文當成**成功的** tool result 回來,job 本身完全健康。整套實測證據與
+  wire shape(`tool_call_update` 沒有 `toolName`、`rawOutput` 是
+  `{type:"ImageGen", path, filename, session_folder}`)留在
+  `docs/grok-cli-contract-audit.md` Part 4,標成 superseded。**這正是搬走的理由**:那條路的
+  成功判準只能靠讀 raw stream 猜。
 
 ## 細節指向
 - 長任務 watch loop(B1:`--background` + `wait` 輪詢 + exit-code 狀態機 10/0/1/2):

@@ -1,6 +1,6 @@
 # agent-fleet — one marketplace for AI-agent delegation plugins
 
-Five Claude Code plugins, one marketplace:
+Six Claude Code plugins, one marketplace:
 
 | Plugin | Commands | What it delegates to |
 |---|---|---|
@@ -9,6 +9,7 @@ Five Claude Code plugins, one marketplace:
 | `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
 | `grok` | `/grok:*` (task, status, wait, logs, result, cancel, setup) | xAI Grok Build (`grok`), headless — default model grok-4.5; auth via `grok login` or `XAI_API_KEY` |
 | `fleet` | `/fleet:*` (setup, doctor, status) | Guided onboarding plus read-only fleet diagnostics/status |
+| `imagine` | `/imagine:image` | xAI Grok Imagine, over `POST /v1/images/generations` directly — reuses the grok CLI's OAuth login (read-only) or `XAI_API_KEY`. Not a delegation engine: one API call, one file on disk |
 
 > **`cc` v0.3.0** runs on the shared job runtime (`shared/lib/`). Its companion
 > CLI also exposes machine-layer re-entry verbs `wait` and `logs` (with `--json`
@@ -31,6 +32,7 @@ Five Claude Code plugins, one marketplace:
 /plugin install antigravity@agent-fleet
 /plugin install cc@agent-fleet
 /plugin install grok@agent-fleet
+/plugin install imagine@agent-fleet
 /reload-plugins
 ```
 
@@ -145,9 +147,9 @@ codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/
 ## Development
 
 ```bash
-npm test               # structure + shared + cc + antigravity + codex + grok + fleet + e2e
-npm run test:cc        # one suite at a time (also test:fleet, test:codex, test:grok, …)
-npm run test:e2e       # black-box CLI end-to-end regression for all 5 plugins (real subprocess, fake engine, no API key)
+npm test               # structure + shared + cc + antigravity + codex + grok + imagine + fleet + e2e
+npm run test:cc        # one suite at a time (also test:fleet, test:codex, test:grok, test:imagine, …)
+npm run test:e2e       # black-box CLI end-to-end regression for all 5 job-runtime plugins (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```

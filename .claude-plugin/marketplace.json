@@ -36,7 +36,7 @@
       "name": "grok",
       "source": "./plugins/grok",
       "description": "Use xAI Grok Build (grok) from Claude Code to delegate headless coding tasks — launch, wait, tail, cancel, resume.",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "author": {
         "name": "xAI"
       }
@@ -46,6 +46,15 @@
       "source": "./plugins/fleet",
       "description": "Guided onboarding for the agent-fleet engines — pick the ones you want and fix only those.",
       "version": "0.2.0"
+    },
+    {
+      "name": "imagine",
+      "source": "./plugins/imagine",
+      "description": "Generate images with xAI Grok Imagine from Claude Code — one direct API call, prompt-craft guidance, and a verified path on disk.",
+      "version": "0.1.0",
+      "author": {
+        "name": "audichuang"
+      }
     }
   ]
 }

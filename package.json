@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "description": "One marketplace for delegation plugins: codex, antigravity (agy), cc (Claude Code via profiles)",
-  "engines": { "node": ">=22.3" },
+  "engines": {
+    "node": ">=22.3"
+  },
   "scripts": {
-    "test": "npm run test:structure && npm run test:shared && npm run test:cc && npm run test:antigravity && npm run test:codex && npm run test:grok && npm run test:fleet && npm run test:e2e",
+    "test": "npm run test:structure && npm run test:shared && npm run test:cc && npm run test:antigravity && npm run test:codex && npm run test:grok && npm run test:imagine && npm run test:fleet && npm run test:e2e",
     "test:structure": "node --test tests/*.test.mjs",
     "test:shared": "node --test \"tests/shared/*.test.mjs\" \"tests/shared/conformance/*.test.mjs\"",
     "test:cc": "node --test tests/cc/*.test.mjs",
@@ -21,7 +23,8 @@
     "sync-shared": "node scripts/sync-shared.mjs",
     "use-local": "node .claude/skills/local-install-test/scripts/use-local-version.mjs",
     "prebuild:codex": "mkdir -p plugins/codex/.generated/app-server-types && codex app-server generate-ts --out plugins/codex/.generated/app-server-types",
-    "build:codex": "tsc -p tsconfig.app-server.json"
+    "build:codex": "tsc -p tsconfig.app-server.json",
+    "test:imagine": "node --test tests/imagine/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
