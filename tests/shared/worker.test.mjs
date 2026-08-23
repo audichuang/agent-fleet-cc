@@ -1200,3 +1200,63 @@ test("first-event watchdog: a fired watchdog cannot finalize as completed, even 
   assert.equal(job.status, "failed", "we killed it for stalling; a tidy exit 0 must not launder that");
   assert.equal(job.errorKind, "stalled");
 });
+
+// 兩個期限重疊:整體預算先到、child 在 grace 期間沒關,看門狗若還武裝著會再開火一次,
+// 結果 status 是 timed-out 而 error/errorKind 是 stalled —— 持久化的終態自相矛盾。
+test("overlapping deadlines: whole-job timeout first must not leave contradictory stalled metadata", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 40 });
+  createJob(stateDir, record, "the prompt");
+  // 看門狗預算比整體預算晚一點 —— 整體先到,看門狗會在 child 還沒收尾時想開火。
+  const adapter = makeAdapter({ firstEventTimeoutMs: 70 });
+  const child = silentChild();
+  await runWorker({
+    stateDir, jobId: record.id, adapter,
+    deps: { spawnImpl: () => child, graceMs: 5, forceResolveExtraMs: 120 },
+  });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.status, "timed-out", "the whole-job budget won the race");
+  assert.equal(job.errorKind, "timeout", "errorKind must agree with status, not say stalled");
+  assert.doesNotMatch(job.error ?? "", /wrote nothing to stdout/);
+});
+
+// 截斷只能吃 stderr,不能吃掉「我們為什麼殺掉它」。長 stderr 是這條的重點:
+// 早期版本把前綴和 stderr 串起來一起 .slice(-500),於是說明連同授權 URL 一起被吃光。
+test("stalled message: a long stderr tail must not swallow the explanation", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  const adapter = makeAdapter({ firstEventTimeoutMs: 40 });
+  const child = silentChild({ stderr: "NOISE ".repeat(400) + "\n" }); // ~2400 bytes
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.errorKind, "stalled");
+  assert.match(job.error, /^engine wrote nothing to stdout within 40ms/, "the reason must survive intact");
+  assert.match(job.error, /NOISE/, "and the stderr tail still rides along");
+});
+
+// getter 語意:worker 必須在 buildInvocation **之後**才讀 firstEventTimeoutMs,否則
+// 按 invocation 關閉(grok 的 --json-schema 豁免)會失效。把讀取移早會讓 adapter 自己的
+// 單元測試照樣綠,所以這條要在 worker 層釘住。
+test("firstEventTimeoutMs is read AFTER buildInvocation, so a per-run getter can disable it", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 200 });
+  createJob(stateDir, record, "the prompt");
+  let armedValue = "never-read";
+  const adapter = makeAdapter();
+  let built = false;
+  adapter.buildInvocation = ({ prompt }) => {
+    built = true;
+    return { argv: ["fake-bin"], env: {}, stdinPayload: prompt };
+  };
+  Object.defineProperty(adapter, "firstEventTimeoutMs", {
+    get() {
+      armedValue = built ? 40 : "read-too-early";
+      return built ? 40 : 40;
+    },
+  });
+  const child = silentChild();
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+  assert.equal(armedValue, 40, "the worker read the getter before buildInvocation ran");
+  assert.equal(readJob(stateDir, record.id).errorKind, "stalled");
+});

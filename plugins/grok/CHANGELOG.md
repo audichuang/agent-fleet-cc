@@ -80,31 +80,28 @@ pre-existing defects the durable checklist had been carrying as verified, plus a
   bucket deliberately requires the full phrase "grok is temporarily unavailable" so it cannot
   steal that string — but the `auth` bucket matched `authenticate`, which is not a substring of
   "Authentication", so nobody caught it. Now `authenticat`, which covers both.
-- **A first-event watchdog replaces the deleted auth gate — behaviour, not credential guessing.**
-  Deleting the preflight left one real exposure, found by an independent review and confirmed in
-  the 1.0.5 source: `headless.rs`'s `authenticate` fails closed only at *method selection*, and
-  `cached_token` passes that gate. When the token turns out to be expired or a legacy `WebLogin`,
-  `acp_agent.rs:704-732` hands off to `authenticate_after_cached_token_unavailable`, which — if it
-  lands on grok.com — **replaces the request meta wholesale** with `{"use_oauth": true}`
-  (`agent_ops.rs:1412-1416`), destroying the headless marker, and the browser OAuth callback then
-  waits 600s (`auth/oidc/login.rs`). Under `--background` that is ten invisible minutes.
-  The old gate did not protect against this either — it only called `existsSync`, so an existing
-  but stale `auth.json` sailed straight through. So the fix is not a better credential oracle
-  (two review rounds proved that path wrong in both directions) but an observable one: the shared
-  worker gains an OPTIONAL `firstEventTimeoutMs`, and grok declares 120s. A headless run that
-  emits no engine event in that window is killed and reported `errorKind: "stalled"` — kept
-  distinct from `timeout`, which means "outgrew its budget" rather than "never spoke at all".
-  What disarms it is **any non-empty line on stdout**, not a successfully parsed event — a
-  distinction an independent review caught before this shipped, and the reason it is safe:
-  grok's `parseEvent` returns null for `available_commands`, `thought`, `tool_call` and
-  `tool_call_update`, and `--json-schema` is non-streaming with nothing parseable before its
-  terminal object, so keying on parsed events would have killed every schema run over the
-  budget. stderr does not disarm it — an interactive prompt is most likely to appear there.
-  So the window covers only pre-session silence: grok prints `available_commands` the moment a
-  session opens. 120s is a judgement about cold start / catalog fetch / remote resume, not a
-  proven bound — override with `GROK_FIRST_EVENT_TIMEOUT_MS` if a legitimate start exceeds it.
-  `image_gen`'s minute-plus silent stretch is unaffected: it happens after the session is up. Adapters that do not
-  declare the field are bit-for-bit unaffected, so `cc`, `antigravity` and `codex` are unchanged.
+- **An OPT-IN stall guard, off by default.** Deleting the preflight left one real exposure,
+  confirmed in the 1.0.5 source: `headless.rs`'s `authenticate` fails closed only at *method
+  selection*, so a `cached_token` that turns out to be expired or a legacy `WebLogin` routes
+  through `acp_agent.rs:704-732` into `authenticate_after_cached_token_unavailable`, which on
+  grok.com **replaces the request meta** with `{"use_oauth": true}` (`agent_ops.rs:1412-1416`),
+  destroying the headless marker — and the browser OAuth callback then waits 600s
+  (`auth/oidc/login.rs`). Under `--background` those ten minutes are invisible.
+  The shared worker therefore gained an optional `firstEventTimeoutMs`: no stdout output within
+  the budget → kill, finalize `failed`, `errorKind: "stalled"` (kept distinct from `timeout`,
+  which means outgrew-its-budget rather than never-spoke-at-all).
+  **But grok declares no default value, because no constant is safe.** Its startup is
+  deliberately quiet on stdout — `restore_progress_on_stdout: false` sends remote-restore
+  progress to stderr only, and `REMOTE_RESTORE_TIMEOUT` is **90s** before session opening and
+  catalog work even begin, with no source-proven ceiling after that. A 120s default was tried
+  and it killed healthy runs. The costs are asymmetric — a miss falls back to existing
+  behaviour and the stall self-terminates at 600s with a real error, while a false kill
+  destroys working jobs — so the default sits on the side of missing it. Set
+  `GROK_FIRST_EVENT_TIMEOUT_MS` to opt in. Two rules hold even then: what disarms it is **any
+  non-empty stdout line**, not a parsed event (`parseEvent` returns null for
+  `available_commands`, `thought`, `tool_call`, `tool_call_update`); and `--json-schema` never
+  arms it at all, since a healthy non-streaming run writes nothing until its terminal object —
+  a 15s budget killed one, verified live.
 - **Anchors re-pinned to the binary we actually run.** Part 1's `cli.rs` pins had drifted +8..+16
   lines and Part 3's sandbox pins ~50-70 after upstream's 481-line `config/mod.rs` rewrite;
   behaviour is unchanged across it. `docs/grok-cli-contract-audit.md` carries the new pins, the

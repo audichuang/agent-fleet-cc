@@ -228,6 +228,10 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     const timeoutMs = running.timeoutMs ?? 60 * 60 * 1000;
     const timer = setTimeout(() => {
       state.timedOut = true;
+      // 整體預算先到就把首輸出看門狗拆掉。兩個期限重疊時(例如 --timeout-ms 119000 對 120s 的
+      // 看門狗,或兩者相等),child 若在 grace 期間沒關,看門狗還武裝著就會再開火一次,結果
+      // status 是 timed-out 而 error/errorKind 是 stalled —— 持久化的終態自相矛盾。
+      disarmFirstEventWatchdog();
       const graceMs = deps.graceMs ?? 5000;
       killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
       // Force-resolve after kill+grace+buffer even when a grandchild holding stdout

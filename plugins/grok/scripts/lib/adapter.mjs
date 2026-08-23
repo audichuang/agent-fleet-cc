@@ -78,33 +78,34 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
     engine: "grok",
     recursionMarker: RECURSION_MARKER,
     wantsWatchdog: false,
-    // 首輸出看門狗:headless 的 grok 在 stdout 上沉默超過這麼久就殺掉並報 errorKind "stalled"。
-    // 要防的是一條實際存在的互動式卡頓 —— cached token 過期或是 legacy WebLogin 時,
-    // acp_agent.rs:704-732 轉進 authenticate_after_cached_token_unavailable,後者若選到
-    // grok.com 就把 meta 整個換成 {"use_oauth": true}(agent_ops.rs:1412-1416),原本的
-    // headless 標記就此消失,然後瀏覽器 OAuth callback 等 600s
-    // (auth/oidc/login.rs AUTH_CALLBACK_TIMEOUT)。`--background` 時這 10 分鐘完全不可見。
-    // 注意:headless.rs 的 authenticate 只在**方法選擇**那層 fail closed,擋不到這條。
+    // 首輸出看門狗 —— **預設關閉,只在使用者明確設 GROK_FIRST_EVENT_TIMEOUT_MS 時啟用。**
     //
-    // 這道關量的是「session 開起來了嗎」,不是「有沒有進度」:解除門檻是 stdout 上**任何
-    // 非空行**,而 grok 一開 session 就印 `available_commands`(實測數秒內到)。所以
-    // 120s 只涵蓋 session 之前那段 —— 冷機開機、model catalog fetch、`-r` 從遠端還原。
-    // 那幾段沒有源碼保證的上限(遠端還原本身就可能吃掉 ~90s),所以 120s 是判斷不是證明;
-    // 真的遇到誤殺就調 GROK_FIRST_EVENT_TIMEOUT_MS,別把門檻改成看 parseEvent。
+    // 它要防的卡頓是真的:cached token 過期或是 legacy WebLogin 時,acp_agent.rs:704-732 轉進
+    // authenticate_after_cached_token_unavailable,後者若選到 grok.com 就把 meta 整個換成
+    // {"use_oauth": true}(agent_ops.rs:1412-1416),原本的 headless 標記就此消失,然後瀏覽器
+    // OAuth callback 等 600s(auth/oidc/login.rs)。`--background` 時完全不可見。headless.rs 的
+    // authenticate 只在**方法選擇**那層 fail closed,擋不到這條。
     //
-    // **不要**把解除門檻改成「parseEvent 解析成功的事件」。這條被 review 抓過:grok 的
-    // parseEvent 只認 text / end / error,`available_commands` / thought / tool_call /
-    // tool_call_update 全部回 null;而 `--json-schema` 是非串流的,終端物件之前根本沒有
-    // 任何可解析事件 —— 拿 parsed 當門檻等於保證殺掉每一個超過預算的 schema run。
-    // image_gen 那種一分多鐘不吐位元組也一樣:它發生在 session 開起來之後,這道關早已撤掉。
-    // getter,不是常數:`--json-schema` 是**非串流**的,grok 在終端物件之前 stdout 一個
-    // 位元組都不寫(真跑驗過:一個健康的 schema run 被 15s 的預算殺掉),所以那個模式下
-    // 這道關只會誤殺,必須關掉 —— 由整體 timeoutMs 接手。jsonMode 由 buildInvocation 設定,
-    // 而 worker 是在 buildInvocation 之後才讀這個欄位,所以 getter 拿得到正確的模式。
+    // 但**沒有任何常數是安全的**,所以不能預設開。grok 的啟動階段刻意對 stdout 安靜:
+    //   · `restore_progress_on_stdout: false`(headless.rs headless_materialize_ctx)—— remote
+    //     restore 的進度只走 stderr;
+    //   · `REMOTE_RESTORE_TIMEOUT = 90s`(app/session_startup.rs)—— 單是遠端還原就可以合法花 90 秒,
+    //     之後才開 session、抓 model catalog。
+    // 也就是說一個健康的 `-r` resume 可以合法安靜遠超過任何我們敢設的預算,而引擎自己的 idle
+    // 上限是 600s —— 120s 曾經被設成預設,結果就是會殺掉健康的 run(被 review 抓到)。
+    // 兩邊代價不對稱:漏抓 = 退回既有行為(那個卡頓本身有 600s 上限、最後會真的報錯);
+    // 誤殺 = 直接摧毀使用者的工作。所以預設站在漏抓那邊,把選擇權交給真的踩過的人。
+    //
+    // 兩條 hard-won 的規則,啟用時也不准動:
+    //  (1) 解除門檻是 stdout 上**任何非空行**,不是 parseEvent 解析成功。grok 的 parseEvent 只認
+    //      text / end / error,available_commands / thought / tool_call / tool_call_update 全回 null。
+    //  (2) `--json-schema` 一律不啟用,即使使用者設了環境變數。它是非串流的,終端物件之前 stdout
+    //      一個位元組都不寫(真跑驗過:健康的 schema run 被 15s 預算殺掉),所以那個模式下這道關
+    //      只會誤殺。jsonMode 由 buildInvocation 設定,worker 在那之後才讀這個 getter。
     get firstEventTimeoutMs() {
       if (jsonMode) return null;
-      const override = Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS);
-      return override > 0 ? override : 120_000;
+      const optIn = Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS);
+      return optIn > 0 ? optIn : null;
     },
     buildInvocation({ job, prompt }) {
       const r = job.request ?? {};

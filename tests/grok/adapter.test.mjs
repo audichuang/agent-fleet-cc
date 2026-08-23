@@ -527,16 +527,32 @@ test("renderResult: the resume tip renders the caller's session verdict, never r
 // 真跑驗過的必死情境:`--json-schema` 是非串流的,grok 在終端物件之前 stdout 完全不寫,
 // 所以首輸出看門狗在那個模式下只會誤殺健康的 run(一個 15s 預算的真實 schema run 就被殺了)。
 // 這個欄位刻意是 getter,而 worker 在 buildInvocation 之後才讀它。
-test("firstEventTimeoutMs is disabled in --json-schema mode (non-streaming writes no stdout until the end)", () => {
-  const a = makeGrokAdapter();
-  // 串流模式:看門狗武裝。
-  a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
-  assert.equal(typeof a.firstEventTimeoutMs, "number");
-  assert.ok(a.firstEventTimeoutMs > 0);
-  // schema 模式:必須關掉,否則整體 timeoutMs 之前就被殺。
-  a.buildInvocation({ job: { cwd: "/w", request: { jsonSchema: '{"type":"object"}' } }, prompt: "p" });
-  assert.equal(a.firstEventTimeoutMs, null, "a non-streaming run must not be watched for first stdout");
-  // 切回串流要恢復(同一顆 adapter 會被重用)。
-  a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
-  assert.ok(a.firstEventTimeoutMs > 0);
+test("firstEventTimeoutMs is OPT-IN: null by default, and never armed in --json-schema mode", () => {
+  const prev = process.env.GROK_FIRST_EVENT_TIMEOUT_MS;
+  delete process.env.GROK_FIRST_EVENT_TIMEOUT_MS;
+  try {
+    const a = makeGrokAdapter();
+    // 預設不武裝。grok 的啟動階段刻意對 stdout 安靜(restore_progress_on_stdout: false;
+    // REMOTE_RESTORE_TIMEOUT 90s 之後才開 session),所以沒有安全的常數 —— 曾經預設 120s,
+    // 結果殺掉健康的 run。漏抓退回既有行為,誤殺摧毀使用者的工作,所以預設站漏抓那邊。
+    a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+    assert.equal(a.firstEventTimeoutMs, null, "must not arm unless the user opts in");
+
+    // 明確 opt-in 才武裝。
+    process.env.GROK_FIRST_EVENT_TIMEOUT_MS = "45000";
+    a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+    assert.equal(a.firstEventTimeoutMs, 45000);
+
+    // 但 --json-schema 即使 opt-in 也不准武裝:非串流,終端物件之前 stdout 完全不寫
+    // (真跑驗過:健康的 schema run 被 15s 預算殺掉)。
+    a.buildInvocation({ job: { cwd: "/w", request: { jsonSchema: '{"type":"object"}' } }, prompt: "p" });
+    assert.equal(a.firstEventTimeoutMs, null, "schema mode must stay exempt even when opted in");
+
+    // 切回串流要恢復(同一顆 adapter 會被重用)。
+    a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+    assert.equal(a.firstEventTimeoutMs, 45000);
+  } finally {
+    if (prev === undefined) delete process.env.GROK_FIRST_EVENT_TIMEOUT_MS;
+    else process.env.GROK_FIRST_EVENT_TIMEOUT_MS = prev;
+  }
 });
