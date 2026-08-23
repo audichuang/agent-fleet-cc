@@ -113,9 +113,12 @@ export async function generateImage({
     // existed to protect a test fixture's one-character "token", which is backwards.
     const raw = await res.text().catch(() => "");
     const detail = (token && raw.includes(token) ? raw.split(token).join("<redacted>") : raw).slice(0, 300);
+    // Classify on the RAW body, never the redacted one: a short token like "key" turns
+    // "Incorrect API key" into "Incorrect API <redacted>" and the 400 stops being
+    // recognised as a credential failure — the redaction would eat its own classifier.
     // 401 is the documented shape; a rejected bearer has also been seen to come
     // back as 400 "Incorrect API key provided", so key on the message too.
-    if (res.status === 401 || (res.status === 400 && /api key/i.test(detail))) {
+    if (res.status === 401 || (res.status === 400 && /api key/i.test(raw))) {
       throw new ImageError(`xAI rejected the credential (${res.status}). If you log in through grok, run \`grok\` once to refresh, then retry. ${detail}`);
     }
     if (res.status === 403) {
@@ -193,7 +196,9 @@ async function readStdin() {
   if (process.stdin.isTTY) return "";
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf8").trim();
+  // Verbatim. `--prompt-file -` promises the same byte-for-byte transport as a real file,
+  // so the trimming that the bare-stdin fallback wants happens at its own call site.
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 export async function main(argv, { stdin = readStdin } = {}) {
@@ -207,13 +212,15 @@ export async function main(argv, { stdin = readStdin } = {}) {
     // When it is given it is THE source — never a preference that falls back to stdin or
     // to the positional words on empty. Precedence that changes with the file's CONTENT is
     // how a caller ends up billed for a prompt they cannot see.
-    if (opts.promptFile) {
+    // `!== undefined`, not truthiness: `--prompt-file ""` used to be falsy and fall through
+    // to stdin, which is the content-dependent precedence this branch exists to kill.
+    if (opts.promptFile !== undefined) {
       if (opts.prompt) throw new ImageError("--prompt-file and a positional prompt are two prompts; pass one.");
       // Bytes as-is: the promise is verbatim transport. .trim() only decides emptiness.
       opts.prompt = opts.promptFile === "-" ? await stdin() : readFileSync(opts.promptFile, "utf8");
       if (!opts.prompt.trim()) throw new ImageError(`${opts.promptFile} is empty — nothing to render.`);
     }
-    if (!opts.prompt) opts.prompt = await stdin();
+    if (!opts.prompt) opts.prompt = (await stdin()).trim();
   } catch (error) {
     process.stderr.write(`imagine: ${error?.message ?? error}\n`);
     return 2;

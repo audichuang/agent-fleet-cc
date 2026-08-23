@@ -260,6 +260,44 @@ test("--prompt-file is THE source: it never silently falls back, and never doubl
   }
 });
 
+test("--prompt-file - is verbatim too, and an empty --prompt-file value is not a fallback", async () => {
+  const authFile = authFileWith({ "https://auth.x.ai::c": { key: "T", expires_at: FUTURE } });
+  process.env.GROK_AUTH_FILE = authFile;
+  const origFetch = globalThis.fetch;
+  let sent, requested = false;
+  globalThis.fetch = async (_u, init) => ((sent = JSON.parse(init.body)), (requested = true), jpegBody());
+  try {
+    // `-` promises the same byte-for-byte transport as a real file. It used to run through
+    // readStdin()'s .trim(), so leading/trailing whitespace the author meant was dropped.
+    const padded = "  line one\nline two\n\n";
+    assert.equal(await main(["--prompt-file", "-", "--out", path.join(dir(), "a.jpg")], { stdin: async () => padded }), 0);
+    assert.equal(sent.prompt, padded, "stdin via --prompt-file - must arrive untouched");
+    // `--prompt-file ""` is falsy: it used to skip the branch entirely and read stdin.
+    requested = false;
+    assert.equal(await main(["--prompt-file", ""], { stdin: async () => "a cat" }), 2);
+    assert.equal(requested, false, "an empty --prompt-file value must not silently become stdin");
+  } finally {
+    globalThis.fetch = origFetch;
+    delete process.env.GROK_AUTH_FILE;
+  }
+});
+
+test("redaction must not eat its own classifier: a short token still leaves the 400 recognisable", async () => {
+  // The API's rejected-key 400 is recognised by the words "api key" in the body. Redacting
+  // a token like "key" before that test turned the message into "Incorrect API <redacted>"
+  // and the 400 stopped routing to the refresh advice.
+  const token = "key";
+  await assert.rejects(
+    generateImage({
+      prompt: "x",
+      out: path.join(dir(), "i.jpg"),
+      token,
+      fetchImpl: async () => ({ ok: false, status: 400, text: async () => "Incorrect API key provided" }),
+    }),
+    (e) => e instanceof ImageError && /refresh/.test(e.message),
+  );
+});
+
 test("a DANGLING symlink at the destination is caught before the request, not after the bill", async () => {
   const d = dir();
   const out = path.join(d, "link.jpg");

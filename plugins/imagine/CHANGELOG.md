@@ -24,8 +24,9 @@ the file that actually landed on disk.
   prompt still works for a caller who has one safely in hand; the command doc, the prompt skill and
   its examples all use the file. `--out` is optional — without it the script mkdtemps its own
   directory, so no caller has to compute a path in one shell call and splice it into the next. The
-  file is transported verbatim: given `--prompt-file`, nothing falls back to stdin or to positional
-  words, and an empty file is a usage error rather than a silent substitution.
+  prompt is transported verbatim, `-` (stdin) included: given `--prompt-file`, nothing falls back to
+  stdin or to positional words, and an empty file — or an empty `--prompt-file` value — is a usage
+  error rather than a silent substitution.
 - **Two guards against paying for a request nobody wrote.** A destination that already exists is
   refused *before* the POST (only the extension-corrected collision can still cost money, and its
   message says so), and a flag is never accepted as another flag's value — `--out --aspect 16:9`

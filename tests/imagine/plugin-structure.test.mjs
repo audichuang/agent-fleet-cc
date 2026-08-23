@@ -29,25 +29,44 @@ test("the command carries the prompt in a file, never through the shell", () => 
   // A quoted heredoc looks safe and is not: a prompt whose own text contains the
   // delimiter line closes the here-document, and the rest of the prompt runs as shell.
   // The prompt is model- and user-authored text, so it must never reach a command line.
-  // Every doc that shows an invocation, not just the command: the command MAKES you read
-  // the skill first, so a heredoc surviving there is the same defect one file over.
-  const docs = [
-    "commands/image.md",
-    "skills/imagine-prompts/SKILL.md",
-    "skills/imagine-prompts/references/examples.md",
-    "skills/imagine-prompts/references/model-and-params.md",
-  ];
-  for (const rel of docs) {
-    const text = fs.readFileSync(path.join(ROOT, rel), "utf8");
-    assert.doesNotMatch(text, /<<'?[A-Z_]+'?\n/, `${rel} must not carry the prompt in a heredoc`);
-    // an invocation, not prose that merely names the script: it carries at least one flag
-    for (const line of text.split("\n").filter((l) => /imagine\.mjs/.test(l) && /\s--\w/.test(l))) {
-      assert.match(line, /--prompt-file/, `${rel}: every shown invocation must use --prompt-file (${line.trim()})`);
-      assert.doesNotMatch(line, /<the |<prompt|\$ARGUMENTS/, `${rel}: no prompt text on a command line`);
+  //
+  // The lock walks EVERY shipped .md and checks whole fenced blocks, not single lines.
+  // The earlier same-line version had two holes a mutation found: a wrapped invocation
+  // slipped through, and a doc added later was simply not in the hardcoded list.
+  const docs = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith(".md")) docs.push(full);
+    }
+  })(ROOT);
+  assert.ok(docs.length >= 5, `expected the plugin's shipped docs, found ${docs.length}`);
+
+  let invocations = 0;
+  for (const file of docs) {
+    const rel = path.relative(ROOT, file);
+    const text = fs.readFileSync(file, "utf8");
+    assert.doesNotMatch(text, /<<\s*'?[A-Za-z_][A-Za-z0-9_]*'?\s*$/m, `${rel} must not carry the prompt in a heredoc`);
+    // whole fenced blocks: a command wrapped over several lines is still one block
+    for (const [, lang, block] of text.matchAll(/```(\w*)\n([\s\S]*?)```/g)) {
+      if (!/imagine\.mjs/.test(block)) continue;
+      assert.match(lang, /^(bash|sh|shell|console|typescript)?$/, `${rel}: unexpected fence language ${lang}`);
+      invocations++;
+      assert.match(block, /--prompt-file/, `${rel}: every shown invocation must use --prompt-file:\n${block}`);
+      assert.doesNotMatch(block, /<the |<prompt|\$ARGUMENTS/, `${rel}: no prompt text may reach a command line:\n${block}`);
+      // the prompt body must not sit in a shell fence at all — pasted whole, an
+      // uncommented prose line is a command. It belongs in its own text fence.
+      if (/^(bash|sh|shell|console)$/.test(lang)) {
+        for (const line of block.split("\n")) {
+          const t = line.trim();
+          if (!t || t.startsWith("#") || /^(node|d=|\$)/.test(t) || t.endsWith("\\")) continue;
+          assert.fail(`${rel}: a shell fence must hold only the command; found prose: ${t.slice(0, 60)}`);
+        }
+      }
     }
   }
-  const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
-  assert.match(body, /--prompt-file/, "the documented transport must be a file");
+  assert.ok(invocations >= 9, `expected the command plus the eight worked examples, saw ${invocations}`);
 });
 
 test("the command sends the user to the prompt skill before spending quota", () => {
