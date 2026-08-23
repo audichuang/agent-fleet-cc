@@ -16,7 +16,7 @@ import {
   logFilePath,
   jobDir,
 } from "../core/state-store.mjs";
-import { spawnEngine, killGroupWithGrace } from "./spawn.mjs";
+import { spawnEngine, killGroupWithGrace, killProcessGroup } from "./spawn.mjs";
 
 const STDERR_TAIL_BYTES = 4096;
 
@@ -174,15 +174,20 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       clearTimeout(forceTimer);
       clearTimeout(firstEventTimer);
       clearTimeout(stalledForceTimer);
-      // SIGKILL 升級**刻意不取消**。試過取消,那是錯的:child 的 'close' 不代表 process
-      // group 空了 —— 一個同 pgid 的孫子可以改掉 stdio、無視 TERM 繼續活著(本檔下面
-      // force-resolve 的註解講的就是這件事),取消升級等於讓引擎後代活過 job 的終態,違反
-      // adapter-api.md 不變量 3(「cancel 必殺乾淨:整個 process group,孫子不留」)。
-      // pgid 被回收那個危險是真的,但它未被重現,而這個洩漏是被重現過的 —— 拿承重的保證去
-      // 換一個假設,方向是反的。升級本身 unref 且有界,所以放它燒完是可接受的代價。
+      // 不變量 3(「cancel 必殺乾淨:整個 process group,孫子不留」)在這裡收尾,**同步**做完。
+      // 為什麼不能靠 killGroupWithGrace 那個排程的升級:worker-entry 在 runWorker resolve
+      // 的瞬間就 `process.exit()`,而 process.exit **無視 ref'd handle**(ref 過,實測無效),
+      // 所以只要 leader 比 grace 先關,那一槍永遠不會開,忽略 TERM 又改掉 stdio 的同 pgid
+      // 孫子就活過了 job 的終態。唯一可靠的時機是「resolve 之前」——此刻 entry 還沒機會退出。
+      // 只在我們真的發過 TERM 的路徑上做(happy path 不碰),而且對已死的 group 是無害 no-op。
+      // 代價:早關的情況下孫子拿到的 grace 比 graceMs 短 —— 它已經無視過一次 TERM,這是它的選擇。
+      if (killInitiated && child?.pid) {
+        killProcessGroup(child.pid, "SIGKILL", deps.killImpl ?? process.kill);
+      }
       resolve(state);
     };
     let forceTimer = null;
+    let killInitiated = false;
     // 首輸出看門狗(adapter 選填 firstEventTimeoutMs)。要防的不是「跑太久」——
     // 那是下面的 timeoutMs——而是「headless 的 run 被互動式提示卡住」:引擎沒死、
     // 沒報錯、stdout 一個位元組都不吐,只是在等一個永遠不會來的人類。引擎特定的
@@ -227,6 +232,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       firstEventTimer = (deps.scheduleImpl ?? setTimeout)(() => {
         state.stalledBeforeFirstEvent = true;
         state.armedFirstEventTimeoutMs = firstEventTimeoutMs;
+        killInitiated = true;
         // 這道關開火就代表整體 timeoutMs 沒有意義了(引擎連話都沒講),而且兩個計時器都
         // 活著會讓終態自相矛盾:status 說 timed-out、errorKind 說 stalled。先把它拆掉。
         clearTimeout(timer);
@@ -252,6 +258,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     const timeoutMs = running.timeoutMs ?? 60 * 60 * 1000;
     const timer = setTimeout(() => {
       state.timedOut = true;
+      killInitiated = true;
       // 整體預算先到就把首輸出看門狗拆掉。兩個期限重疊時(例如 --timeout-ms 119000 對 120s 的
       // 看門狗,或兩者相等),child 若在 grace 期間沒關,看門狗還武裝著就會再開火一次,結果
       // status 是 timed-out 而 error/errorKind 是 stalled —— 持久化的終態自相矛盾。

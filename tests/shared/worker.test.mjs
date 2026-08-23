@@ -1308,10 +1308,10 @@ test("an absent or null firstEventTimeoutMs is the documented opt-out — no war
 // stdio、無視 TERM 活下來。所以 SIGKILL 升級必須照樣開火,不能因為 job 落終態就取消
 // (adapter-api.md 不變量 3:孫子不留)。曾經為了 pgid 回收的顧慮把它取消掉,那讓引擎後代
 // 活過 job 終態 —— 用一個未重現的假設換掉一個承重的保證,方向反了。
-// 注意這條在 production 也成立的前提是那個 timer 是 **ref** 的(spawn.mjs);它曾經 unref,
-// 而 worker-entry 在 resolve 就 process.exit(),於是這個保證在真實 runtime 是空的 ——
-// 這條測試當時只是靠自己那個 ref'd 的等待 timer 撐著才綠。ref 由
-// tests/shared/spawn.test.mjs 直接釘住。
+// 注意:這條**只**證明「finish() 沒有取消那個排程的升級」,不證明不變量 3 —— in-process
+// 的測試不會顯式 exit,所以那個 unref 的升級照樣開火。真正跨過 production 退出邊界的證明
+// 在 tests/shared/spawn.test.mjs 的 invariant-3 測試(起一個會 process.exit() 的子行程)。
+// 曾經想靠把 timer 改 ref 來解決,沒用:process.exit() 無視 ref'd handle。
 test("kill escalation still fires after the child closes — close does not prove the group is empty", async () => {
   const stateDir = tmp();
   const record = createJobRecord({ engine: "fake", timeoutMs: 30 });
