@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { validateProcessAdapter } from "../../plugins/grok/scripts/lib/shared/adapter-api.mjs";
 import { promptFilePath } from "../../plugins/grok/scripts/lib/shared/core/state-store.mjs";
 import { makeGrokAdapter, PROMPT_ARGV_LIMIT } from "../../plugins/grok/scripts/lib/adapter.mjs";
+import { renderResult } from "../../plugins/grok/scripts/lib/render.mjs";
 
 test("adapter satisfies the ProcessAdapter contract", () => {
   assert.deepEqual(validateProcessAdapter(makeGrokAdapter()), []);
@@ -466,4 +467,56 @@ test("buildInvocation: no sessionId and no resumeSessionId sends neither flag", 
   const { argv } = a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
   assert.ok(!argv.includes("-s"));
   assert.ok(!argv.includes("-r"));
+});
+
+// The three ownership/ordering bugs an independent review found, each pinned to the
+// verbatim string that reproduced it.
+test("classifyError: ownership beats substring luck (403, failed-resume, spawn ENOENT)", () => {
+  const a = makeGrokAdapter();
+  // 1. A 403 is authenticated-but-not-permitted, so it must never read as "fix your
+  // login". Upstream states it outright (xai-grok-shell/src/sampling/error.rs:127-136)
+  // and pins it with a regression test (xai-grok-sampling-types/src/error.rs:1206-1217,
+  // "403 Forbidden must not be treated as an auth error"). We park a policy denial in
+  // `config`: the request as written is not permitted, so the fix is to change it.
+  assert.equal(a.classifyError("403 Forbidden: content policy blocked", 1), "config");
+  assert.equal(a.classifyError("Request failed (HTTP 403).", 1), "config");
+  // …except the one 403 that is an entitlement limit, which is a quota story
+  // (xai-grok-shell/src/sampling/error.rs:696, special-cased at :134).
+  assert.equal(a.classifyError("The model 'grok-build' requires a Grok subscription.", 1), "quota");
+  // 2. A resume that failed BECAUSE the endpoint was down is an endpoint failure — grok
+  // embeds the transport error in the same line, and `endpoint` is now checked before
+  // `config` so the outer "failed to restore" token cannot claim it.
+  assert.equal(
+    a.classifyError("Failed to restore session from remote: Grok is temporarily unavailable (HTTP 503)", 1),
+    "endpoint",
+  );
+  // …while a resume miss with no transport evidence stays `config`.
+  assert.equal(a.classifyError("Failed to restore session from remote: 404", 1), "config");
+  // 3. Spawn-level evidence is decided FIRST, so a user path can no longer donate a
+  // substring to another bucket. The bare `relay` token in `endpoint` used to steal
+  // this one.
+  assert.equal(a.classifyError("spawn /opt/relay/grok ENOENT", 1), "not-installed");
+});
+
+// The pre-minted request.sessionId is minted before spawn, so the resume tip must not
+// advertise it on a job where grok never ran.
+test("renderResult: resume tip needs evidence the engine actually ran", () => {
+  const crashed = renderResult({
+    id: "grok-1",
+    status: "failed",
+    // reconcile.mjs's dead-worker repair: no exitCode, no errorKind — the exact crash
+    // the pre-minted id exists for.
+    error: "worker process died (reconciled dead pid)",
+    request: { sessionId: "11111111-1111-4111-8111-111111111111" },
+  });
+  assert.match(crashed, /--resume-job grok-1/);
+
+  for (const job of [
+    { id: "grok-2", status: "failed", errorKind: "not-installed", error: "spawn grok ENOENT", request: { sessionId: "22222222-2222-4222-8222-222222222222" } },
+    { id: "grok-3", status: "failed", errorKind: "spawn", error: "EACCES: permission denied", request: { sessionId: "33333333-3333-4333-8333-333333333333" } },
+    // spawn throw with an errno classifyError has no bucket for → errorKind "unknown"
+    { id: "grok-4", status: "failed", errorKind: "unknown", error: "spawn /opt/grok EACCES", request: { sessionId: "44444444-4444-4444-8444-444444444444" } },
+  ]) {
+    assert.doesNotMatch(renderResult(job), /--resume-job/, job.id);
+  }
 });

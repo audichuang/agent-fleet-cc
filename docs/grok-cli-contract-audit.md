@@ -80,14 +80,14 @@ breaks) → `cosmetic` (additive upstream, we ignore it fine) → `none`.
 
 | What | Value |
 | --- | --- |
-| Plugin | `plugins/grok/` @ `0.6.0` + the unreleased working-tree fixes of the 2026-08-23 pass (not yet bumped; this row moves when they land) |
+| Plugin | `plugins/grok/` @ `0.7.0` (`npm run check-version`) — the 2026-08-23 first-pass fixes plus `/grok:image` shipped in it; the second-pass corrections below are on top of it |
 | Released binary we invoke | `grok 1.0.5 (5115b46bc9)` — verified 2026-08-23 by `grok --version`. **Stale-data fix only:** the doc had carried `1.0.0 (3cd0d0cbce) [stable]` since 2026-08-09. Do **not** read the vanished `[stable]` suffix as drift in something we depend on. `cli.rs:413` did swap clap's `version` to `xai_grok_version::full_version()`, but that returns a plain version string either way (`xai-grok-version/src/lib.rs:27-28`); `[stable]` comes from `xai_grok_update::channel_label()` (`xai-grok-update/src/version.rs:589-600`), which returns `""` whenever no channel pointer is cached (`:595`, documented `:586` and `:514-525`) — **cache state, not the swap**. Either way it is cosmetic: `grok-companion.mjs` only echoes the string. |
-| Provenance of behavioral claims | **Re-proven 2026-08-23:** every flag we send parses on 1.0.5 (parse-only probe, recipe under Part 1); every error string Parts 3 and 5 key on is present in the shipped binary (`strings -a`); the contract-file diffs quoted in the rows below. **Carried forward, NOT re-run:** the `classifyError` `auth` / `quota` buckets, verified by *running* `0.2.93` (2026-07-16). The `endpoint` bucket was likewise not re-run — it was re-read against source this pass and found **dead**; see Part 5. The sandbox-refusal bucket remains source + `strings` only, never triggered. The Imagine surface in Part 4 was **live-verified 2026-08-23** (one real generation on `grok 1.0.5`: registration via `available_commands`, the `tool_call_update` wire shape, the `ImageGen` `rawOutput` fields, tool events reaching the raw log). The one exception is the **tier-restricted** branch, still inference — the account under test has SuperGrok, so the short-circuit never fired. |
+| Provenance of behavioral claims | **Re-proven 2026-08-23:** every flag we send parses on 1.0.5 (parse-only probe, recipe under Part 1); every error string Parts 3 and 5 key on is present in the shipped binary (`strings -a`); the contract-file diffs quoted in the rows below. **Carried forward, NOT re-run:** the `classifyError` `auth` / `quota` buckets, verified by *running* `0.2.93` (2026-07-16). The `endpoint` bucket was likewise not re-run — it was re-read against source this pass and found **dead**; see Part 5. The sandbox-refusal bucket remains source + `strings` only, never triggered. The Imagine surface in Part 4 was **live-verified 2026-08-23** (one real generation on `grok 1.0.5`: registration via `available_commands`, the `tool_call_update` wire shape, the `ImageGen` `rawOutput` fields, tool events reaching the raw log). The one exception is the **tier-restricted** branch, still inference — the account under test has SuperGrok, so the short-circuit never fired. **Second pass, same day (doc-only re-verification, no new upstream diff):** additionally **re-proven** — grok's headless auth chain fails closed (`headless.rs:459`, `:466-472`, `:474-479`, `:899-900`, `pager-bin/src/main.rs:1901-1908`), the 403-is-not-auth pair (`shell/sampling/error.rs:127-136` + the `forbidden_is_not_auth_error` test at `sampling-types/error.rs:1197-1219`), `resolve_image_gen`'s full precedence chain incl. the managed requirement pin (`agent/config.rs:2631-2656`), the `0700` site (`storage.rs:64-71`), and the deployment-key surface (`agent/config.rs:186-189`/`:554`, `managed_config.rs:453-471`). Newly **carried forward unproven:** whether a deployment-key-only setup can complete a headless task (untested, and moot for the plugin now that nothing plugin-side inspects auth). |
 | Open-source tree audited | commit `9fabade` ("Synced from monorepo") — the tree matching the **installed** `grok 1.0.5`. Diff base for this pass: `8a14c91` (the 2026-08-09 baseline = `grok 1.0.0`), so the contract diff that matters is `8a14c91..9fabade`. Source tree at `~/research/grok-build`. |
 | Tree vs binary | Two axes, kept apart on purpose — conflating them is exactly how a wrong baseline once produced a false "no drift" verdict. **What we run:** `9fabade` *is* the installed binary. **Tree leads binary:** local HEAD is `19d42e3` (version 1.0.6), and `9fabade..19d42e3` changes **nothing** in any contract file — verified empty via `git diff --stat 9fabade 19d42e3 -- crates/codegen/xai-grok-pager/src/app/cli.rs .../headless.rs .../headless/ crates/codegen/xai-grok-sandbox/ crates/codegen/xai-grok-shell/src/config/mod.rs`. The previous row's only stated divergence is **dead**: 1.0.5's `--help` *does* expose `du`/`disk-usage` (checked on the installed binary). |
 | Flag inventory (replaces the old "43 visible flags" claim) | The old line "all 43 visible `PagerArgs` flags match `--help` 1:1" is **dropped**. Not because the arithmetic broke — `grok --help \| grep -cE '^\s+(-[a-zA-Z], )?--'` returns **41** on 1.0.5, and 41 + the 2 newly-hidden memory flags reconstructs the old 43 — but because the old line recorded no counting method, which makes the number unfalsifiable, and as written it no longer matches `--help` on the binary we run. (Method recorded here so the next pass can at least reproduce *this* number.) Scoped, verified replacement: the `8a14c91..9fabade` `cli.rs` diff **adds and removes no visible `PagerArgs` flag** — it only sets `hide = true` on `--experimental-memory` / `--no-memory` (visible 43 → 41). The "visible `PagerArgs`" scoping is load-bearing: the same diff *does* add two flags outside that scope — hidden `--trigger` and `--auto` on the `grok update` subcommand, which the plugin never invokes. |
 | Contract files | `crates/codegen/xai-grok-pager/src/app/cli.rs`, `.../src/headless.rs`, **`.../src/headless/cli.rs`** (`OutputFormat`, `parse_json_schema`, `parse_permission_rules_strict`, prompt-file parsing — moved out of `headless.rs`), **`.../src/headless/reducer/{mod,acp}.rs`** (the NDJSON emitter), `.../xai-grok-sandbox/src/{profiles,lib,hook_write_deny}.rs`, `.../xai-grok-shell/src/config/mod.rs` (sandbox startup gate) |
-| Verdict | **should-upgrade** (2026-08-23, binary `1.0.0 → 1.0.5`): nothing we send is rejected and nothing we read was renamed — `headless/cli.rs` and `headless/reducer/` are **byte-identical** across `8a14c91..9fabade`, so Part 2 has zero drift — but four *pre-existing* defects surfaced and were fixed, plus a Part 1/Part 3 anchor refresh and the newly-wired `/grok:image` surface. See the newest Audit-log row. *(Superseded 2026-08-09 verdict, kept for continuity: `--sandbox read-only` gained a fail-closed startup gate while its enforcement stayed fail-open, and the plugin documented neither correctly — fixed in `0.6.0`.)* |
+| Verdict | **should-upgrade** (2026-08-23, binary `1.0.0 → 1.0.5`): nothing we send is rejected and nothing we read was renamed — `headless/cli.rs` and `headless/reducer/` are **byte-identical** across `8a14c91..9fabade`, so Part 2 has zero drift — but four *pre-existing* defects surfaced and were fixed, plus a Part 1/Part 3 anchor refresh and the newly-wired `/grok:image` surface. **A second pass the same day** (independent Codex review of the first pass's commits, every claim re-verified by the host against the bytes) then **deleted the auth preflight the first pass had just hardened** — grok's headless path fails closed on its own (Part 4) — corrected `classifyError` again (403 out of `auth`, the failed-resume token narrowed, the bare `relay` token dropped), and hardened `/grok:image`'s success gate. See the two newest Audit-log rows. *(Superseded 2026-08-09 verdict, kept for continuity: `--sandbox read-only` gained a fail-closed startup gate while its enforcement stayed fail-open, and the plugin documented neither correctly — fixed in `0.6.0`.)* |
 
 ---
 
@@ -346,8 +346,15 @@ everything the verb depends on is engine contract that the next pass has to re-d
 
 - **Grok Imagine / `image_gen` — WIRED as of 2026-08-23 (`/grok:image`).** Not a companion verb:
   `commands/image.md` drives the existing `task` verb with a canned prompt (`--no-subagents
-  --json`, foreground, `timeout: 600000`), and grok's own shell does the `cp` out of its
-  `0700` session folder. All anchors read at `9fabade` (= installed `1.0.5`):
+  --json`, foreground, `timeout: 600000`), and **grok's own shell is asked to do the `cp`** out of
+  its session folder. **Why that copy, stated correctly (2026-08-23, second pass):** for
+  convenience and sandbox-independence — grok already knows the absolute path it just wrote and
+  can copy it whatever profile the run used. **Not** for permissions: the images directory is
+  chmod `0700` on unix, but only at creation time (`storage.rs:64-71`), and `0700` is owner-rwx —
+  it does not stop the *same OS user* from reading the file, which is exactly what the verb's own
+  recovery step does. Anything implying the file is unreachable afterwards is overstated; so is
+  "a path outside cwd necessarily fails", which nothing supports with the sandbox off (the
+  resolved default is `off` — Part 3). All anchors read at `9fabade` (= installed `1.0.5`):
   - **Registration / gate.** `builder.rs:741` pushes `ImageGenTool` when
     `image_gen_config.image_gen_enabled()`; the tool's own `requires_expr` is `Expr::True`
     (`image_gen/mod.rs:405-407`). Resolution is
@@ -355,7 +362,10 @@ everything the verb depends on is engine contract that the next pass has to re-d
     (`xai-grok-shell/src/agent/config.rs:2648-2656`, `.default(true)` exactly at `:2655`), with
     the remote `imagine_tool_disabled` kill switch short-circuiting to `false` first
     (`:2641-2647`) and a **managed requirement pin** outranking even that
-    (`:2638-2640`, field decl `requirements.image_gen: Constrained<bool>` `:609`). There is **no
+    (`:2638-2640`, field decl `requirements.image_gen: Constrained<bool>` `:609`) — the whole
+    precedence chain, pin included, was **re-read byte-for-byte on the second 2026-08-23 pass**;
+    `resolve_image_gen` states it in its own doc comment ("requirement > env > `[features]` >
+    remote > default", `:2631-2635`). There is **no
     `AgentMode::Headless` gate anywhere in the chain** — which is the whole reason the verb can
     exist. Verified disablers, then: `GROK_IMAGE_GEN`, `[features] image_gen`, remote
     `imagine_tool_disabled`, and a managed requirement pin. *(The pin is anchored above; its
@@ -379,8 +389,15 @@ everything the verb depends on is engine contract that the next pass has to re-d
     `storage.rs:168`, which is inside that file's `#[cfg(test)] mod tests` — the `cfg(test)` at
     `storage.rs:161`) and `save()` is called with
     `ext_override = None` (`:468-472`), writing whatever base64 the API returned (`:259-273`).
-    Hence the verb's pass/fail gate is "file exists and is non-empty", with JPEG magic bytes a
-    **warning only**.
+    Hence the verb's pass/fail gate cannot key on the extension, and JPEG magic bytes stay a
+    **warning only**. **Tightened 2026-08-23, second pass:** "exists and is non-empty" was too
+    loose to be a gate — a bare `test -s` also passes on a *stale* file left by an earlier run and
+    on a *directory*, so a failed generation could report success. The gate is now
+    `test -f && test -s` (regular file, non-empty) with **freshness supplied by requiring the
+    output path not to exist beforehand** — no mtime or inode bookkeeping to get wrong. Same pass
+    narrowed the tier triage: scanning the whole job log for the upsell substring also matched
+    **the user's own prompt text**, so the triage reads the **completed `image_gen` tool result**
+    instead.
   - **LIVE-VERIFIED 2026-08-23 against real `grok 1.0.5`** (one generation: 35s, exit 0,
     431,791-byte JPEG, magic `ff d8 ff`). Observed, not inferred: `image_gen` is listed in the
     `available_commands` line of a headless run (registration proven on the path we use, not just
@@ -460,31 +477,74 @@ everything the verb depends on is engine contract that the next pass has to re-d
   `du … [aliases: disk-usage]`. The old "not even in the shipped binary" was true of `1.0.0` and
   is now dead; the skip stands on its own merits, not on absence), `export`, `sessions`, `trace`,
   `models`, `doctor`, `inspect`, `update`, `plugin`, `worktree`.
-- **`GROK_AUTH_PATH` — CONSUMED, not inherited (row corrected 2026-08-23).** Env override for
-  the auth file, independent of `GROK_HOME`: real consumer `xai-grok-shell/src/auth/manager.rs:311`
-  (comment `:306-310`, falling back to `grok_home.join("auth.json")` `:313`). *(The old pin
-  `cli_models.rs:103/112` is superseded — those lines are now `:120`/`:129` and are `EnvGuard`
-  **test** support, not the production read.)* The row used to say "we delegate auth to the CLI
-  and don't need it today". **Disproven:** the plugin's own preflight is what consumes auth
-  presence and **hard-refuses the launch**, so a new auth source is a *plugin* change, never a
-  free CLI inheritance. `hasGrokAuth` (`grok-companion.mjs:101-105`) now checks
-  `XAI_API_KEY \| GROK_CODE_XAI_API_KEY \| GROK_AUTH` (`AUTH_ENV_KEYS`, `:94`) plus the file at
-  `GROK_AUTH_PATH ?? $GROK_HOME/auth.json ?? $HOME/.grok/auth.json` (`grokAuthFile`, `:79-83`),
-  matching grok's own order: `read_xai_api_key_env` prefers `XAI_API_KEY` then the legacy
-  `GROK_CODE_XAI_API_KEY` (`xai-grok-shell/src/agent/auth_method.rs:26-38`), and inline
-  `GROK_AUTH` JSON is the highest-priority source of all (`auth/manager.rs:315-328`). Without a
-  hit the companion refuses before spawning (`:265-268`) rather than letting a headless run block
-  on a device-code URL until the 1 h job timeout.
-  - **`GROK_DEPLOYMENT_KEY` is deliberately EXCLUDED.** `resolve_credentials`
-    (`xai-grok-shell/src/agent/config.rs:4796-4825`: BYOK `own_credential` → cached provider
-    token → session key → `XAI_API_KEY` env) never consults it — it authenticates grok's
-    backend/management calls, not model sampling. Honouring it would wave a deployment-key-only
-    user straight into the device-code hang the preflight exists to prevent.
-  - **`GROK_BIN` no longer skips the preflight** — that was a real bypass: a real-binary
-    `GROK_BIN` install (a production override, `cmdSetup` probes it and `adapter.mjs` spawns it)
-    silently lost the guard. The only escapes now are the in-process fake seam
-    (`deps.binaryArgv`, i.e. tests/e2e which own their auth) and an explicit
-    `GROK_SKIP_AUTH_PREFLIGHT=1` (`authPreflightNeeded`, `grok-companion.mjs:111-113`).
+- **Auth — grok's headless path FAILS CLOSED, so the plugin inherits it for free
+  (row re-inverted 2026-08-23, second pass).** This row has now been written three ways; the
+  history is the lesson, so it is kept.
+  1. Originally: "we delegate auth to the CLI and don't need it today."
+  2. First pass 2026-08-23 called that **disproven**, because the plugin's own preflight
+     consumed auth presence and hard-refused the launch — so a new auth source would be a
+     *plugin* change, not a free CLI inheritance.
+  3. **Second pass 2026-08-23: reading (1) was right and (2) was wrong.** The correction
+     reasoned from *the plugin's guard*, never from *the engine* — and the engine settles it.
+     The preflight was written to prevent a headless run blocking on a device-code URL until
+     the 1 h job timeout, and **that hang does not exist on the binary we run.** So the guard
+     was deleted; auth detection survives only as `/grok:setup`'s **advisory** report
+     (`cmdSetup` in `grok-companion.mjs` — it prints what it found and never blocks).
+
+  **Engine evidence, all read at `9fabade` (= installed `grok 1.0.5`):**
+  `xai-grok-pager/src/headless.rs` fn `authenticate` is documented "failing closed when none is
+  available" (`:459`); it bails when no eager method exists (`:466-472`, message from
+  `auth_required_message` `:445-457`) and bails again if the selected method
+  `needs_interactive_login()` (`:475-479`), under the comment "Prefer non-interactive methods
+  only; interactive login is not usable headless." (`:474`). Its call site turns that into a
+  stdout `error` line and returns `Err` (`:889-902`, `emitter.on_error` `:899`), which `main`
+  prints as `Error: …` on **stderr** and `exit(1)` (`xai-grok-pager-bin/src/main.rs:1901-1908`).
+  The non-interactive message is *"Not signed in. To authenticate without a browser, run: grok
+  login --device-code … Alternatively, set the XAI_API_KEY environment variable …"* (`:451-455`).
+  **Consequences we rely on:** an unauthenticated headless run dies in seconds with a
+  self-explanatory reason on both streams — never a hang — and the reason lands in
+  `classifyError`'s `auth` bucket, since the message contains "authenticate" (the bucket matches
+  `authenticat`) and `XAI_API_KEY`. Nothing plugin-side has to detect auth to get that.
+
+  **Why the guard was a net negative** (host-verified against its own logic — env truthiness plus
+  a bare `fs.existsSync`): it **false-refused valid setups** — a per-model `api_key`/`env_key` in
+  grok's config (`resolve_credentials`' first tier, below), an unset `HOME`, an empty
+  `GROK_AUTH_PATH` — and **accepted credentials grok cannot use**: `GROK_AUTH=garbage` (grok
+  parses it as JSON and falls back, `auth/manager.rs:316-328`), a zero-byte auth file, or a
+  *directory* at that path. A guard that both refuses working setups and waves through broken
+  ones is worse than the engine's own error.
+
+  **`GROK_AUTH_PATH` itself is real and unchanged** — env override for the auth file, independent
+  of `GROK_HOME`: `xai-grok-shell/src/auth/manager.rs:311` (comment `:306-310`, falling back to
+  `grok_home.join("auth.json")` `:313`), resolved *before* the `GROK_AUTH` branch so inline
+  credentials persist refreshes to the same path. *(The old pin `cli_models.rs:103/112` stays
+  superseded — those lines are now `:120`/`:129` and are `EnvGuard` **test** support, not the
+  production read.)* grok's own source order, for anyone who needs to reason about it again:
+  inline `GROK_AUTH` JSON first (`manager.rs:315-328`), then the file at
+  `GROK_AUTH_PATH ?? $GROK_HOME/auth.json`, with `XAI_API_KEY` then legacy
+  `GROK_CODE_XAI_API_KEY` read by `read_xai_api_key_env` (`agent/auth_method.rs:36-38`, consts
+  `:26` / `:30`). **We consume none of it** — this list exists so the next pass does not
+  re-discover it, not because the plugin reads it.
+  - **`GROK_DEPLOYMENT_KEY` — not an auth source we can reason about, and moot for the plugin.**
+    It is grok's **management** API key (`xai-grok-shell/src/agent/config.rs:186-189` "Management
+    API key for enterprise deployments. Sent on telemetry and service requests for
+    deployment-level attribution", read from env at `:554`; resolved for managed-config calls by
+    `resolve_deployment_key`, `managed_config.rs:453-471`, which also accepts `[endpoints]
+    deployment_key` from config). It does **not** appear in sampling credential resolution:
+    `resolve_credentials` (`agent/config.rs:4796-4825`, priority comment `:4794-4795`) goes BYOK
+    `own_credential` → cached auth-provider token → session key → `XAI_API_KEY` env, and never
+    consults it. **So whether a deployment-key-only setup can complete a headless task is
+    UNTESTED** — the earlier justification ("it would walk the user into a device-code hang") is
+    dead with the hang. With no preflight, the plugin no longer takes a position either way:
+    grok either authenticates or fails closed as above.
+  - **`GROK_BIN` and `GROK_SKIP_AUTH_PREFLIGHT` — historical, deleted with the guard.** For one
+    day the doc recorded that `GROK_BIN` had bypassed the preflight (a real bypass while the
+    guard existed: a real-binary `GROK_BIN` install is a production override that `cmdSetup`
+    probes and `adapter.mjs` spawns) and that the escapes were the in-process fake seam
+    (`deps.binaryArgv`) plus `GROK_SKIP_AUTH_PREFLIGHT=1`. All of that is gone: there is no
+    preflight to bypass, and **`GROK_SKIP_AUTH_PREFLIGHT` is read by no code path any more** (it
+    survives only as history in `plugins/grok/CHANGELOG.md`) — do not reintroduce it in a doc, a
+    test or a README. `GROK_BIN` itself is untouched and still a supported production override.
 
 ---
 
@@ -496,16 +556,57 @@ kinds. Buckets used to be justified only by "verified by running `0.2.93` (2026-
 how one of them stayed **dead** for a month. Anchors and a re-check recipe now live here so the
 next pass diffs instead of re-guessing.
 
-| Bucket | Adapter test | Upstream source of the strings | Evidence class |
-| --- | --- | --- | --- |
-| `config` (sandbox refusal) — matched **FIRST**, above every bucket | `adapter.mjs:340` `/refusing to start/i` | `xai-grok-shell/src/config/mod.rs:1435-1438`, `:1461-1466`, `:1500-1505`, `:1513-1516` (all four carry the phrase) | `strings -a` on 1.0.5 ✓; never triggered |
-| `auth` | `:342` | Carried forward from a **live 0.2.93 run** (2026-07-16); not re-proven since | behavioural, stale |
-| `quota` | `:343` | Same live-0.2.93 provenance | behavioural, stale |
-| `config` (bad model/effort, unsatisfiable schema, failed resume) | `:355` | `headless.rs:684` (`--effort/--reasoning-effort: …`), `:559` (`Session does not exist`), `app/session_startup.rs:1285` / `:1288` (`Failed to restore session from remote…`), `headless.rs:270-280` (`model did not produce structured output`) | source ✓ |
-| `endpoint` tier 1 — Node/undici codes | `:381` | **Nothing in grok.** Kept only for a spawn-level failure in *our own* Node process | source ✓ (see below) |
-| `endpoint` tier 2 — grok's real prose | `:382` | `xai-grok-sampling-types/src/error.rs:593-617` `status_user_message` (HTTP 502-504 / 529 / 520-524+530 / 525-526 / other 5xx sentences), `:179` (`reqwest error stream: …`); `xai-grok-shell/src/sampling/error.rs:101` `OVERLOADED_USER_MESSAGE`, `:119-121` (`http client init failed: {e}`) | source ✓ + `strings -a` on 1.0.5 ✓ |
-| `not-installed` | `:383` | exit 127 / `ENOENT` from our own spawn | ours |
-| `config` (weak sandbox word-net) — matched **LAST** | `:389` | wording-change fallback for the refusal above | deliberate belt-and-braces |
+**Order is part of the contract.** `classifyError` returns on first match, and several of grok's
+strings satisfy two regexes, so the table below is written **in evaluation order** — re-ordering it
+is a behaviour change, not a tidy-up. Adapter pins re-read 2026-08-23 (second pass) against the
+landed `adapter.mjs`; the first pass's pins were ~6 lines stale within a day, which is why every
+row also names its regex token.
+
+| # | Bucket | Adapter test | Upstream source of the strings | Evidence class |
+| --- | --- | --- | --- | --- |
+| 1 | `config` (sandbox refusal) — **FIRST**, above every bucket | `adapter.mjs:341` `/refusing to start/i` | `xai-grok-shell/src/config/mod.rs:1435-1438`, `:1461-1466`, `:1500-1505`, `:1513-1516` (all four carry the phrase) | `strings -a` on 1.0.5 ✓; never triggered |
+| 2 | `not-installed` — **SECOND** (moved up 2026-08-23, second pass) | `:351` exit 127 / `/command not found\|ENOENT/i` | Our own spawn, not grok. It must outrank the prose buckets because the string here is the spawn error verbatim (`spawn /opt/relay/grok ENOENT`) and it embeds a **user-controlled PATH** — any bucket matching a substring of that path steals a missing binary | ours |
+| 3 | `auth` | `:367` (`401`, `unauthorized`, `authenticat`, `XAI_API_KEY`, `grok login`, …) | Widened from a **live 0.2.93 run** (2026-07-16). Newly source-backed this pass: grok's own headless no-auth message ("Not signed in. To authenticate without a browser … set the XAI_API_KEY environment variable", `headless.rs:445-457`) lands here via `authenticat` + `XAI_API_KEY`. **`forbidden`/403 was REMOVED** — see the traps below | behavioural (stale) + source ✓ for the no-auth message |
+| 4 | `quota` | `:375` (`429`, `rate limit`, `quota`, **`requires a grok subscription`**) | Same live-0.2.93 provenance, plus the one 403 that IS an entitlement limit. **Production anchor is the match pattern**, `xai-grok-shell/src/sampling/error.rs:134` (`message.contains("requires a Grok subscription")`, inside the `StatusCode::FORBIDDEN` arm) — *not* the sentence "The model 'grok-build' requires a Grok subscription." at `:696`, which is a fixture inside `#[test] forbidden_subscription_error_includes_api_key_hint_when_env_set` (`:690-700`); cite that test as what **pins** the wording, the way Part 4 already distinguishes `image_gen/mod.rs:150` from `storage.rs:168` | behavioural (stale) + source ✓ for the subscription 403 |
+| 5 | `endpoint` tier 1 — Node/undici codes | `:408` (`ENOTFOUND`, `ECONNREFUSED`, `ETIMEDOUT`, `fetch failed`) | **Nothing in grok.** Kept only for a transport failure in *our own* Node process. The bare **`relay`** token that used to sit here is **GONE** (second pass) — it stole `spawn /opt/relay/grok ENOENT` from `not-installed`, and grok only ever says "relay" about session-**share** connections (`xai-grok-shell/src/extensions/notification.rs:1218-1229`), never in headless failure prose | source ✓ |
+| 6 | `endpoint` tier 2 — grok's real prose | `:409` | `xai-grok-sampling-types/src/error.rs:593-617` `status_user_message` (HTTP 502-504 / 529 / 520-524+530 / 525-526 / other 5xx sentences), `:179` (`reqwest error stream: …`); `xai-grok-shell/src/sampling/error.rs:101` `OVERLOADED_USER_MESSAGE`, `:119-121` (`http client init failed: {e}`) | source ✓ + `strings -a` on 1.0.5 ✓ |
+| 7 | `config` (bad model/effort, unsatisfiable schema, failed resume, **403 policy denial**) — now **AFTER** endpoint | `:427` | `headless.rs:684` (`--effort/--reasoning-effort: …`), `:559` (`Session does not exist`), `app/session_startup.rs:1285` / `:1288` (`Failed to restore session from remote…`), `headless.rs:270-280` (`model did not produce structured output`); `forbidden`/`HTTP 403` per `xai-grok-shell/src/sampling/error.rs:127-136` | source ✓ |
+| 8 | `config` (weak sandbox word-net) — **LAST** | `:434` (`bwrap`, `bubblewrap`, `write-deny`, `sandbox profile`, `sandbox deny`) | wording-change fallback for row 1's refusal | deliberate belt-and-braces |
+
+**Three ordering decisions that are load-bearing** (each was a real mis-bucketing, fixed
+2026-08-23 second pass):
+- **`not-installed` before the prose buckets** (row 2). The input can be a spawn error containing
+  a user-chosen path; a `GROK_BIN` under `/srv/relay`, `/tmp/quota` or `/opt/ENOENT` was being
+  labelled by its *directory name*.
+- **`endpoint` before `config`** (rows 6 → 7). grok's resume-failure prose **embeds** the
+  transport failure that caused it — "Failed to restore session from remote: Grok is temporarily
+  unavailable. (HTTP 503)". That run failed because the endpoint was down, not because the user
+  named a bad session. Safe in the other direction because `classifyError` sees **one** string
+  (`spawnError || adapter error || stderrTail`, `shared/lib/runtime/worker.mjs`) and every
+  remaining `config` token is a purely local decision grok makes without issuing a request, so
+  none can co-occur with 5xx prose.
+- **403 is not `auth`** (rows 3/4/7). Upstream says it in as many words: "403 Forbidden is NOT an
+  auth error — the request was authenticated, but the action is not permitted (content-safety
+  blocks, ZDR-gated operations, remote-settings-blocked users)"
+  (`xai-grok-shell/src/sampling/error.rs:127-132`, mapping it to `internal_error` at `:133+`
+  *precisely* so the client does not run its re-auth flow), pinned by a regression test
+  `forbidden_is_not_auth_error` (`xai-grok-sampling-types/src/error.rs:1197-1219`, assert message
+  "403 Forbidden must not be treated as an auth error" `:1217`). Telling a user to fix a login
+  that is already fine is the worst kind of wrong label. The split: the **entitlement** 403
+  ("requires a Grok subscription") → `quota`, everything else → `config` (the fix is to change
+  the request). One deliberate exception, and it is correct: when the user also has an API key
+  set, upstream appends "You have an API key set (XAI_API_KEY) … run `grok logout`"
+  (`shell/sampling/error.rs:134-141`) and row 3 claims that variant first — there the fix really
+  is auth state.
+
+**Those three orderings were RUN, not reasoned** (2026-08-23, second pass — feeding real upstream
+sentences to the landed `classifyError`): grok's no-auth message → `auth`; a content-policy
+`Forbidden … (HTTP 403)` → `config`; `The model 'grok-build' requires a Grok subscription.` →
+`quota`; `spawn /srv/relay/grok ENOENT` → `not-installed`; `Failed to restore session from remote:
+Grok is temporarily unavailable. (HTTP 503)` → `endpoint`; `Authentication temporarily unavailable`
+→ `auth`. This is the first time any part of Part 5 has behavioural evidence newer than the live
+`0.2.93` run — the `auth`/`quota` *widenings* are still only as good as that 2026-07-16 run, but
+the **routing** of the six strings above is now pinned by execution.
 
 **The `endpoint` bucket was DEAD against the engine we ship against.** Its only regex matched
 Node/undici codes — `ENOTFOUND` / `ECONNREFUSED` / `ETIMEDOUT` / `fetch failed` / `relay` — and
@@ -517,18 +618,28 @@ comments and tests (`xai-file-utils/src/storage_client.rs:2593`, `xai-grok-mcp/s
 `git show 8a14c91:crates/codegen/xai-grok-sampling-types/src/error.rs | grep -n 'fn status_user_message'`
 → line `464`, i.e. the prose was already there at the baseline this bucket was last blessed on.
 Both regexes are fixed in this change: tier 1 stays (a real `spawn ENOENT` still comes from our
-Node process), tier 2 carries grok's actual sentences.
+Node process), tier 2 carries grok's actual sentences. **Second pass:** tier 1 also **lost its
+`relay` token** — the one Node-code alternative that was not a Node code at all, and the one that
+stole a missing binary from `not-installed` (row 2).
 
 **Two traps worth writing down** — both are one-word mistakes that silently mis-bucket:
 1. Use the **full** phrase `grok is temporarily unavailable`, never a bare
-   `temporarily unavailable`. The binary also carries **"Authentication temporarily
-   unavailable"** (`strings -a` ✓), which the `auth` bucket does **not** catch — its net has
-   `authenticate`, and "authenticate" is not a substring of "Authentication" — so the short token
-   would steal an auth-service failure into `endpoint`.
+   `temporarily unavailable`. The binary also carries **"Authentication temporarily unavailable"**
+   (`xai-grok-pager/src/app/error_display.rs:230`, the `WireErrorType::AuthTransient` arm
+   `:229-232`; `strings -a` ✓). **Stale-claim correction, 2026-08-23 second pass:** this trap used
+   to say the `auth` bucket does *not* catch that string ("authenticate" is not a substring of
+   "Authentication"). That has been false since the same-day first pass, which widened the token to
+   **`authenticat`** — case-insensitively that *does* match "Authentication", and `auth` is
+   evaluated before `endpoint`, so the string is claimed correctly. The full-phrase rule therefore
+   is now belt-and-braces rather than load-bearing — **keep it anyway**: a bare
+   `temporarily unavailable` would also swallow any other "<subsystem> temporarily unavailable"
+   prose upstream adds.
 2. Do **not** match `not found locally, restoring conversation from remote`
-   (`app/session_startup.rs:1134`; in the shipped binary too, `strings -a` ✓). grok prints it even when the remote restore **succeeds**, and
-   `config` is tested before `endpoint`, so matching it would steal a genuine endpoint failure
-   from the same run.
+   (`app/session_startup.rs:1134`; in the shipped binary too, `strings -a` ✓). grok prints it even
+   when the remote restore **succeeds**, so matching it would relabel any later failure in the same
+   run as a resume problem. *(The 2026-08-23 first pass justified this by "`config` is tested
+   before `endpoint`" — that ordering is now **reversed** (see row 6 → 7 above), and the trap
+   stands on its own without it.)*
 
 Also deliberately unmatched: grok's idle timeout (`No response from model for {n}s — the model
 may be stuck`, `xai-grok-shell/src/sampling/error.rs:180-182`). The `timeout` kind already has an
@@ -563,4 +674,5 @@ until someone does one they stay flagged stale in the Baseline block.
 | 2026-07-24 | `~/research/grok-build` @ `c68e39f` (same tree, re-verified) + released `grok 0.2.111` | **none** | Wired `-s`/`--session-id` (`cli.rs:582`, adopted in headless at `headless.rs:608/617`) so a session id is minted client-side (`crypto.randomUUID()`) and persisted into the job record's `request` BEFORE the engine spawns — a worker crash mid-run (no `end` event) no longer loses the id needed to `-r`/`--resume`. Sent only for a brand-new conversation; always mutually exclusive with `-r` (grok rejects `--session-id` + `--resume` without `--fork-session`, which this plugin never passes). Local released binary `grok 0.2.111 --help` cross-checked the flag exists. **[Anchor note added 2026-08-23, verdict unchanged]** at `9fabade` the flag decl is `cli.rs:601` and the headless wiring `headless.rs:530` (param) / `:537` (consumed), not `608`/`617`. |
 | 2026-07-24 | (same tree, wave 2) | **none** | Wired three more opt-in flags: (1) **`--research`** → `--tools x_search,web_search,web_fetch --deny MCPTool` — `--tools` (`cli.rs:620`) is an **authoritative** allowlist (`apply_to_definition` overwrites `def.tools` outright, `config.rs:1564-1573`/`1576-1587`; hosted-tool gate `hosted_tool_allowed`, `xai-grok-agent/src/config.rs:1349-1357`, canonical names `builder.rs:1175-1182`/`conversation.rs:495`), stronger than `--sandbox read-only`'s best-effort FS guarantee; MCP tools are NOT proven covered by `--tools` (headless always loads user MCP servers, `headless.rs:615/660`), so `--deny MCPTool` (`cli.rs:476`) rides along as a cooperative backstop only — documented as two distinct guarantee tiers, not conflated. (2) **`--max-turns <n>`** (`cli.rs:627`, clap range `1..`) as a runaway-cost fuse for unattended background jobs. (3) **`--no-memory`** (`cli.rs:611`, `conflicts_with=experimental_memory`, never sent) so a one-off delegated task doesn't touch the user's cross-session grok memory. All three are per-invocation behavior flags (not session identity) — orthogonal to `--read-only`/`--no-subagents`/resume, no mutual exclusion needed; verified against the same `c68e39f` tree, no drift. **[Correction added 2026-08-23 — verdict left as written]** item (3) was **wrong on the day it was written**, and this is a DOC defect, not upstream drift: `git show c68e39f:crates/codegen/xai-grok-pager/src/headless.rs` already hardcoded `cli_experimental_memory: false, cli_no_memory: false` at lines `878-879` (the old field shape, same effect), and `8a14c91` the same at `795-796`. So `--no-memory` never reached headless on any tree this doc has audited; the flag was inert from the moment it was wired. Fixed 2026-08-23 by injecting `GROK_MEMORY=0` into the spawn env — see the Part 1 `--no-memory` row. |
 | 2026-08-09 | `8a14c91` / `SOURCE_REV 27b3c666` / pager-bin `1.0.0` (released `grok 1.0.0`) | **should-upgrade** → fixed in plugin `0.6.0` | First audit since the `0.2.111 → 1.0.0` jump (10 public releases in 16 days; 23 tree syncs since `c68e39f`). Method: 6 parallel source-grounded dimensions + adversarial refutation of every actionable finding; one finding (capture `num_turns`/`total_cost_usd`) was refuted and dropped as already-deliberate. **1.0.0 is NOT a breaking major** — upstream's own `xai-grok-shell/CHANGELOG.md` (which this doc had never noticed) records zero `breaking_change: true` for it. **No contract breakage:** all 17 flags present with identical names/aliases/enums/conflict sets, verified against source AND verbatim `--help` AND a parse-only run of the real binary; every field we read survived the `headless/reducer/` refactor byte-for-byte (`rename_all="snake_case"` renames variants, not fields), `usage` keys still snake_case, all new line types tolerated. **The real find: `--sandbox read-only` gained a fail-closed STARTUP gate while its ENFORCEMENT stayed fail-open** (`hook_write_deny.rs`, added upstream in `69f0ba8`) — see Part 3 caveat 2a/2b; four plugin surfaces promised plain fail-open and are corrected, `classifyError` gained a `config` bucket for the refusal, and bubblewrap is now documented as a Linux prerequisite. **TWO rounds of independent Codex review (session `019fe6d7`) were needed, and each caught a real defect in the previous round's fix** — recorded here because the failure mode repeated: round 1 caught the first draft collapsing 2a/2b into a flat "fails CLOSED" (an overstatement in the dangerous direction — bwrap binds `/` read-write and a kernel without Landlock runs writable); round 2 caught that even the corrected 2a/2b **still** over-generalised by omitting **2c (Windows: stub `apply`, no refusal compiled, so no enforcement at all)**. Round 1 also found: the `structuredOutputError` branch returned a bare error event, discarding `sessionId`/`usage` (job unresumable, cost unrecorded); a bare `/sandbox/` alternative in `classifyError` stole `not-installed`; the E2BIG test pinned 131072 (wrong on 64 KiB-page kernels); and the prompt-file test never ran the worker. Round 2 found: `classifyError`'s sandbox check still preceded `endpoint`/`not-installed`, so `GROK_BIN=/opt/bwrap/grok` → `spawn … ENOENT` was still stolen (fixed with two tiers: the unambiguous `Refusing to start` phrase matched **first**, above every bucket, because the refusal text embeds user-controlled paths verbatim — a hooks-path of `/tmp/quota` would otherwise read as a quota error; the broad word-net stays **last** as a wording-change fallback, since those words also appear in ordinary paths); the `ponytail:` comment recorded the wrong-`error` problem instead of fixing it (fixed by adding an optional `error` to the `extractResult` contract in `shared/lib/`, which the worker now prefers over `stderrTail` — additive, no other adapter sets it); and the new worker test used a 400 KB prompt that a 64 KiB-page kernel would pass with the swap disabled, while the fake's 60-char echo could not detect a truncated prompt (fixed: 3 MiB prompt + an exact byte-count assertion; verified to fail when the swap is disabled). Also fixed: `--effort` advertised 4 tokens (`none\|minimal\|xhigh\|max`) that grok-4.5's catalog rejected at runtime. **[Correction added 2026-08-23 — the replacement claim rotted in 14 days]** this row (and Part 1) then asserted the catalog "offers only `low\|medium\|high`". On 2026-08-23 the live cache (`~/.grok/models_cache.json`, `fetched_at 2026-08-23T03:36:51Z`, `grok_version 1.0.5`, `origin https://cli-chat-proxy.grok.com/v1/models`) holds **`grok-4.6`** with `reasoning_efforts` `[xhigh, high (default), medium, low]`, `hidden: false`, alongside `grok-4.5` with `[high (default), medium, low]`. **The durable rule replaces the enumeration everywhere: effort levels are per-model and remote, and `grok models` is the only authority** — do not write a level list into this doc, the plugin, or a fixture; a `--json-schema` run with no structured output exited 0 and returned un-schema'd prose (now fails via `structuredOutputError`); `commands/task.md` advertised a nonexistent model id `grok-composer-2.5-fast`; the inline-prompt `ponytail:` comment named ARG_MAX (~2MB) when the real ceiling is MAX_ARG_STRLEN (131071 B — measured 131071 ok / 131072 `spawn E2BIG`), reachable via `/grok:task --prompt-file`, so oversized prompts now swap to `--prompt-file <jobDir>/prompt.txt`; and `tests/grok/fake-grok.mjs` still emitted CamelCase `stopReason` where 1.0.0 emits snake_case — a green suite against fiction. **Bookkeeping correction:** `.git/logs/HEAD` proves the local clone was never fetched between the 2026-07-16 clone and 2026-08-02, so the 2026-07-24 rows' "same commit, no upstream drift" was really "never fetched" — upstream had shipped 8 syncs by then, and the fail-closed switch was already live. The clone's previous HEAD `a422116` was likewise never audited, so this pass diffed from `c68e39f`; `a422116..HEAD` hides both `headless/reducer/` and `hook_write_deny.rs`. Step 0 of "How to keep this current" now forces a fetch. |
-| 2026-08-23 | `8a14c91` → **`9fabade`** (the installed binary) / released `grok 1.0.0` → `grok 1.0.5 (5115b46bc9)`; local HEAD `19d42e3` (1.0.6, contract-identical) | **should-upgrade** → fixed in the working tree (not yet bumped) | First pass since the doc's baseline went stale by five patch releases. **No contract breakage:** no flag we send is rejected (parse-only probe on the real 1.0.5 — control `--definitely-not-a-flag --help` exits `2`, the whole send-argv exits `0`) and nothing we read was renamed — `headless/cli.rs` and `headless/reducer/` are **byte-identical** across `8a14c91..9fabade`, so Part 2 needed no edit at all. **Four PRE-EXISTING defects surfaced and were fixed** (none is new upstream drift): (1) **`--no-memory` is inert in headless** — `-p` → `headless::run_single_turn` hardcodes `memory_enabled_override: None` (`headless.rs:795`), `HeadlessOptions` has no memory field, and the flag's only consumers are the interactive `ConnectFlags` literal (`app/mod.rs:795-796`); now enforced by injecting `GROK_MEMORY=0` into the spawn env (`adapter.mjs:222`), the one precedence tier that beats a user's `[memory] enabled = true` (`config-types/memory.rs:607-612`, `flags.rs:109-136`, upstream test `config/tests.rs:283`). The 2026-07-24 row that wired it was wrong the day it was written — annotated there. (2) **the `endpoint` bucket was DEAD** — it matched Node/undici codes that appear nowhere in grok's Rust source; replaced with grok's real prose (`sampling-types/src/error.rs:593-617`, `shell/sampling/error.rs:101`/`:119-121`), all confirmed in the shipped binary. (3) the `config` bucket did not catch a **failed resume**. (4) the **auth preflight** checked 2 of grok's sources and **`GROK_BIN` bypassed it entirely** — now `XAI_API_KEY \| GROK_CODE_XAI_API_KEY \| GROK_AUTH` plus `GROK_AUTH_PATH ?? $GROK_HOME/auth.json`, with only the in-process fake seam and `GROK_SKIP_AUTH_PREFLIGHT=1` exempt. Plus: a **Part 1 + Part 3 anchor refresh** (Part 1's `cli.rs` pins were off by +8..+16; Part 3's sandbox pins by ~50-70 after upstream's 481-line `config/mod.rs` rewrite — **behaviour unchanged**, the 2a/2b/2c structure survives verbatim), a **new Part 5** giving `classifyError` real anchors and an offline re-check recipe, and a **new Part 4 bullet for `/grok:image`**, which moves Grok Imagine from "not wired" to wired. **Two "MOVED FILE" claims were refuted, not carried forward:** `resolve_write_deny` (already `profiles.rs:43` at baseline) and `resolve_profile` (already `agent/config.rs:1173`) never changed file; the doc's `hook_write_deny.rs:224-229` pin had been pointing at the *callee*. **Claims RE-PROVEN this pass:** every flag parses on 1.0.5; every error string Parts 3/5 key on is in the shipped binary (`strings -a`); the staleness facts (`grok --version`, `--help` exposing `du`, `--help` hiding `--no-memory`); and the contract-file diffs (`9fabade..19d42e3` empty; `image_gen/mod.rs` + `acp_conversion.rs` empty across both ranges). **Claims CARRIED FORWARD unproven:** the `auth`/`quota` buckets (live `0.2.93` run, 2026-07-16 — a version bump does not re-prove them); the sandbox refusal (source + `strings`, never triggered); and the Imagine **tier-restricted** branch (the rest of that surface was live-verified this pass — see Part 4; the tier short-circuit could not fire on a SuperGrok account). **Open product question, not a defect:** upstream's baked default model moved `grok-4.5` → `grok-4.6` (`crates/codegen/xai-grok-models/default_models.json` `"default"`, provable with `git diff 8a14c91 9fabade -- crates/codegen/xai-grok-models/default_models.json`), while the plugin still hardcodes `grok-4.5`. Drift, not breakage: `grok-4.5` is still in the live catalog and we always send an explicit `-m`. That file is deliberately **not** added to the step-1 contract-file list — the CLI's default is not part of a contract we send. |
+| 2026-08-23 | `8a14c91` → **`9fabade`** (the installed binary) / released `grok 1.0.0` → `grok 1.0.5 (5115b46bc9)`; local HEAD `19d42e3` (1.0.6, contract-identical) | **should-upgrade** → fixed in `0.7.0` | First pass since the doc's baseline went stale by five patch releases. **No contract breakage:** no flag we send is rejected (parse-only probe on the real 1.0.5 — control `--definitely-not-a-flag --help` exits `2`, the whole send-argv exits `0`) and nothing we read was renamed — `headless/cli.rs` and `headless/reducer/` are **byte-identical** across `8a14c91..9fabade`, so Part 2 needed no edit at all. **Four PRE-EXISTING defects surfaced and were fixed** (none is new upstream drift): (1) **`--no-memory` is inert in headless** — `-p` → `headless::run_single_turn` hardcodes `memory_enabled_override: None` (`headless.rs:795`), `HeadlessOptions` has no memory field, and the flag's only consumers are the interactive `ConnectFlags` literal (`app/mod.rs:795-796`); now enforced by injecting `GROK_MEMORY=0` into the spawn env (`adapter.mjs:222`), the one precedence tier that beats a user's `[memory] enabled = true` (`config-types/memory.rs:607-612`, `flags.rs:109-136`, upstream test `config/tests.rs:283`). The 2026-07-24 row that wired it was wrong the day it was written — annotated there. (2) **the `endpoint` bucket was DEAD** — it matched Node/undici codes that appear nowhere in grok's Rust source; replaced with grok's real prose (`sampling-types/src/error.rs:593-617`, `shell/sampling/error.rs:101`/`:119-121`), all confirmed in the shipped binary. (3) the `config` bucket did not catch a **failed resume**. (4) the **auth preflight** checked 2 of grok's sources and **`GROK_BIN` bypassed it entirely** — now `XAI_API_KEY \| GROK_CODE_XAI_API_KEY \| GROK_AUTH` plus `GROK_AUTH_PATH ?? $GROK_HOME/auth.json`, with only the in-process fake seam and `GROK_SKIP_AUTH_PREFLIGHT=1` exempt. Plus: a **Part 1 + Part 3 anchor refresh** (Part 1's `cli.rs` pins were off by +8..+16; Part 3's sandbox pins by ~50-70 after upstream's 481-line `config/mod.rs` rewrite — **behaviour unchanged**, the 2a/2b/2c structure survives verbatim), a **new Part 5** giving `classifyError` real anchors and an offline re-check recipe, and a **new Part 4 bullet for `/grok:image`**, which moves Grok Imagine from "not wired" to wired. **Two "MOVED FILE" claims were refuted, not carried forward:** `resolve_write_deny` (already `profiles.rs:43` at baseline) and `resolve_profile` (already `agent/config.rs:1173`) never changed file; the doc's `hook_write_deny.rs:224-229` pin had been pointing at the *callee*. **Claims RE-PROVEN this pass:** every flag parses on 1.0.5; every error string Parts 3/5 key on is in the shipped binary (`strings -a`); the staleness facts (`grok --version`, `--help` exposing `du`, `--help` hiding `--no-memory`); and the contract-file diffs (`9fabade..19d42e3` empty; `image_gen/mod.rs` + `acp_conversion.rs` empty across both ranges). **Claims CARRIED FORWARD unproven:** the `auth`/`quota` buckets (live `0.2.93` run, 2026-07-16 — a version bump does not re-prove them); the sandbox refusal (source + `strings`, never triggered); and the Imagine **tier-restricted** branch (the rest of that surface was live-verified this pass — see Part 4; the tier short-circuit could not fire on a SuperGrok account). **Open product question, not a defect:** upstream's baked default model moved `grok-4.5` → `grok-4.6` (`crates/codegen/xai-grok-models/default_models.json` `"default"`, provable with `git diff 8a14c91 9fabade -- crates/codegen/xai-grok-models/default_models.json`), while the plugin still hardcodes `grok-4.5`. Drift, not breakage: `grok-4.5` is still in the live catalog and we always send an explicit `-m`. That file is deliberately **not** added to the step-1 contract-file list — the CLI's default is not part of a contract we send. **[Annotations added 2026-08-23, second pass — verdict left as written]** (a) this row's verdict cell originally read "fixed in the working tree (not yet bumped)"; those fixes shipped as **`grok@0.7.0`** and the cell was updated to say so — the verdict itself (`should-upgrade`) is untouched. (b) Item **(4)**, the hardened auth preflight, was **DELETED the same day** — an independent Codex review pointed at the engine instead of the plugin, and grok's headless path already fails closed (`headless.rs:459`/`:475-479`), so the 1 h device-code hang the guard existed to prevent cannot happen on the binary we run. See the second-pass row below and the rewritten Part 4 auth block. (c) Item **(2)**'s replacement `endpoint` regex still carried a bare `relay` token that stole `spawn … ENOENT` from `not-installed`, and item (3)'s failed-resume token out-ranked `endpoint` on prose that embeds a 5xx — both corrected in the second pass. |
+| 2026-08-23 (second pass) | `9fabade` (unchanged) / `grok 1.0.5` — **no new upstream diff was run** | **should-upgrade** → fixed on this branch (on top of `0.7.0`) | **The first pass's own commits were reviewed by an independent Codex (gpt-5.6), and the host re-verified every finding against the bytes.** Four real defects, all first-pass regressions or first-pass rationalisations that did not survive contact with the engine. (1) **The auth preflight is DELETED, and the doc's original conclusion is restored.** grok's headless path fails closed on its own — `authenticate` is documented "failing closed when none is available" (`headless.rs:459`), bails when no non-interactive method exists (`:466-472`) and again on `needs_interactive_login()` under the comment "interactive login is not usable headless" (`:474-479`), emitting a stdout `error` line and returning `Err` (`:899-900`) which `main` prints on stderr with `exit(1)` (`pager-bin/src/main.rs:1901-1908`). **So the 1 h device-code hang the guard was written for does not exist on the binary we run**, while the guard itself false-refused valid setups (per-model `api_key`, unset `HOME`, empty `GROK_AUTH_PATH`) and accepted credentials grok cannot use (`GROK_AUTH=garbage`, an empty file, a directory). **The lesson is the reason this doc exists:** the 0.6.0-era row that called "we delegate auth to the CLI" *disproven* was itself wrong, because it reasoned from the plugin's guard instead of from the engine — and one pass shipped a guard on that reasoning. Auth detection survives only as `/grok:setup`'s advisory report (`cmdSetup`). (2) **`classifyError` corrected again:** 403/`forbidden` out of `auth` (upstream is explicit and test-pinned — `shell/sampling/error.rs:127-136`, `sampling-types/error.rs:1197-1219`), the entitlement 403 ("requires a Grok subscription", `shell/sampling/error.rs:696`) into `quota`, the rest into `config`; `not-installed` moved **second** so a `GROK_BIN` path like `/srv/relay` stops being read as prose; the bare `relay` token dropped from `endpoint` tier 1; and `endpoint` moved **before** `config` so a resume failure that embeds "Grok is temporarily unavailable. (HTTP 503)" is bucketed by its real cause. Part 5 is now written in **evaluation order** with per-row regex tokens, because the first pass's adapter line pins went stale within a day. (3) **`/grok:image`'s success gate hardened** — a bare `test -s` also passes on a stale file from an earlier run and on a directory, so the gate now requires a regular, non-empty, freshly-written file; and the tier triage reads the completed `image_gen` tool result instead of grepping the whole log, which was matching the user's own prompt text. (4) **Two overstated claims removed from this doc:** the images directory's `0700` mode (`storage.rs:64-71`, unix, set once at creation) does **not** stop the same OS user from copying the file — the verb's own recovery step does exactly that, so the reason grok's shell does the copy is convenience and sandbox-independence; and "a path outside cwd necessarily fails" is unsupported with the sandbox `off`. **Claims RE-PROVEN this pass** (each anchor opened at `9fabade`): the whole headless auth chain above; `resolve_image_gen`'s precedence including the **managed requirement pin** (`agent/config.rs:2631-2656`, pin `:2638-2640`, field decl `:609`) — already in Part 4 and now byte-verified, with its `requirements.toml` **key spelling** still deliberately NOT claimed; the 403 anchors; `"Authentication temporarily unavailable"` (`app/error_display.rs:229-232`); the relay-share enum (`extensions/notification.rs:1218-1229`); `GROK_AUTH_PATH` / `GROK_AUTH` / `read_xai_api_key_env` (`auth/manager.rs:306-328`, `agent/auth_method.rs:26-38`); and the deployment-key surface (`agent/config.rs:186-189`, `:554`, `managed_config.rs:453-471`, absent from `resolve_credentials` `:4796-4825`). **Claims CARRIED FORWARD unproven:** everything the first pass carried (the `auth`/`quota` buckets' live-`0.2.93` provenance, the sandbox refusal, the Imagine tier-restricted branch) **plus one new one**: whether a **deployment-key-only** setup can complete a headless task is **untested** — the old justification for excluding it (it would walk the user into the device-code hang) died with the hang, and with no preflight the plugin takes no position either way. **Behavioural evidence, new this pass:** the six-string routing check in Part 5 was *run* against the landed `classifyError` (no-auth message → `auth`, policy 403 → `config`, subscription 403 → `quota`, `spawn /srv/relay/grok ENOENT` → `not-installed`, resume-with-503 → `endpoint`, `Authentication temporarily unavailable` → `auth`) — the first behavioural evidence in Part 5 newer than the 2026-07-16 `0.2.93` run. No upstream diff was run this pass: the tree, the binary and Parts 1-3 are the first pass's, unchanged. |

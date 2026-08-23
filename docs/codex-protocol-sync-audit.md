@@ -64,9 +64,9 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 | | |
 |---|---|
 | Codex CLI HEAD | `99660ab3c7` (main @ 2026-08-23; installed binary codex-cli **0.149.0** — still no `rust-v0.149.0` tag, only `release/0.149.0-alpha.*` branches (the nearest tag is `rust-v0.150.0-alpha.7`), so keep pinning diffs to main) |
-| Last re-check | 2026-08-23 (wire-schema diff `646f7c0a91`→main, deletion-only read of the 6 files that have any; durable-checklist re-assertion; `build:codex` against types regenerated from the installed 0.149.0 binary) |
+| Last re-check | 2026-08-23 (wire-schema diff `646f7c0a91`→main, deletion-only read of the 6 files that have any; durable-checklist re-assertion; `build:codex` against types regenerated from the installed 0.149.0 binary). **Second pass same day**, doc-only, no new diff: an independent Codex review found the managed-auto-review anchor overstated, so every `model_auto_review.rs` pin in the checklist was re-read at `99660ab3c7` and proof was split from inference — see the newest Audit-log row. |
 | Last FULL 11-dimension audit | 2026-07-21 @ `d5998e7452` (codex-cli 0.144.6) → `codex@1.3.2` |
-| Plugin version now | `codex@1.5.0` |
+| Plugin version now | `codex@1.6.0` (was `1.5.0` through the 2026-08-23 first pass; bumped when the failed-turn fix landed — `npm run check-version`) |
 | Codex repo checked | `/home/audichuang/research/codex` |
 
 > **2026-08-09 re-check (`57f42a8113` → main `646f7c0a91`, 80 commits, 20 on protocol paths;
@@ -218,26 +218,47 @@ The plugin speaks Codex **app-server v2** over JSON-RPC (`scripts/lib/app-server
 - **thread/start settings:** `{ approvalPolicy:"never", sandbox: resolveSandboxMode() }`
   (`codex.mjs:89-90,102-103`; sandbox defaults to `danger-full-access` because target hosts
   cannot start Codex's bwrap sandbox). Since 0.147.0 (#37511) a **managed** workspace with
-  `auto_review.required_on_models` **silently coerces** exactly this pair at `thread/start` —
-  `on-request` + `auto_review` reviewer, sandbox downgraded to `workspace-write`
-  (`app-server/tests/suite/v2/model_auto_review.rs:119-136`). Sending the same unsafe values on a
-  **thread-settings update or a turn override** is a hard `-32600` "you need to use auto review"
-  (`:166-203`) — the plugin stays on the coerced path only because `turn/start` carries no such
-  fields. Keep it that way. **Re-pinned at `99660ab3c7`** (the anchors above are pinned to this
-  doc's previous baseline `646f7c0a91` and are correct there; upstream has since moved them):
-  the `danger-full-access` coercion case plus its
-  `assert!(matches!(started.sandbox, SandboxPolicy::WorkspaceWrite{..}))` is
-  `model_auto_review.rs:162-180`, the auto-review-disabled hard error `:181-194`, and the hard
-  `-32600` settings-update / turn-override path `:198-258`. **And the open question about
-  `thread/resume` is now closed by upstream:**
-  `thread_resume_and_fork_upgrade_legacy_protected_model_settings`
-  (`model_auto_review.rs:291-378 @ 99660ab3c7`) sends both `thread/resume` and
-  `thread/fork` with the same unsafe pair the plugin sends (`approval_policy = Some(Never)`,
-  `approvals_reviewer = Some(User)`) and asserts `assert_protected_with_policy` — never
-  `assert_error`. So resume/fork are on the **coerce** lane, not the `-32600` reject lane, which
-  means `buildResumeParams` (`codex.mjs:97-105`) is as safe as `thread/start`. (That test sends no
-  `sandbox` field, so `:162-180` remains the only anchor for the sandbox → `workspace-write`
-  downgrade.)
+  `auto_review.required_on_models` **coerces** what we send at `thread/start` instead of
+  rejecting it. **All anchors below re-read at `99660ab3c7` (2026-08-23, second pass) —
+  `app-server/tests/suite/v2/model_auto_review.rs`; the managed requirement under test is
+  `[auto_review] required_on_models = ["protected-model"]`, `:35`.** What the test *proves*,
+  stated no wider:
+  - `thread/start` with `model` = protected, `approval_policy = Never`, `approvals_reviewer =
+    User`, `sandbox = DangerFullAccess` **succeeds**, and asserts the requested `never` is
+    **preserved** while the reviewer becomes `auto_review` and the sandbox is downgraded:
+    `assert!(matches!(started.sandbox, SandboxPolicy::WorkspaceWrite{..}))` (`:162-180`;
+    `assert_protected_with_policy` `:109-119`).
+  - **Correction to this doc's own earlier wording (2026-08-23, second pass):** the coerced
+    policy is **not** always `on-request`. Every explicitly-requested policy survives, `Never`
+    included (`APPROVAL_POLICIES` `:36-47`, loop `:132-146`); `on-request` is only what you get
+    when no policy is sent at all (`UNSAFE = [(None, Some(User))]` `:48`, loop `:147-161`,
+    `assert_protected` defaulting to `OnRequest` `:105-107`). The plugin sends `never`
+    explicitly, so its coerced pair is `never` + `auto_review` + `workspace-write`. *(The dated
+    2026-08-09 blockquote above says `on-request` and is left as written — its anchors are pinned
+    to `646f7c0a91`, and this correction is about the claim, not that row's verdict.)*
+  - The hard `-32600` "you need to use auto review" fires on an explicit
+    `approvals_reviewer = User` in a **thread-settings update** (`:202-239`) or a **turn
+    override** (`:240-258`) — and **only** on that field: a `turn/start` carrying just
+    `thread_id` + a protected `model` **succeeds** and coerces via a settings-updated
+    notification (`:259-267`, and with an explicit thread policy `:269-286`). That is exactly the
+    plugin's `turn/start` shape, so the reject lane is unreachable for it. Keep it that way.
+    Auto-review disabled outright is a separate hard error (`:181-194`).
+  - **`thread/resume` / `thread/fork` are on the coerce lane, PROVEN for the approval fields:**
+    `thread_resume_and_fork_upgrade_legacy_protected_model_settings` (`:290-381`) sends both, with
+    `approval_policy = Some(Never)` + `approvals_reviewer = Some(User)` (`:325-340`, `:355-369`)
+    and again with no settings at all (`:341-354`, `:370-379`), and asserts
+    `assert_protected_with_policy(… Never)` every time — never `assert_error`. Our request is
+    *less* provocative than the tested one: `buildResumeParams` (`codex.mjs:97-105`) sends
+    `approvalPolicy:"never"` and **no** `approvalsReviewer` at all, and the reviewer field is the
+    only one that ever triggers `-32600`.
+  - **What that test does NOT prove — inference, flagged:** it sends **no `sandbox` field**,
+    while `buildResumeParams` sends `danger-full-access`. So nothing here shows a resume's
+    sandbox being downgraded (or accepted); `:162-180` remains the *only* anchor for the
+    `danger-full-access` → `workspace-write` downgrade, and it is a `thread/start` anchor. The
+    conclusion "resume is as safe as `thread/start`" holds on the approval fields and is
+    **inferred** for the sandbox field, on the reasoning that both routes share the protected-model
+    settings upgrade. If that distinction ever matters, the cheap proof is a resume test with a
+    sandbox field — upstream has not written one.
 - **Server→client requests it auto-declines** (`SERVER_REQUEST_REPLIES`):
   `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`,
   `item/permissions/requestApproval`, `item/tool/requestUserInput`,
@@ -373,6 +394,7 @@ that Codex diff-review before considering the pass done.
 
 | Date | Codex HEAD | Plugin | Outcome |
 |---|---|---|---|
+| 2026-08-23 (second pass) | `99660ab3c7` (main; unchanged) | 1.5.0 → **1.6.0** | **Doc-only correction pass — no new upstream diff was run.** An independent Codex (gpt-5.6) review of the first pass's commits found this doc's managed-auto-review anchor **overstating what its test proves**, and the host re-verified it by reading the bytes. Two fixes: (1) **Baseline** said `codex@1.5.0`; the repo is `1.6.0` (`npm run check-version`) since the failed-turn fix landed. (2) The durable checklist's `thread/start` / `thread/resume` bullet is rewritten to separate proof from inference, all anchors re-read at `99660ab3c7`: the resume/fork test (`model_auto_review.rs:290-381`) sends `approvals_reviewer = Some(User)` and **no `sandbox` field**, while the plugin sends the reviewer *not at all* and `danger-full-access` — so "the same unsafe pair the plugin sends" was wrong in both directions. The coerce-lane conclusion **survives** (and is stronger than before: `-32600` fires only on an explicit `approvals_reviewer`, `:202-239` / `:240-258`, and a bare `turn/start` with a protected `model` coerces fine at `:259-267` — exactly the plugin's shape), but the **sandbox** half of it is now labelled inference, since `:162-180` is a `thread/start` anchor. Same pass also corrected a claim this doc had carried since 2026-08-09: the coerced approval policy is **not** always `on-request` — an explicitly-requested policy survives (`:36-47`, `:132-146`), and the plugin sends `never` explicitly, so its coerced triple is `never` + `auto_review` + `workspace-write`. **Re-proven this pass:** every `model_auto_review.rs` anchor in the checklist, plus `buildResumeParams` (`codex.mjs:97-105`) and `resolveSandboxMode` (`:70-82`). **Carried forward, not re-run:** the whole 2026-08-23 first-pass wire-schema sweep and `build:codex` — this pass touched no plugin code. |
 | 2026-08-23 | `99660ab3c7` (main; installed CLI 0.149.0) | 1.5.0 (**unchanged**) | **No drift — record-only.** 639 commits past `646f7c0a91`. Wire-schema diff (`git -C <codex> diff --stat 646f7c0a91 99660ab3c7 -- codex-rs/app-server-protocol/schema/json`) is **54 files, +5560/−195** — the biggest since this log started, yet **only 6 files carry any deletion at all**: `ClientRequest.json` (3), the two aggregate schemas (92, 63), `v2/HooksListResponse.json` (33), `v2/RawResponseItemCompletedNotification.json` (2), `v2/ThreadResumeParams.json` (2). Swap `--stat` for `--numstat … \| awk '$2>0'` to get that list in one command; then read only those files' `^-` lines. All 3 `ClientRequest.json` deletions are **loosening, not breaking**: `FunctionCallOutputResponseItem.call_id` `string`→`[string,null]` and dropped from `required`, and `account/usage/read` params `null`→nullable object. `ServerNotification.json` is **+333/−0** — the whole notification surface untouched — and every params schema the plugin sends is **byte-identical** (`ThreadStartParams`, `TurnStartParams`, `ReviewStartParams`, `ThreadListParams`, `ModelListParams`, `GetAccountParams`, `ConfigReadParams`); `ThreadResumeParams`' top-level fields are untouched too, its 2 deletions being the same embedded `FunctionCallOutputResponseItem` loosening. Checklist re-asserted: 12 request methods, 19 handled notifications + the 4 opt-out delta names, the 9 server-request declines, the 10 item variants (`v2/item.rs` is **+9/−0**), `TurnError{message,codexErrorInfo,additionalDetails}`, `will_retry` (`v2/notification.rs:56`), and the `TurnStatus` wire values. `build:codex` green against types regenerated from the installed 0.149.0 binary. **Additive-only upstream news, none of it a plugin change:** `CodexErrorDetails::MisalignmentPolicyViolation` (`protocol/src/error.rs:136`) is a **new `codexErrorInfo` tag** and is **non-retryable** (`:389`) — it is not in `MODEL_GATE_CODES` (`codex.mjs:1242`) and the plugin reads tags opaquely, so it surfaces in `errorMessage` without wrongly arming the model fallback; `KnownPlan::EduPlus`/`EduPro` (`protocol/src/account.rs:38,41`) with Bedrock's `uses_codex_managed_credentials` still at `v2/account.rs:42`; `ReasoningEffort` unchanged (None/Minimal/Low/Medium/High/XHigh/Max/Ultra/`Custom(String)`), so 1.5.0's `max` and the `Custom` catch-all both still hold. **One open question closed, recorded not coded:** upstream now proves `thread/resume` and `thread/fork` are on the auto-review **coerce** lane, not the `-32600` reject lane (`model_auto_review.rs:291-378`), so `buildResumeParams` is as safe as `thread/start`; the durable checklist carries the re-pinned anchors. |
 | 2026-08-09 | `646f7c0a91` (main; installed CLI 0.147.0) | 1.5.0 (**unchanged**) | **No drift — record-only.** 80 commits past `57f42a8113`, 20 on protocol paths. Cheapest pass yet: wire-schema diff is **+411/−0 (zero deletions)** and the diffstat for `ServerNotification.json` / `ClientRequest.json` / `ServerRequest.json` / `v2/item.rs` / `core/src/protocol` is **empty** — the plugin's whole dependency surface is byte-untouched, so no checklist re-assertion was needed. The two `app-server-protocol/src` deletions are non-wire (a broker lane label on the never-called `externalAgentConfig/detect`; `#[derive(Default)]` on `HookExecutionMode`). `build:codex` green against types regenerated from the installed 0.147.0 binary; `npm test` exit 0 twice on Node 24.16. **One behaviour learned, recorded not coded:** #37511's managed `auto_review.required_on_models` **silently coerces** the plugin's `thread/start` pair (`approvalPolicy:"never"` + `danger-full-access`) to `on-request` + `auto_review` + **`workspace-write`** — the tested case at `model_auto_review.rs:119-136`. The plugin picks full-access precisely because its hosts can't run bwrap and never reads `thread/started.sandbox`, so on managed-workspace + protected-model + bwrap-incapable hosts a job fails opaquely; too narrow an intersection to carry code for. The hard `-32600` "you need to use auto review" path is unreachable from the plugin (settings-update / turn-override only; `turn/start` carries no approval or sandbox fields — the durable checklist now says so). **Catalog re-checked offline:** luna still `visibility:"list"`, `low…max`, no `ultra` → **ticket lane holds**; and #37433's new `multi_agent_version` (`v2` on sol/terra, `v1` on luna) independently corroborates why `gpt-5-6-prompting` refuses to pass `ultra`. |
 | 2026-08-07 | `57f42a8113` (main; installed CLI 0.146.1) | 1.5.0 (**unchanged**) | **No drift — record-only.** 159 commits past `2b5bdcf675`, 61 on protocol paths. Wire-schema diff +249/−4 with the only deletions being one reworded `description`; full durable checklist re-asserted green from the checked-in schema JSON; `build:codex` (types regenerated from the 0.146.1 binary) + full `npm test` green on Node 24. Additions are all unread: `InitializeParams.extensions`, `ModelListResponse.modelSpecialty`, `transparentBackground`, `onboardingEntrypoint`. **Two things learned, both recorded above rather than coded:** (1) #36893 makes `commandExecution.command`/`commandActions` **redacted display values** — a free secret-leak win for job logs, and a standing "never replay a logged command" rule; (2) the model catalog can be checked **offline** from `~/.codex/models_cache.json` (raw upstream catalog + `fetched_at`/`client_version`), which is how 1.5.0's luna-@-`max` ticket lane was re-confirmed (`visibility:"list"`, levels `low…max`, no `ultra`) without a live `model/list`. Recipe folded into "How to keep this current" step 1c. |

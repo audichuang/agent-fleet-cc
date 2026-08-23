@@ -278,3 +278,52 @@ test("e2e: `review --json` surfaces turn.error from a failed turn/completed (no 
   const payload = JSON.parse(result.stdout);
   assert.match(payload.errorMessage ?? "", /401 Unauthorized/);
 });
+
+// The failure header is for a PARTIAL answer only. When the turn produced no agent
+// message, resolveFinalMessage already falls back to the turn error text, so rawOutput
+// IS the reason and prefixing it says the same thing twice — the exact case the header
+// was written for read WORSE than before. These three run the real companion CLI, so
+// they also pin the plumbing in executeTaskRun (render gets errorMessage only when
+// result.hadAgentMessage); a unit test that injects errorMessage into renderTaskResult
+// cannot see that line at all.
+test("e2e: a failed turn WITH a partial answer prefixes the reason above it", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "partial-then-error");
+  initGitRepo(repo);
+  commitInitial(repo);
+
+  const result = run("node", [SCRIPT, "task", "do the thing"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /^Codex turn failed: /);
+  assert.ok(
+    result.stdout.indexOf("newer version of Codex") < result.stdout.indexOf("Here is what I found so far."),
+    "the reason must sit above the partial answer, or a verbatim paste hides the failure"
+  );
+});
+
+test("e2e: a failed turn with NO agent message states the reason exactly once", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "turn-completed-error");
+  initGitRepo(repo);
+  commitInitial(repo);
+
+  const result = run("node", [SCRIPT, "task", "do the thing"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  assert.equal(
+    (result.stdout.match(/401 Unauthorized/g) ?? []).length,
+    1,
+    "the failure reason must be stated once, not as a header ON TOP of the identical body"
+  );
+  assert.doesNotMatch(result.stdout, /Codex turn failed: Codex turn failed/);
+});
+
+// The OTHER failure shape (a standalone `error` notification with no turn/completed —
+// the "terminal-error" fixture) never reached the header at all: resolveFinalMessage
+// has no finalTurn to read, so rawOutput is empty and renderTaskResult takes its
+// failureMessage fallback, which prints result.error.message with no header. Nothing
+// can double there, so there is nothing to pin — the doubling needs turn.error, which
+// is what the test above drives.

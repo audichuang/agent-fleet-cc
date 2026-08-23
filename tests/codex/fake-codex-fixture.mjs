@@ -443,6 +443,15 @@ rl.on("line", (line) => {
           send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
         }
+        // A turn that produces a real agentMessage (a PARTIAL answer) and THEN dies —
+        // the only shape where the failure reason is distinct from the final message,
+        // i.e. where the companion must prefix the reason onto the output.
+        if (BEHAVIOR === "partial-then-error") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "item/completed", params: { threadId: thread.id, turnId, item: { type: "agentMessage", id: "msg_" + turnId, text: "Here is what I found so far.", phase: "final_answer" } } });
+          send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
+          break;
+        }
         if (BEHAVIOR === "turn-completed-error") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
           send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });

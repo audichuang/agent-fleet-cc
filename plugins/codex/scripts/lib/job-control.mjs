@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
 import { getSessionRuntimeStatus } from "./codex.mjs";
-import { findJobByIdAcrossWorkspaces, getConfig, listJobs, readJobFile, resolveJobFile, resolveStateDir } from "./state.mjs";
+import { findJobByIdAcrossWorkspaces, getConfig, jobFilePath, listJobs, readJobFile, resolveStateDir } from "./state.mjs";
 import { readProgressSnapshot } from "./codex-progress.mjs";
 import { SESSION_ID_ENV } from "./tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
@@ -249,7 +249,11 @@ export function enrichJob(job, options = {}) {
 }
 
 export function readStoredJob(workspaceRoot, jobId) {
-  const jobFile = resolveJobFile(workspaceRoot, jobId);
+  // jobFilePath, not resolveJobFile: this is a pure READ, and resolveJobFile mkdirs the
+  // per-job dir on the way there. A /codex:result racing a prune would otherwise
+  // re-create an empty jobs/<id>/ with no terminal.lock — invisible to the orphan sweep
+  // and to the job list, i.e. leaked forever (see state.mjs jobFilePath).
+  const jobFile = jobFilePath(workspaceRoot, jobId);
   if (!fs.existsSync(jobFile)) {
     return null;
   }

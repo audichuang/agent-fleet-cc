@@ -3,7 +3,8 @@
 // FAKE_GROK_MODE:
 //   success (default) | fail | hang
 //   conf-ok | conf-resume | conf-midway-drop | conf-noise | conf-hang |
-//   conf-instant-exit | conf-huge-output | conf-auth-expire-midway | conf-grandchild
+//   conf-instant-exit | conf-huge-output | conf-auth-expire-midway | conf-grandchild |
+//   not-signed-in
 // The prompt arrives as the `-p` value (grok does not read stdin).
 import fs from "node:fs";
 
@@ -125,6 +126,16 @@ switch (mode) {
     setInterval(() => {}, 1000);
     break;
   }
+  // grok 1.0.5's headless fail-closed path, verbatim: no auth resolves, so
+  // authenticate() bails BEFORE any turn starts and nothing is streamed
+  // (xai-grok-pager/src/headless.rs:459-480; text = auth_required_message(false),
+  // :445-457 — the non-interactive branch, which is what a piped-stdin spawn gets).
+  case "not-signed-in":
+    process.stderr.write(
+      "Not signed in. To authenticate without a browser, run:\n  grok login --device-code\n\n" +
+        "Alternatively, set the XAI_API_KEY environment variable or run `grok login` on a machine with a browser.\n",
+    );
+    process.exit(1);
   case "fail":
     process.stderr.write("xai: 401 unauthorized\n");
     process.exit(1);

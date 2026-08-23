@@ -19,8 +19,14 @@
   週期是 vendored shared runtime。
 
 ## 進來改要遵守
-- **auth 委派給 grok CLI**(`XAI_API_KEY` 或 `~/.grok/auth.json`);companion **絕不碰 secrets、
-  無 profile**。無 auth 的 headless run 會卡在裝置碼授權 → `startJob` 有 preflight 直接擋掉。
+- **auth 完全委派給 grok CLI**,companion **絕不碰 secrets、無 profile、也不做 preflight**。
+  1.0.5 的 headless 路徑是 **fail closed**:`authenticate` 沒解到 non-interactive 方法就直接
+  bail(`xai-grok-pager/src/headless.rs:459-480`,doc comment 明寫 "failing closed";訊息在
+  `:445-457` `auth_required_message`),毫秒級失敗且訊息比我們自己寫的更可用(指名
+  `grok login --device-code` / `XAI_API_KEY`),`classifyError` 也照樣標成 `auth`。
+  **不要再加 gate**:grok 的憑證解析包含 per-model `api_key`/`env_key`、OS 解析的 home 等,
+  重寫一遍只會誤拒有效設定又放行 grok 用不了的憑證(0.6.0 那顆 preflight 兩件都犯了)。
+  `setup` 只**報告**看得見的來源(env keys + auth 檔),**不 gate 任何東西**。
 - **`task`、`live`、`image` 是 model-invocable**(三支 delegation entry;`image` 是純 prose 疊在
   `task` 上的生圖 verb,沒有自己的 script);`cancel/logs/result/status/wait/setup`
   是 user-run(`disable-model-invocation`)。長任務 watch loop 靠**直接 shell companion** 跑 `wait`,

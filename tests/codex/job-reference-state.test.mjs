@@ -9,8 +9,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { resolveCancelableJob, resolveResultJob } from "../../plugins/codex/scripts/lib/job-control.mjs";
+import fs from "node:fs";
+import path from "node:path";
+
+import { resolveJobsDir, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
+import { readStoredJob, resolveCancelableJob, resolveResultJob } from "../../plugins/codex/scripts/lib/job-control.mjs";
 
 function seedRecord(workspace, id, overrides) {
   writeJobFile(workspace, id, {
@@ -72,4 +75,19 @@ test("result on a still-running job reaches its own state-specific message", () 
   const workspace = makeTempDir();
   seedRecord(workspace, "job-live", {});
   assert.throws(() => resolveResultJob(workspace, "job-live"), /job-live is still running/i);
+});
+
+// resolveJobFile mkdirs the per-job dir on its way to job.json, so reading a job that
+// a concurrent prune just removed RE-CREATED jobs/<id>/ — empty, no terminal.lock, so
+// sweepOrphanLockDirs never collects it and the job list skips it: a permanent leak.
+// A read must derive the path purely (state.mjs jobFilePath).
+test("readStoredJob leaves no job directory behind when the job does not exist", () => {
+  const workspace = makeTempDir();
+
+  assert.equal(readStoredJob(workspace, "task-never-existed"), null);
+  assert.equal(
+    fs.existsSync(path.join(resolveJobsDir(workspace), "task-never-existed")),
+    false,
+    "a read must not create the job directory it failed to find"
+  );
 });

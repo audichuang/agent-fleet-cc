@@ -240,21 +240,6 @@ test("task rejects --live together with --wait (--live is already foreground)", 
   assert.match(lines.join("\n"), /--live and --wait are mutually exclusive/);
 });
 
-test("task refuses to launch unauthenticated (guards the 1h OAuth hang)", async () => {
-  const { out, lines } = collect();
-  const code = await runCompanion(["task", "hello", "--json"], {
-    // Real-binary path: no binaryArgv, no GROK_BIN → auth preflight is active.
-    // Hermetic HOME (helpers.mjs) has no ~/.grok/auth.json and no XAI_API_KEY.
-    env: { GROK_PLUGIN_DATA: process.env.GROK_PLUGIN_DATA, HOME: process.env.HOME },
-    cwd: process.env.GROK_PLUGIN_DATA,
-    out,
-  });
-  assert.equal(code, 1);
-  const json = JSON.parse(lines.at(-1));
-  assert.equal(json.errorKind, "auth");
-  assert.match(json.error, /not authenticated/);
-});
-
 test("task accepts --no-subagents (does not reject it as an unknown flag)", async () => {
   const { out, lines } = collect();
   const code = await runCompanion(
@@ -610,108 +595,49 @@ test("resume-job on a job with NO session id anywhere (never spawned) still refu
   assert.match(lines.join("\n"), /has no session id to resume/);
 });
 
-// --- auth preflight (the 1h device-code hang guard) --------------------------
+// --- no auth: the CLI refuses, we don't ---------------------------------------
 
-// Drives the REAL-binary path — no `binaryArgv`, so authPreflightNeeded() is true —
-// while still keeping the run hermetic: grokSpawnImpl stands in for
-// node:child_process.spawn and runs the fake engine instead. `bin` is discarded on
-// purpose; what is under test is whether the preflight let the launch through at all.
-// Returns the spawn count and the job records so a REFUSAL can be pinned as
-// "nothing spawned, nothing recorded" (the preflight runs before createJobRecord).
-async function taskUnderPreflight(extraEnv) {
+// There is NO auth preflight (deleted in 0.7.0): grok's headless path fails closed
+// itself (xai-grok-pager/src/headless.rs:459-480 fn `authenticate`), so a
+// credential-less run must SPAWN and land `failed`/`auth` with grok's own message.
+// Drives the real-binary path — no `binaryArgv` — while staying hermetic:
+// grokSpawnImpl stands in for node:child_process.spawn and runs the fake engine in
+// its `not-signed-in` mode (grok's verbatim fail-closed stderr, exit 1). `bin` is
+// discarded on purpose. spawnCount + the job records are what prove we no longer
+// refuse before createJobRecord.
+async function taskWithNoAuth() {
   const dataRoot = makeDataRoot();
   const cwd = makeTempDir("grok-ws-");
   const { out, lines } = collect();
   let spawnCount = 0;
   const code = await runCompanion(["task", "hello", "--wait", "--json"], {
-    env: { GROK_PLUGIN_DATA: dataRoot, HOME: process.env.HOME, ...extraEnv },
+    env: { GROK_PLUGIN_DATA: dataRoot, HOME: process.env.HOME },
     cwd,
     out,
     grokSpawnImpl: (bin, args, opts) => {
       spawnCount += 1;
-      return spawn(process.execPath, [FAKE_GROK, ...args], opts);
+      return spawn(process.execPath, [FAKE_GROK, ...args], {
+        ...opts,
+        env: { ...opts.env, FAKE_GROK_MODE: "not-signed-in" },
+      });
     },
   });
   const jobs = listJobs(workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd));
   return { code, lines, spawnCount, jobs };
 }
 
-// Every source grok's own resolve_credentials consults, so the preflight neither hangs a
-// user who IS authenticated nor waves through one who is not:
-// XAI_API_KEY / the legacy GROK_CODE_XAI_API_KEY (read_xai_api_key_env,
-// shell/src/agent/auth_method.rs:26-43), GROK_AUTH (inline JSON credentials,
-// auth/manager.rs:315-328), and the cached token file at $GROK_AUTH_PATH else
-// <$GROK_HOME|$HOME/.grok>/auth.json (auth/manager.rs:306-313,
-// xai-grok-home/src/lib.rs:29-45).
-test("auth preflight: each credential source grok honours lets the launch through", async () => {
-  const authHome = makeTempDir("grok-authhome-");
-  fs.writeFileSync(path.join(authHome, "auth.json"), '{"token":"fake"}');
-  const looseAuth = path.join(makeTempDir("grok-authpath-"), "creds.json");
-  fs.writeFileSync(looseAuth, '{"token":"fake"}');
-
-  const sources = [
-    { XAI_API_KEY: "xai-fake" },
-    { GROK_CODE_XAI_API_KEY: "xai-fake-legacy" },
-    { GROK_AUTH: '{"api_key":"xai-fake-inline"}' },
-    { GROK_AUTH_PATH: looseAuth },
-    { GROK_HOME: authHome },
-    // The documented escape hatch (BYOK / auth_provider_command users), quoted in the
-    // refusal message itself — it must actually work.
-    { GROK_SKIP_AUTH_PREFLIGHT: "1" },
-  ];
-  for (const source of sources) {
-    const label = Object.keys(source)[0];
-    const { code, lines, spawnCount } = await taskUnderPreflight(source);
-    assert.equal(code, 0, `${label} must satisfy the preflight: ${lines.join("\n")}`);
-    assert.equal(spawnCount, 1, `${label} must reach the engine`);
-    assert.equal(JSON.parse(lines.at(-1)).status, "completed", label);
-  }
-});
-
-test("auth preflight: with no credential at all the launch is refused before any spawn", async () => {
-  const { code, lines, spawnCount, jobs } = await taskUnderPreflight({});
+// The hermetic HOME (helpers.mjs) has no ~/.grok/auth.json and no XAI_API_KEY, so
+// this is the real "user has nothing" case. The engine's message is more actionable
+// than the refusal we used to print, and classifyError still labels it `auth`.
+test("no credentials: the launch goes ahead and grok's own fail-closed message lands as errorKind auth", async () => {
+  const { code, lines, spawnCount, jobs } = await taskWithNoAuth();
+  assert.equal(spawnCount, 1, "no preflight: an unauthenticated run must still reach the engine");
+  assert.equal(jobs.length, 1, "the attempt is recorded, not refused before createJobRecord");
   assert.equal(code, 1);
   const json = JSON.parse(lines.at(-1));
+  assert.equal(json.status, "failed");
   assert.equal(json.errorKind, "auth");
-  assert.match(json.error, /not authenticated/);
-  assert.equal(spawnCount, 0, "the whole point: never spawn a grok that will sit on a device-code URL");
-  assert.equal(jobs.length, 0, "a refused launch must leave no job record behind");
-
-  // No base dir at ALL (no HOME, no GROK_HOME, no GROK_AUTH_PATH): grokAuthFile returns
-  // null rather than a relative ".grok/auth.json", so this refuses like any other
-  // credential-less run instead of throwing out of path.join.
-  const homeless = await taskUnderPreflight({ HOME: undefined });
-  assert.equal(homeless.code, 1);
-  assert.equal(JSON.parse(homeless.lines.at(-1)).errorKind, "auth");
-  assert.equal(homeless.spawnCount, 0);
-});
-
-// GROK_DEPLOYMENT_KEY is excluded on purpose: resolve_credentials never consults it
-// (BYOK → cached provider token → session → XAI_API_KEY env, agent/config.rs:4801-4825).
-// It authenticates grok's backend/management calls, not sampling — so honouring it here
-// would wave a deployment-key-only user straight into the hang this guard prevents.
-test("auth preflight: GROK_DEPLOYMENT_KEY alone does NOT count as auth", async () => {
-  const { code, lines, spawnCount, jobs } = await taskUnderPreflight({ GROK_DEPLOYMENT_KEY: "dk-fake" });
-  assert.equal(code, 1);
-  assert.equal(JSON.parse(lines.at(-1)).errorKind, "auth");
-  assert.equal(spawnCount, 0);
-  assert.equal(jobs.length, 0);
-});
-
-// The inverse of the refusal test above, and the whole point of dropping GROK_BIN from
-// authPreflightNeeded: GROK_BIN is a PRODUCTION override naming a real grok at a non-PATH
-// location (cmdSetup probes it, adapter.mjs spawns it), not a test fake. Exempting it
-// meant the most common "grok installed somewhere odd" setup skipped the guard entirely
-// and got the 1h device-code hang the guard exists to prevent. Only an in-process
-// binaryArgv fake (tests/e2e, which own their auth) and GROK_SKIP_AUTH_PREFLIGHT=1 skip it.
-test("auth preflight: GROK_BIN does NOT skip the check — an unauthenticated run is still refused", async () => {
-  const { code, lines, spawnCount, jobs } = await taskUnderPreflight({ GROK_BIN: "/bin/false" });
-  assert.equal(code, 1, "GROK_BIN must not buy an exemption from the preflight");
-  const json = JSON.parse(lines.at(-1));
-  assert.equal(json.errorKind, "auth");
-  assert.match(json.error, /not authenticated/);
-  assert.equal(spawnCount, 0);
-  assert.equal(jobs.length, 0);
+  assert.match(json.error, /grok login --device-code/);
 });
 
 // --- --resume-job onto a non-terminal job -----------------------------------
@@ -757,8 +683,8 @@ test("--resume-job refuses a source job that has not finished yet", async () => 
 // --- empty-file validation --------------------------------------------------
 
 // JSON.parse("") throws too, but "not valid JSON" is the wrong story for a file the user
-// meant to fill in and didn't. Both checks run before the auth preflight and before any
-// job record exists, so a typo costs nothing.
+// meant to fill in and didn't. Both checks run before any job record exists and before the
+// engine is spawned, so a typo costs nothing.
 test("task rejects an empty (or whitespace-only) --schema file with the emptiness reason, not a parse error", async () => {
   const dataRoot = makeDataRoot();
   const cwd = makeTempDir("grok-ws-");

@@ -34,12 +34,11 @@ import {
   applyJobPatchIfActive,
   generateJobId,
   getConfig,
+  jobFilePath,
   listJobs,
   readJobFile,
   resolveJobDoneFile,
-  resolveJobFile,
   resolveJobFileInStateDir,
-  resolveJobLogFile,
   resolveStateDir,
   setConfig,
   upsertJob,
@@ -688,8 +687,11 @@ async function executeTaskRun(request) {
       rawOutput,
       failureMessage,
       // The render needs the structured reason too: a failed turn that still produced
-      // a final message would otherwise render as a plain successful answer.
-      errorMessage,
+      // a PARTIAL answer would otherwise render as a plain successful answer. Only then:
+      // with no agent message, resolveFinalMessage (codex.mjs) already fell back to the
+      // turn error text, so rawOutput IS the reason and prefixing it prints it twice.
+      // The job record + --json payload keep errorMessage unconditionally (status/wait).
+      ...(result.hadAgentMessage ? { errorMessage } : {}),
       reasoningSummary: result.reasoningSummary
     },
     {
@@ -1452,6 +1454,15 @@ export function makeUtf8LogReader(logFile) {
   return { readChunk, flush };
 }
 
+// Pure read-path derivation of a job's log file. state.mjs's resolveJobLogFile mkdirs
+// (it shares ensureJobDir with resolveJobFile), so using it to READ a log re-creates a
+// jobs/<id>/ dir a concurrent prune just removed — an empty dir with no terminal.lock is
+// invisible to both the orphan sweep and the job list, so it leaks forever. The log sits
+// beside job.json in the directory-per-job layout, so the pure jobFilePath twin gives it.
+// (The natural home is state.mjs next to jobFilePath; this lane does not own that file.)
+const pureJobLogPath = (workspaceRoot, jobId) =>
+  path.join(path.dirname(jobFilePath(workspaceRoot, jobId)), "log");
+
 export async function handleAttach(argv, deps = {}) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
@@ -1468,7 +1479,6 @@ export async function handleAttach(argv, deps = {}) {
   let workspaceRoot;
   let jobId;
   let logFile;
-  let statusFile;
   let statusStateDir;
   if (reference) {
     const snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
@@ -1477,9 +1487,9 @@ export async function handleAttach(argv, deps = {}) {
     // For a cross-workspace hit, read from the job's PHYSICAL state dir;
     // re-deriving from workspaceRoot can resolve to a different (missing) path.
     statusStateDir = snapshot.stateDir ?? resolveStateDir(workspaceRoot);
-    statusFile = snapshot.stateDir
+    const statusFile = snapshot.stateDir
       ? resolveJobFileInStateDir(snapshot.stateDir, jobId)
-      : resolveJobFile(workspaceRoot, jobId);
+      : jobFilePath(workspaceRoot, jobId);
     // Derive the log from the SAME per-job dir as the resolved job.json (a pure
     // join, no mkdir) so a record missing logFile never re-derives a wrong dir
     // under the current workspace root (directory-per-job: log sits beside job.json).
@@ -1493,9 +1503,8 @@ export async function handleAttach(argv, deps = {}) {
       throw new Error("No active Codex job to attach to. Run /codex:status to inspect known jobs.");
     }
     jobId = active.id;
-    logFile = active.logFile ?? resolveJobLogFile(workspaceRoot, jobId);
+    logFile = active.logFile ?? pureJobLogPath(workspaceRoot, jobId);
     statusStateDir = resolveStateDir(workspaceRoot);
-    statusFile = resolveJobFile(workspaceRoot, jobId);
   }
 
   const { readChunk: defaultReadChunk } = makeUtf8LogReader(logFile);
@@ -1546,7 +1555,7 @@ export async function handleLogs(argv, deps = {}) {
     const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
     const live = jobs.find((j) => j.status === "queued" || j.status === "running");
     if (!live && jobs[0]) {
-      const logFile = jobs[0].logFile ?? resolveJobLogFile(workspaceRoot, jobs[0].id);
+      const logFile = jobs[0].logFile ?? pureJobLogPath(workspaceRoot, jobs[0].id);
       let log = "";
       try { log = fs.readFileSync(logFile, "utf8"); } catch { /* no log yet */ }
       outputResult(log, false);

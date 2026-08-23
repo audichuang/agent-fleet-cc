@@ -1715,6 +1715,11 @@ export async function runAppServerTurn(cwd, options = {}) {
       threadId,
       turnId: turnState.turnId,
       finalMessage: resolveFinalMessage(turnState),
+      // Provenance of `finalMessage`: true only when it came from a real agentMessage.
+      // When it is false, resolveFinalMessage fell back to the turn error text, so
+      // `finalMessage` IS the failure reason — a caller must not ALSO prefix the reason
+      // (that double-prints it), and must not treat it as a partial answer.
+      hadAgentMessage: Boolean(turnState.lastAgentMessage),
       reasoningSummary: turnState.reasoningSummary,
       turn: turnState.finalTurn,
       error: turnState.error,

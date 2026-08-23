@@ -11,12 +11,21 @@ handed over as the result. `/codex:result <id>` repeated it: the stored-output b
 the `Status:` / `errorMessage` block, so the failure header was unreachable whenever any output
 text existed.
 
-- **`renderTaskResult` puts the reason above the partial output** (`Codex turn failed: …`). The
-  reason was already computed two lines from the call — it just was not passed in. A successful
-  turn is byte-identical to before (`failureReasonFor` returns `null` at status 0).
-- **`renderStoredJobResult` prefixes `Status: <status>` + the error message** onto every
-  non-completed job's stored payload, which is what `commands/result.md` promised all along. The
-  three duplicated return blocks collapsed into one helper — net deletion.
+- **`renderTaskResult` puts the reason above a PARTIAL answer** (`Codex turn failed: …`). The
+  reason was already computed two lines from the call — it just was not passed in. Only a real
+  agent message gets the header: with none, `resolveFinalMessage` already falls back to the turn
+  error text, so `rawOutput` *is* the reason and prefixing it printed the same sentence twice
+  (`Codex turn failed: Codex turn failed: 401 Unauthorized…`, then the body again). `executeTaskRun`
+  gates on a new `hadAgentMessage` flag from `runAppServerTurn`; the record and the `--json`
+  payload keep `errorMessage` unconditionally, because `/codex:status` and `/codex:wait` read it.
+  A successful turn is byte-identical to before (`failureReasonFor` returns `null` at status 0).
+- **`renderStoredJobResult` prefixes `Status: <status>`** onto every non-completed job's stored
+  payload, which is what `commands/result.md` promised all along, and adds the error message
+  unless the body already contains it. The three duplicated return blocks collapsed into one
+  helper — net deletion. The skip matters for the two bodies that *are* the error: a turn with no
+  agent message stores the error text as its `rawOutput`, and a failed structured review reprints
+  it under `Raw final message:`. Substring test, not a provenance flag — no stored record carries
+  provenance, and the review body is a case no flag on the task payload would cover.
 - **`interruptAppServerTurn` stops spawning an app-server that cannot own the turn.** With no
   recorded broker session it used to start a throwaway `codex app-server`, send `turn/interrupt`
   for a thread that server had never seen, and log "Codex turn interrupt failed: …" as if a live
@@ -34,10 +43,15 @@ text existed.
 - **`task` swallows a stray `--wait`.** It was not in `booleanOptions`, and an unrecognised
   `--flag` becomes a positional — and positionals *are* the prompt, so `/codex:task --wait fix the
   bug` sent Codex the prompt "--wait fix the bug". `review` already accepted and discarded it.
-- **Read paths stopped creating job directories.** `resolveJobFile` / `resolveJobLogFile` mkdir on
-  the way to a *read*, so a detached watchdog reading a just-pruned job re-created `jobs/<id>/`
-  with no `terminal.lock` — invisible to both the orphan sweep and the job list, leaking forever.
-  A pure `jobFilePath` now serves the three read call sites.
+- **The read call sites stopped creating job directories.** `resolveJobFile` / `resolveJobLogFile`
+  mkdir on the way to a *read*, so reading a just-pruned job re-created `jobs/<id>/` with no
+  `terminal.lock` — invisible to both the orphan sweep and the job list, leaking forever. A pure
+  `jobFilePath` (and, for a log, its `dirname` + `log`) now serves the watchdog, the `SessionEnd`
+  hook, `ensureTerminalSignal`, `readStoredJob` (the `/codex:result` read), and `attach`/`logs`
+  when a record carries no `logFile`. `attach` also dropped a `resolveJobFile` call whose result
+  was never read — an mkdir that existed only as a side effect. Not *every* read is pure:
+  `tracked-jobs.mjs`'s crash-path re-read still uses `resolveJobFile`, harmlessly — it runs inside
+  the job's own lifecycle, where the directory exists by construction.
 - **Protocol re-check, no drift.** 639 upstream commits (`646f7c0a91` → `99660ab3c7`, installed CLI
   0.147.0 → 0.149.0) move the wire schema +5560/−195, but only 6 files carry any deletion, none on
   our dependency surface, and all three `ClientRequest.json` deletions are *loosening*. Upstream

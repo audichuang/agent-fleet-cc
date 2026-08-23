@@ -167,6 +167,26 @@ test("renderStoredJobResult prefixes status and failure reason onto a failed job
   assert.match(output, /Codex session ID: thr_9/);
 });
 
+test("renderStoredJobResult does not repeat a failure reason that IS the stored body", () => {
+  // A turn that died before any agent message stores the error text AS its rawOutput
+  // (codex.mjs resolveFinalMessage falls back to it), so the header reason and the body
+  // are the same sentence. Status still has to show; the reason must not be said twice.
+  const reason = "Codex turn failed: 401 Unauthorized (upstream auth rejected).";
+  const output = renderStoredJobResult(
+    { id: "task-failed-noanswer", status: "failed", title: "Codex Task", jobClass: "task", errorMessage: reason },
+    { result: { rawOutput: reason } }
+  );
+
+  assert.match(output, /Status: failed/);
+  assert.equal((output.match(/401 Unauthorized/g) ?? []).length, 1);
+});
+
+// NOTE for the next reader: this test and "renderTaskResult leaves a successful turn's
+// output untouched" pass both with and without the failure-header change — that is the
+// point. They are no-regression guards on the SUCCESS path (failureReasonFor returns
+// null at status 0, so a completed job must render byte-identically). Do not "fix" them
+// into failure-path tests; the failure path is pinned by the e2e tests in
+// turn-error-surfacing.test.mjs, which go through the real companion.
 test("renderStoredJobResult does not prefix a status header onto a completed job", () => {
   const output = renderStoredJobResult(
     { id: "task-ok", status: "completed", title: "Codex Task", jobClass: "task" },

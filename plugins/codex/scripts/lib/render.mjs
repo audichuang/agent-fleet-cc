@@ -431,14 +431,23 @@ export function renderStoredJobResult(job, storedJob) {
   // /codex:result promises the job status, and the captured output of a failed turn is
   // a partial answer that reads as a successful one without this header. The final
   // fallback block below already prints status + errorMessage itself.
-  const failureHeader =
-    job?.status && job.status !== "completed"
-      ? `Status: ${job.status}${
-          job.errorMessage ?? storedJob?.errorMessage ? `\n\n${job.errorMessage ?? storedJob.errorMessage}` : ""
-        }\n\n`
-      : "";
+  const failureReason = String(job?.errorMessage ?? storedJob?.errorMessage ?? "").trim();
+  // ...but the reason is NOT always distinct from the body. When the turn produced no
+  // agent message, the stored rawOutput IS the turn error text (codex.mjs
+  // resolveFinalMessage falls back to it), and a failed structured review reprints the
+  // same error in its "Raw final message:" block — repeating it in the header just says
+  // it twice. Substring test rather than a provenance flag because no stored record
+  // carries provenance, and the doubling shows up in bodies (the review render) that no
+  // flag on the task payload would cover. `Status:` stays unconditional.
+  // ponytail: a body carrying the bare message while errorMessage adds a
+  // `[codexErrorInfo]` tag or an ` — additionalDetails` tail still misses the match and
+  // near-doubles; nothing is lost, so a fuzzier compare is not worth the ambiguity.
   const withContext = (body) => {
     const output = body.endsWith("\n") ? body : `${body}\n`;
+    const failureHeader =
+      job?.status && job.status !== "completed"
+        ? `Status: ${job.status}${failureReason && !output.includes(failureReason) ? `\n\n${failureReason}` : ""}\n\n`
+        : "";
     if (!threadId) {
       return `${failureHeader}${output}`;
     }

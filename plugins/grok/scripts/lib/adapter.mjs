@@ -333,11 +333,23 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       const s = String(stderrTail ?? "");
       // FIRST, above everything: grok's sandbox startup refusal. The phrase is
       // unambiguous (grok prints it only from refuse_unprotected / the macOS gate),
-      // and it has to outrank the generic buckets because the refusal text embeds
-      // user-controlled paths verbatim — a configured hooks-path of `/tmp/quota`
-      // or `/srv/relay` would otherwise be classified `quota` / `endpoint`
+      // and it has to outrank every generic bucket because the refusal text embeds
+      // user-controlled paths verbatim — a configured hooks-path of `/tmp/quota`,
+      // `/srv/relay` or `/opt/ENOENT` would otherwise be classified
+      // `quota` / `endpoint` / `not-installed`
       // (HookWriteDenyError::MissingConfigured, hook_write_deny.rs:27-31).
       if (/refusing to start/i.test(s)) return "config";
+      // SECOND: spawn-level evidence. ENOENT / exit 127 means the engine binary never
+      // executed, so no later bucket's claim about grok's behaviour can be true. It has
+      // to be decided BEFORE the prose buckets because what classifyError gets here is
+      // the spawn error verbatim (`spawn /opt/relay/grok ENOENT` — the worker passes
+      // state.spawnError, runtime/worker.mjs), and that string embeds a user-controlled
+      // PATH: any bucket whose regex matches a substring of the path steals a missing
+      // binary. The bare `relay` token that used to sit in `endpoint` did exactly that;
+      // it is gone (grok only ever says "relay" about session-SHARE connections —
+      // extensions/notification.rs:1214-1225, "Status updates for relay sync (session
+      // sharing) feature" — never in headless failure prose).
+      if (exitCode === 127 || /command not found|ENOENT/i.test(s)) return "not-installed";
       // Buckets widened against real grok 0.2.93 failure strings (verified by running).
       // `authenticat` (not `authenticate`) so grok's own "Authentication temporarily
       // unavailable" lands here instead of falling through to `unknown`: the endpoint
@@ -345,20 +357,30 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       // cannot steal this string, which left nobody catching it. It names the right
       // subsystem even though the failure is transient — `errorKind` is a label, not a
       // retry signal (only render.mjs and the job record read it).
-      if (/401|unauthorized|forbidden|not logged in|no cached credentials|waiting for authorization|XAI_API_KEY|authenticat|token expired|grok login|sign in/i.test(s)) return "auth";
-      if (/429|too many requests|rate limit|usage limit|quota/i.test(s)) return "quota";
-      // "model did not produce structured output" — a --json-schema run the model
-      // could not satisfy. Actionable in the same way a bad model id is: simplify
-      // the schema or change the model, so it belongs in the config bucket.
-      // A failed `-r` resume also lands here — same shape of fix (pick a real
-      // session or start fresh). "Failed to restore session from remote"
-      // (app/session_startup.rs:1285/1288) is the primary token; "Session does not
-      // exist" (headless.rs:559) is the local miss. Deliberately NOT matched:
-      // "not found locally, restoring conversation from remote"
-      // (session_startup.rs:1134) — grok prints that even when the restore
-      // SUCCEEDS, and config runs before endpoint, so it would steal a later
-      // endpoint failure from this same run.
-      if (/unknown model id|unknown effort level|did not produce structured output|failed to restore session from remote|session does not exist/i.test(s)) return "config";
+      // `forbidden` / HTTP 403 is deliberately NOT here. Upstream says so in as many
+      // words: "403 Forbidden is NOT an auth error — the request was authenticated, but
+      // the action is not permitted (content-safety blocks, ZDR-gated operations,
+      // remote-settings-blocked users)" (xai-grok-shell/src/sampling/error.rs:127-136,
+      // which maps it to internal_error precisely so the client does not run its
+      // re-auth flow), and xai-grok-sampling-types/src/error.rs:1206-1217 pins it with a
+      // regression test ("403 Forbidden must not be treated as an auth error"). Sending
+      // a policy denial here would tell the user to fix a login that is already fine.
+      if (/401|unauthorized|not logged in|no cached credentials|waiting for authorization|XAI_API_KEY|authenticat|token expired|grok login|sign in/i.test(s)) return "auth";
+      // quota also owns the ONE 403 that is an entitlement limit rather than a policy
+      // denial: "The model 'grok-build' requires a Grok subscription."
+      // (xai-grok-shell/src/sampling/error.rs:696) — the message upstream special-cases
+      // at :134. The fix is to get the plan, which is a quota story, not "change the
+      // request". If the user ALSO has an API key set, upstream appends "You have an API
+      // key set (XAI_API_KEY) … run `grok logout`" (error.rs:134-141) and the auth bucket
+      // above claims that variant first — correct: there the fix really is auth state.
+      if (/429|too many requests|rate limit|usage limit|quota|requires a grok subscription/i.test(s)) return "quota";
+      // endpoint BEFORE config, deliberately: grok's resume-failure prose EMBEDS the
+      // transport failure that caused it ("Failed to restore session from remote: Grok
+      // is temporarily unavailable. (HTTP 503)"), and that run failed because the
+      // endpoint was down, not because the user named a bad session. The swap costs
+      // config nothing: classifyError sees ONE source (spawnError || adapter error ||
+      // stderrTail, runtime/worker.mjs), and every config token below is a local
+      // decision grok makes without a request — none can co-occur with 5xx prose.
       // grok is a Rust CLI, so its capacity/5xx/transport failures arrive as PROSE,
       // not as Node/undici codes — the codes are kept because they still cover a
       // spawn-level failure in this process. Verified strings (all present in the
@@ -373,10 +395,10 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       // Two constraints, both load-bearing:
       //  - the FULL phrase "grok is temporarily unavailable", never a bare
       //    "temporarily unavailable": the binary also carries "Authentication
-      //    temporarily unavailable" (app/error_display.rs:230), which the auth
-      //    bucket does NOT catch ("authenticate" is not a substring of
-      //    "Authentication"), so the short token would steal an auth-service
-      //    failure into endpoint.
+      //    temporarily unavailable" (app/error_display.rs:230). The auth bucket DOES
+      //    catch that one (`authenticat` matches it case-insensitively) and runs
+      //    first, so this is now belt-and-braces — keep it anyway: the short token
+      //    would swallow any other "<subsystem> temporarily unavailable" prose too.
       //  - grok's idle timeout ("No response from model for {n}s — the model may
       //    be stuck", shell/sampling/error.rs:181) is deliberately LEFT OUT: the
       //    `timeout` kind already has an owner (the worker's wall-clock fuse,
@@ -384,14 +406,32 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       //    labelling it `endpoint` ("transport, try again") would mislead.
       // Ordering is safe: auth (HTTP 401) and quota (HTTP 429) are checked above
       // and `HTTP 5\d\d` cannot collide with either.
-      if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed|relay/i.test(s)) return "endpoint";
+      if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed/i.test(s)) return "endpoint";
       if (/grok is temporarily unavailable|temporarily overloaded|connection to grok timed out|secure connection to grok failed|something went wrong on the server|HTTP 5\d\d|http client init failed|reqwest error stream/i.test(s)) return "endpoint";
-      if (exitCode === 127 || /command not found|ENOENT/i.test(s)) return "not-installed";
+      // "model did not produce structured output" — a --json-schema run the model
+      // could not satisfy. Actionable in the same way a bad model id is: simplify
+      // the schema or change the model, so it belongs in the config bucket.
+      // A failed `-r` resume also lands here — same shape of fix (pick a real
+      // session or start fresh). "Failed to restore session from remote"
+      // (app/session_startup.rs:1285/1288) is the primary token; "Session does not
+      // exist" (headless.rs:559) is the local miss. Both only reach this line when the
+      // same text carried no transport evidence (endpoint is checked above).
+      // Deliberately NOT matched: "not found locally, restoring conversation from
+      // remote" (session_startup.rs:1134) — grok prints that even when the restore
+      // SUCCEEDS, so matching it would relabel any later failure in the same run.
+      // Last token: a 403 policy denial (see the auth bucket for why it is not auth).
+      // `config` is the closest honest bucket — the request as written is not permitted,
+      // so the fix is to change the request (rephrase the prompt, drop the ZDR-gated
+      // operation). Matching `forbidden` and `HTTP 403` rather than a bare `403` keeps
+      // it off ordinary numbers in paths and ports; the entitlement 403 was already
+      // claimed by quota above.
+      if (/unknown model id|unknown effort level|did not produce structured output|failed to restore session from remote|session does not exist|forbidden|HTTP 403/i.test(s)) return "config";
       // Weaker sandbox signals, deliberately LAST: unlike "Refusing to start" above,
-      // these words also occur in ordinary paths and hostnames (GROK_BIN=/opt/bwrap/grok
-      // → "spawn … ENOENT"; a relay host named bubblewrap), so every earlier bucket is a
-      // more specific claim. This is the belt-and-braces net for a refusal whose wording
-      // changes upstream — the five shapes we know today all carry "Refusing to start".
+      // these words also occur in ordinary paths and hostnames (a relay host named
+      // bubblewrap; GROK_BIN=/opt/bwrap/grok, though that one is now caught as
+      // `not-installed` two checks up), so every earlier bucket is a more specific
+      // claim. This is the belt-and-braces net for a refusal whose wording changes
+      // upstream — the five shapes we know today all carry "Refusing to start".
       if (/bwrap|bubblewrap|write-deny|sandbox profile|sandbox deny/i.test(s)) return "config";
       return "unknown";
     },

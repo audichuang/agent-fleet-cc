@@ -55,17 +55,15 @@ function makeWorkspace() {
 function cli(w, args, { mode = "ok", timeout = 20000 } = {}) {
   return spawnSync(process.execPath, [COMPANION, ...args], {
     cwd: w.ws,
-    // GROK_SKIP_AUTH_PREFLIGHT is REQUIRED, not hygiene: the launch preflight no
-    // longer exempts GROK_BIN (it is a production override for a real binary, not
-    // a test seam), and this suite drives the CLI as a subprocess so it cannot use
-    // the in-process binaryArgv seam. helpers.mjs gives it a fresh empty HOME with
-    // no auth, so without the flag every launch here is refused.
+    // No credential is passed and none is needed: helpers.mjs gives this suite a
+    // fresh empty HOME with no auth, and there is no auth preflight to appease
+    // (grok's own headless path fails closed — see companion.test.mjs). So every
+    // launch below is also standing proof that a credential-less run still spawns.
     env: {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       GROK_PLUGIN_DATA: w.data,
       GROK_BIN: w.shims[mode],
-      GROK_SKIP_AUTH_PREFLIGHT: "1",
     },
     encoding: "utf8",
     timeout,

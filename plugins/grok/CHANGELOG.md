@@ -35,18 +35,23 @@ pre-existing defects the durable checklist had been carrying as verified, plus a
   unavailable`, because the binary also carries "Authentication temporarily unavailable" and the
   auth bucket does not catch it. The `config` bucket also gained a failed `-r` resume, which
   reported `unknown` until now.
-- **The auth preflight checked 2 of grok's sources and hard-refused the rest.** It accepted only
-  `XAI_API_KEY` and a literal `$HOME/.grok/auth.json`, so a user authenticated via `GROK_HOME`,
-  `GROK_AUTH_PATH`, `GROK_AUTH` or the legacy `GROK_CODE_XAI_API_KEY` was told "not
-  authenticated" and the launch never happened. Broadened to those, with the auth file resolved
-  the way grok resolves it. `GROK_DEPLOYMENT_KEY` is deliberately **not** accepted —
-  `resolve_credentials` never consults it, so honouring it would wave a deployment-key-only user
-  into the device-code hang the preflight exists to prevent.
-- **`GROK_BIN` silently disabled that preflight.** It is a real deployment override (a
-  bubblewrap-wrapped grok, a non-PATH install), not just a test seam, so pointing it at a real
-  binary lost the guard entirely and re-opened the failure it was written to prevent. The skip now
-  keys on the in-process fake seam only; `GROK_SKIP_AUTH_PREFLIGHT=1` remains the documented
-  escape hatch.
+- **The auth preflight is DELETED — the hang it was written for does not exist.** Its whole
+  rationale was that a headless run with no auth prints a device-code URL and blocks on "Waiting
+  for authorization" until the 1h job timeout. grok 1.0.5 does the opposite: `authenticate` is
+  documented as *"failing closed when none is available"* and bails in milliseconds — no eager
+  non-interactive method → `auth_required_message`; a method that needs interactive login →
+  `bail!`, *"interactive login is not usable headless"*
+  (`xai-grok-pager/src/headless.rs:459-480`, message at `:445-457`). Its message is also better
+  than ours ("run: grok login --device-code … or set the XAI_API_KEY environment variable"), and
+  `classifyError` already buckets it as `auth`, so a credential-less run still lands
+  `failed` / `errorKind: "auth"` — just with the engine's words. Meanwhile the guard as shipped in
+  0.6.0 was wrong in both directions: it **false-refused** setups grok accepts (a per-model
+  `api_key`/`env_key`, an OS-resolvable home with `HOME` unset) and **accepted** credentials grok
+  cannot use (`GROK_AUTH=garbage`, an empty or directory-shaped `auth.json`), because
+  `existsSync` + truthiness is not credential resolution. Replicating grok's real resolution would
+  mean parsing effective model config and credential schemas; that is the CLI's job. `GROK_BIN` no
+  longer needs an exemption and `GROK_SKIP_AUTH_PREFLIGHT` is gone with the gate. `setup` keeps
+  reporting which credential sources are visible — advisory only, gating nothing.
 - **A crashed job is resumable, and now says so.** The resume tip and the `--json` `sessionId`
   both read only the post-hoc id that a *normal* finalize writes — so the crash-safe pre-minted
   `request.sessionId`, which exists precisely for a worker that died mid-run, was hidden in the

@@ -71,6 +71,15 @@ function readSchemaFile(schemaPath, cwd) {
   return raw;
 }
 
+// --- `setup`'s advisory auth report ----------------------------------------
+// These two are a BEST-EFFORT REPORT of the credential sources a user probably
+// has, for `/grok:setup` to print. They gate NOTHING: seeing a source here is no
+// proof grok will accept it (an empty/garbage GROK_AUTH, an empty auth.json, a
+// per-model `api_key` we never look at), and seeing none is no proof it will not.
+// Auth resolution belongs to the grok CLI, which fails closed in milliseconds
+// (xai-grok-pager/src/headless.rs:459-480 fn `authenticate` — "failing closed
+// when none is available"; message at :445-457 `auth_required_message`).
+//
 // Where grok itself looks for a cached token: $GROK_AUTH_PATH, else
 // <grok home>/auth.json, where grok home is $GROK_HOME else <home>/.grok
 // (xai-grok-shell/src/auth/manager.rs:306-313; xai-grok-home/src/lib.rs:29-45
@@ -89,28 +98,8 @@ function grokAuthFile(env) {
 // GROK_DEPLOYMENT_KEY is deliberately NOT here: resolve_credentials never
 // consults it (BYOK → cached provider token → session → XAI_API_KEY env,
 // agent/config.rs:4801-4825) — it authenticates grok's backend/management calls,
-// not sampling, so accepting it would wave a deployment-key-only user straight
-// into the hang below.
+// not sampling, so reporting it as "auth" would mislead a deployment-key-only user.
 const AUTH_ENV_KEYS = ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_AUTH"];
-
-// Auth is delegated to the grok CLI, but a headless run with NO auth does not
-// fail — it prints a device-code URL and blocks on "Waiting for authorization"
-// until the job timeout (1h). Preflight every source grok consults (the same
-// ones `setup` reports) and refuse fast. BYOK / auth_provider_command stay out
-// of scope: GROK_SKIP_AUTH_PREFLIGHT=1 covers them and the refusal says so.
-function hasGrokAuth(env) {
-  if (AUTH_ENV_KEYS.some((k) => env[k])) return true;
-  const file = grokAuthFile(env);
-  return Boolean(file && fs.existsSync(file));
-}
-// Skipped only for an in-process fake (deps.binaryArgv — tests/e2e own their
-// auth) or an explicit override. NOT for GROK_BIN: that is a production override
-// pointing at a REAL binary at a non-PATH location (cmdSetup probes it,
-// adapter.mjs spawns it), so exempting it re-opens the failure the guard was
-// written to prevent, per the guard's own documentation above.
-function authPreflightNeeded(env, deps) {
-  return !deps.binaryArgv && env.GROK_SKIP_AUTH_PREFLIGHT !== "1";
-}
 
 function safeJobId(value) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value)) {
@@ -210,8 +199,8 @@ function cmdSetup({ env, out, deps }) {
   } else {
     out(`✓ grok CLI: ${String(probe.stdout).trim()}`);
   }
-  // Auth is delegated to the grok CLI. Report exactly the sources hasGrokAuth
-  // consults, so what setup prints is what the launch preflight checks.
+  // Advisory only — see AUTH_ENV_KEYS / grokAuthFile above. Nothing here gates a
+  // launch; grok resolves (and refuses) its own credentials.
   const envKey = AUTH_ENV_KEYS.find((k) => env[k]);
   const authFile = grokAuthFile(env);
   if (envKey) {
@@ -219,7 +208,10 @@ function cmdSetup({ env, out, deps }) {
   } else if (authFile && fs.existsSync(authFile)) {
     out(`✓ auth: cached token at ${authFile}`);
   } else {
-    out("• auth: none detected — run `!grok login` (SuperGrok / X Premium+) or set XAI_API_KEY");
+    out(
+      "• auth: none of the sources we can see is set — if a run fails with `auth`, " +
+        "run `!grok login --device-code` (SuperGrok / X Premium+) or set XAI_API_KEY",
+    );
   }
   out(`default model: ${env.GROK_DEFAULT_MODEL ?? "grok-4.5"}`);
   return healthy ? 0 : 1;
@@ -262,13 +254,13 @@ function resolveResumeSource({ flags, stateDir }) {
 async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
   const jsonSchema = readSchemaFile(flags.schema, cwd); // UsageError on bad file/JSON
   const maxTurns = parseMaxTurns(flags["max-turns"]); // UsageError on non-positive-integer
-  if (authPreflightNeeded(env, deps) && !hasGrokAuth(env)) {
-    const msg =
-      "not authenticated — run `!grok login` (SuperGrok / X Premium+) or set XAI_API_KEY. " +
-      "Skipping launch to avoid a headless OAuth hang. (Override: GROK_SKIP_AUTH_PREFLIGHT=1.)";
-    out(flags.json ? JSON.stringify({ engine: "grok", status: "failed", errorKind: "auth", error: msg }) : `grok: ${msg}`);
-    return 1;
-  }
+  // No auth preflight on purpose: grok's headless path fails CLOSED in milliseconds
+  // (xai-grok-pager/src/headless.rs:459-480 fn `authenticate` — bails via
+  // `auth_required_message` when no non-interactive method resolves; interactive
+  // login is never attempted headless), and its message names `grok login
+  // --device-code` + XAI_API_KEY. classifyError buckets that as `auth`, so the job
+  // lands failed/auth with the ENGINE's message — strictly better than guessing at
+  // grok's credential resolution (per-model api_key/env_key, OS-resolved home, …).
   const source = resolveResumeSource({ flags, stateDir });
   const record = createJobRecord({
     engine: "grok",

@@ -11,11 +11,18 @@ prompt text below.
 
 ## 1. Resolve the output path
 
-`--out <path>` if given, else `./grok-image-1.jpg`. It **must sit inside the cwd you
+`--out <path>` if given, else the first FREE `./grok-image-N.jpg` (start at `N=1`, bump
+until the name is unused). The target **must not already exist**: an explicit `--out`
+that is already there → stop and ask before spending quota, never overwrite. Generating
+into a name nothing occupies is what makes step 4's gate proof that *this* run produced
+the file — no mtime or inode bookkeeping to get wrong. It **must sit inside the cwd you
 hand grok**. Grok writes the original into its own session folder under `~/.grok`
-(`<session_folder>/images/<n>.jpg`) and that directory is created `0700` — you cannot
-reach in and copy it out afterwards. **Grok's own shell has to do the copy**, which is
-why the prompt below ends with a `cp`.
+(`<session_folder>/images/<n>.jpg`, in a directory named after the URL-encoded cwd).
+**Grok's own shell does the copy** — that is why the prompt below ends with a `cp` — but
+only because grok already holds the absolute path mid-turn, so it is one step instead of a
+parse-the-log round trip. It is **not** a permissions matter: those paths are `0700`/`0600`
+but owned by the same user running this session, so you can read and copy them yourself
+(verified 2026-08-23), which is exactly what step 5's recovery branch does.
 
 **There is no `--cwd` flag on the companion** (it exits 1 with `Unknown flag: --cwd`) —
 the run's cwd is simply the cwd of the Bash call, and the adapter forwards that to grok.
@@ -62,9 +69,14 @@ The prompt to pass, with the placeholders filled in:
 
 ## 4. Verify the FILE, never grok's prose
 
-The pass/fail gate is **the file exists and is non-empty** (`test -s "<OUT>"`). Grok's
-`IMAGE_SAVED:` line is a convenience for reading the log, not evidence — same as any
-other model text: untrusted, and no substitute for looking at the disk.
+The pass/fail gate is **a regular, non-empty file at a path that did not exist before
+this run**: `test -f "<OUT>" && test -s "<OUT>"`, with step 1's "must not already exist"
+supplying the freshness half. Every clause is load-bearing — `test -s` on its own is
+happy with a non-empty **directory** (so `--out .` "passes" while the `cp` landed
+somewhere else or failed outright), and just as happy with the previous run's leftover
+`grok-image-1.jpg` when this run generated nothing at all. Grok's `IMAGE_SAVED:` line is
+a convenience for reading the log, not evidence — same as any other model text:
+untrusted, and no substitute for looking at the disk.
 
 `od -An -N3 -tx1 "<OUT>"` printing `ff d8 ff` confirms a JPEG, but treat a mismatch as
 a **warning only, not a failure**. Nothing upstream validates the format: the writer
@@ -77,11 +89,9 @@ be reported as a failed generation.
 Take the job id from `--json` and read the raw stream:
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" logs <job>`.
 
-- **Contains `SuperGrok`** → the user's tier (free / X Basic) is server-side
-  zero-limited on Imagine. `image_gen` short-circuits and hands back the upsell prose as
-  a **successful** tool result, so the job itself can look perfectly healthy. Match the
-  substring `SuperGrok` only — never the full marketing sentence, which upstream can
-  reword. Say the tier can't generate images, point at the upgrade, and **do not retry**.
+Check these **in this order** — the first bullet is positive proof a generation happened,
+so it settles the question before any triage that concludes it didn't.
+
 - **A `tool_call_update` line carrying a typed `rawOutput`** whose `"type"` is
   `"ImageGen"` → grok generated the image but skipped the copy. `path` is a *top-level*
   key of that object (`{path, filename, session_folder, uploaded_url?}`) — copy it to
@@ -91,6 +101,18 @@ Take the job id from `--json` and read the raw stream:
   `"toolName":"image_gen"` on one **never** matches. Match on `rawOutput`'s type, or
   correlate `toolCallId` back to the earlier `tool_call` line, which is the variant that
   does carry `toolName`.
+- **`SuperGrok` inside the completed `image_gen` tool RESULT** → the user's tier (free /
+  X Basic) is server-side zero-limited on Imagine. `image_gen` short-circuits and hands
+  back the upsell prose as a **successful** tool result, so the job itself can look
+  perfectly healthy. Locate it, do not grep for it: take the `toolCallId` off the
+  `tool_call` line carrying `"toolName":"image_gen"`, find the `tool_call_update` line
+  with that same `toolCallId`, and look for the substring `SuperGrok` in **its** `content`
+  / `rawOutput` — nowhere else in the log. A whole-stream grep reads the user's own words
+  back: the prompt text and the `tool_call`'s `rawInput` both echo into the stream, so
+  `/grok:image "a SuperGrok mascot"` would triage a healthy generation whose `cp` failed
+  as a tier block. Match the substring `SuperGrok` only — never the full marketing
+  sentence, which upstream can reword. Say the tier can't generate images, point at the
+  upgrade, and **do not retry**.
 - **No `image_gen` `tool_call` at all** → the tool is not registered in this
   environment. Cheapest confirmation: the `available_commands` line at the top of the raw
   stream lists every tool the session got, `image_gen` included when it is on. The
