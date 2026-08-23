@@ -86,8 +86,8 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       // above). Past that, hand grok the prompt file the worker ALREADY wrote at
       // <jobDir>/prompt.txt — no new file, nothing to clean up. `.txt` matters:
       // grok parses a `.json` prompt file as ACP content blocks and everything
-      // else as plain text (headless/cli.rs:58-69). `--prompt-file` is
-      // `conflicts_with_all = ["single","prompt_json"]` (cli.rs:493-501), so this
+      // else as plain text (headless/cli.rs:58-68). `--prompt-file` is
+      // `conflicts_with_all = ["single","prompt_json"]` (cli.rs:502-509), so this
       // is a swap for `-p`, not an addition, and it triggers headless on its own.
       const oversized = Buffer.byteLength(prompt) > PROMPT_ARGV_LIMIT;
       const promptPath = oversized && stateDir && job.id
@@ -172,21 +172,33 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       // sampling-types/conversation.rs:495) — hence x_search/web_search/web_fetch.
       // MCP tools are a SEPARATE, weaker layer: headless always loads the user's MCP
       // servers regardless of `--tools` (headless.rs) and nothing in source
-      // proves the whitelist covers them, so `--deny MCPTool` (cli.rs:467-474) rides
+      // proves the whitelist covers them, so `--deny MCPTool` (cli.rs:476-482) rides
       // along as a COOPERATIVE backstop — same permission-layer tier as Part 3's
       // `--deny` rows, not a hard guarantee like the built-in whitelist above.
       if (r.research) argv.push("--tools", "x_search,web_search,web_fetch", "--deny", "MCPTool");
       // Opt-in agent-turn ceiling (r.maxTurns) — a runaway-cost fuse, chiefly for
-      // background jobs nobody is watching live. cli.rs:669: value_parser u32
+      // background jobs nobody is watching live. cli.rs:684-689: value_parser u32
       // range 1.. ("Maximum number of agent turns") → CliAgentOverrides.max_turns.
       // The companion validates it's a positive integer
       // before a job record is even created.
       if (r.maxTurns) argv.push("--max-turns", String(r.maxTurns));
       // Opt-in r.noMemory: skip cross-session memory for a one-off delegated task
       // so the result stays reproducible and never reads/writes the user's grok
-      // memory. cli.rs:653 ("Disable cross-session memory for this session"),
-      // `conflicts_with = "experimental_memory"` — we never send that flag, so no
-      // conflict.
+      // memory. `--no-memory` (cli.rs:664-670, now hide=true and relabelled
+      // "Legacy compatibility flag") is TUI/ACP-ONLY in this build and does NOT
+      // reach headless: PagerArgs::memory_enabled_override() is consumed only by
+      // the interactive ConnectFlags literal (app/mod.rs:798-799), and `-p`
+      // dispatches headless::run_single_turn, which hardcodes
+      // `memory_enabled_override: None` (headless.rs:795) — HeadlessOptions has no
+      // memory field at all. Memory then resolves through
+      // BoolFlag::env("GROK_MEMORY").cli(None).config(memory.enabled)
+      // .feature_flag(remote).default(false) (config-types/memory.rs:607-612),
+      // precedence requirement > cli > env > config > managed > remote > default
+      // (config-types/flags.rs:118-135). So the env tier is the ONLY one that can
+      // beat a user's `[memory] enabled = true`, and upstream's own test pins it
+      // ("GROK_MEMORY=0 should force-disable even when TOML enables memory",
+      // shell/src/config/tests.rs:283). Keep the flag too — it costs nothing and
+      // covers upstream ever wiring it through.
       if (r.noMemory) argv.push("--no-memory");
       // r.sessionId is minted client-side BEFORE spawn (grok-companion.mjs
       // startJob, via crypto.randomUUID()) and persisted into the job record's
@@ -202,7 +214,14 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       if (r.resumeSessionId) argv.push("-r", r.resumeSessionId);
       else if (r.sessionId) argv.push("-s", r.sessionId);
       // env: conformance/e2e can inject via request.env; secrets are NOT set here.
-      return { argv, env: r.env ?? {}, stdinPayload: null };
+      // GROK_MEMORY goes LAST so it also beats a GROK_MEMORY=1 in the user's shell
+      // (buildEngineEnv applies invocation.env after baseEnv, core/env.mjs:20-31);
+      // "0" is an accepted false token (xai-grok-config/src/lib.rs:84-92 env_bool).
+      return {
+        argv,
+        env: { ...(r.env ?? {}), ...(r.noMemory ? { GROK_MEMORY: "0" } : {}) },
+        stdinPayload: null,
+      };
     },
     parseEvent(line) {
       if (jsonMode) {
@@ -325,8 +344,42 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       // "model did not produce structured output" — a --json-schema run the model
       // could not satisfy. Actionable in the same way a bad model id is: simplify
       // the schema or change the model, so it belongs in the config bucket.
-      if (/unknown model id|unknown effort level|did not produce structured output/i.test(s)) return "config";
+      // A failed `-r` resume also lands here — same shape of fix (pick a real
+      // session or start fresh). "Failed to restore session from remote"
+      // (app/session_startup.rs:1285/1288) is the primary token; "Session does not
+      // exist" (headless.rs:559) is the local miss. Deliberately NOT matched:
+      // "not found locally, restoring conversation from remote"
+      // (session_startup.rs:1134) — grok prints that even when the restore
+      // SUCCEEDS, and config runs before endpoint, so it would steal a later
+      // endpoint failure from this same run.
+      if (/unknown model id|unknown effort level|did not produce structured output|failed to restore session from remote|session does not exist/i.test(s)) return "config";
+      // grok is a Rust CLI, so its capacity/5xx/transport failures arrive as PROSE,
+      // not as Node/undici codes — the codes are kept because they still cover a
+      // spawn-level failure in this process. Verified strings (all present in the
+      // shipped 1.0.5 binary): sampling-types/error.rs:593-617 status_user_message
+      // ("Grok is temporarily unavailable … (HTTP 502)", "Grok is temporarily
+      // overloaded … (HTTP 529)", "Connection to Grok timed out or was interrupted
+      // … (HTTP 520)", "Secure connection to Grok failed. (HTTP 525)", "Something
+      // went wrong on the server (HTTP 500)"); shell/sampling/error.rs:101
+      // OVERLOADED_USER_MESSAGE ("Model is temporarily overloaded. Try again in a
+      // moment."); :119-121 ("http client init failed: {e}");
+      // sampling-types/error.rs:179 ("reqwest error stream: …").
+      // Two constraints, both load-bearing:
+      //  - the FULL phrase "grok is temporarily unavailable", never a bare
+      //    "temporarily unavailable": the binary also carries "Authentication
+      //    temporarily unavailable" (app/error_display.rs:230), which the auth
+      //    bucket does NOT catch ("authenticate" is not a substring of
+      //    "Authentication"), so the short token would steal an auth-service
+      //    failure into endpoint.
+      //  - grok's idle timeout ("No response from model for {n}s — the model may
+      //    be stuck", shell/sampling/error.rs:181) is deliberately LEFT OUT: the
+      //    `timeout` kind already has an owner (the worker's wall-clock fuse,
+      //    runtime/worker.mjs), and upstream calls this one NOT retryable, so
+      //    labelling it `endpoint` ("transport, try again") would mislead.
+      // Ordering is safe: auth (HTTP 401) and quota (HTTP 429) are checked above
+      // and `HTTP 5\d\d` cannot collide with either.
       if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed|relay/i.test(s)) return "endpoint";
+      if (/grok is temporarily unavailable|temporarily overloaded|connection to grok timed out|secure connection to grok failed|something went wrong on the server|HTTP 5\d\d|http client init failed|reqwest error stream/i.test(s)) return "endpoint";
       if (exitCode === 127 || /command not found|ENOENT/i.test(s)) return "not-installed";
       // Weaker sandbox signals, deliberately LAST: unlike "Refusing to start" above,
       // these words also occur in ordinary paths and hostnames (GROK_BIN=/opt/bwrap/grok

@@ -290,6 +290,7 @@ test("task accepts --read-only (does not reject it as an unknown flag)", async (
 test("task accepts --research, --max-turns, --no-memory (not rejected as unknown flags) and maps them into the spawned argv", async () => {
   const { out, lines } = collect();
   let capturedArgs = null;
+  let capturedEnv = null;
   const code = await runCompanion(
     ["task", "research xyz", "--research", "--max-turns", "7", "--no-memory", "--wait", "--json"],
     {
@@ -299,6 +300,7 @@ test("task accepts --research, --max-turns, --no-memory (not rejected as unknown
       binaryArgv: [process.execPath, FAKE_GROK],
       grokSpawnImpl: (bin, args, opts) => {
         capturedArgs = args;
+        capturedEnv = opts.env;
         return spawn(bin, args, opts);
       },
     },
@@ -310,6 +312,9 @@ test("task accepts --research, --max-turns, --no-memory (not rejected as unknown
   assert.equal(capturedArgs[capturedArgs.indexOf("--deny") + 1], "MCPTool");
   assert.equal(capturedArgs[capturedArgs.indexOf("--max-turns") + 1], "7");
   assert.ok(capturedArgs.includes("--no-memory"));
+  // …and the env tier that headless actually reads reaches the child process, not just
+  // the invocation object (see adapter.test.mjs for why the flag alone is inert).
+  assert.equal(capturedEnv.GROK_MEMORY, "0");
 });
 
 test("task without --research/--max-turns/--no-memory sends none of their flags (opt-in only)", async () => {
@@ -603,4 +608,244 @@ test("resume-job on a job with NO session id anywhere (never spawned) still refu
   });
   assert.equal(code, 1);
   assert.match(lines.join("\n"), /has no session id to resume/);
+});
+
+// --- auth preflight (the 1h device-code hang guard) --------------------------
+
+// Drives the REAL-binary path — no `binaryArgv`, so authPreflightNeeded() is true —
+// while still keeping the run hermetic: grokSpawnImpl stands in for
+// node:child_process.spawn and runs the fake engine instead. `bin` is discarded on
+// purpose; what is under test is whether the preflight let the launch through at all.
+// Returns the spawn count and the job records so a REFUSAL can be pinned as
+// "nothing spawned, nothing recorded" (the preflight runs before createJobRecord).
+async function taskUnderPreflight(extraEnv) {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const { out, lines } = collect();
+  let spawnCount = 0;
+  const code = await runCompanion(["task", "hello", "--wait", "--json"], {
+    env: { GROK_PLUGIN_DATA: dataRoot, HOME: process.env.HOME, ...extraEnv },
+    cwd,
+    out,
+    grokSpawnImpl: (bin, args, opts) => {
+      spawnCount += 1;
+      return spawn(process.execPath, [FAKE_GROK, ...args], opts);
+    },
+  });
+  const jobs = listJobs(workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd));
+  return { code, lines, spawnCount, jobs };
+}
+
+// Every source grok's own resolve_credentials consults, so the preflight neither hangs a
+// user who IS authenticated nor waves through one who is not:
+// XAI_API_KEY / the legacy GROK_CODE_XAI_API_KEY (read_xai_api_key_env,
+// shell/src/agent/auth_method.rs:26-43), GROK_AUTH (inline JSON credentials,
+// auth/manager.rs:315-328), and the cached token file at $GROK_AUTH_PATH else
+// <$GROK_HOME|$HOME/.grok>/auth.json (auth/manager.rs:306-313,
+// xai-grok-home/src/lib.rs:29-45).
+test("auth preflight: each credential source grok honours lets the launch through", async () => {
+  const authHome = makeTempDir("grok-authhome-");
+  fs.writeFileSync(path.join(authHome, "auth.json"), '{"token":"fake"}');
+  const looseAuth = path.join(makeTempDir("grok-authpath-"), "creds.json");
+  fs.writeFileSync(looseAuth, '{"token":"fake"}');
+
+  const sources = [
+    { XAI_API_KEY: "xai-fake" },
+    { GROK_CODE_XAI_API_KEY: "xai-fake-legacy" },
+    { GROK_AUTH: '{"api_key":"xai-fake-inline"}' },
+    { GROK_AUTH_PATH: looseAuth },
+    { GROK_HOME: authHome },
+    // The documented escape hatch (BYOK / auth_provider_command users), quoted in the
+    // refusal message itself — it must actually work.
+    { GROK_SKIP_AUTH_PREFLIGHT: "1" },
+  ];
+  for (const source of sources) {
+    const label = Object.keys(source)[0];
+    const { code, lines, spawnCount } = await taskUnderPreflight(source);
+    assert.equal(code, 0, `${label} must satisfy the preflight: ${lines.join("\n")}`);
+    assert.equal(spawnCount, 1, `${label} must reach the engine`);
+    assert.equal(JSON.parse(lines.at(-1)).status, "completed", label);
+  }
+});
+
+test("auth preflight: with no credential at all the launch is refused before any spawn", async () => {
+  const { code, lines, spawnCount, jobs } = await taskUnderPreflight({});
+  assert.equal(code, 1);
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(json.errorKind, "auth");
+  assert.match(json.error, /not authenticated/);
+  assert.equal(spawnCount, 0, "the whole point: never spawn a grok that will sit on a device-code URL");
+  assert.equal(jobs.length, 0, "a refused launch must leave no job record behind");
+
+  // No base dir at ALL (no HOME, no GROK_HOME, no GROK_AUTH_PATH): grokAuthFile returns
+  // null rather than a relative ".grok/auth.json", so this refuses like any other
+  // credential-less run instead of throwing out of path.join.
+  const homeless = await taskUnderPreflight({ HOME: undefined });
+  assert.equal(homeless.code, 1);
+  assert.equal(JSON.parse(homeless.lines.at(-1)).errorKind, "auth");
+  assert.equal(homeless.spawnCount, 0);
+});
+
+// GROK_DEPLOYMENT_KEY is excluded on purpose: resolve_credentials never consults it
+// (BYOK → cached provider token → session → XAI_API_KEY env, agent/config.rs:4801-4825).
+// It authenticates grok's backend/management calls, not sampling — so honouring it here
+// would wave a deployment-key-only user straight into the hang this guard prevents.
+test("auth preflight: GROK_DEPLOYMENT_KEY alone does NOT count as auth", async () => {
+  const { code, lines, spawnCount, jobs } = await taskUnderPreflight({ GROK_DEPLOYMENT_KEY: "dk-fake" });
+  assert.equal(code, 1);
+  assert.equal(JSON.parse(lines.at(-1)).errorKind, "auth");
+  assert.equal(spawnCount, 0);
+  assert.equal(jobs.length, 0);
+});
+
+// The inverse of the refusal test above, and the whole point of dropping GROK_BIN from
+// authPreflightNeeded: GROK_BIN is a PRODUCTION override naming a real grok at a non-PATH
+// location (cmdSetup probes it, adapter.mjs spawns it), not a test fake. Exempting it
+// meant the most common "grok installed somewhere odd" setup skipped the guard entirely
+// and got the 1h device-code hang the guard exists to prevent. Only an in-process
+// binaryArgv fake (tests/e2e, which own their auth) and GROK_SKIP_AUTH_PREFLIGHT=1 skip it.
+test("auth preflight: GROK_BIN does NOT skip the check — an unauthenticated run is still refused", async () => {
+  const { code, lines, spawnCount, jobs } = await taskUnderPreflight({ GROK_BIN: "/bin/false" });
+  assert.equal(code, 1, "GROK_BIN must not buy an exemption from the preflight");
+  const json = JSON.parse(lines.at(-1));
+  assert.equal(json.errorKind, "auth");
+  assert.match(json.error, /not authenticated/);
+  assert.equal(spawnCount, 0);
+  assert.equal(jobs.length, 0);
+});
+
+// --- --resume-job onto a non-terminal job -----------------------------------
+
+// Nothing in grok's session layer locks a resumed session: `-r` onto a RUNNING job puts
+// two processes on one session (a mid-turn snapshot at best), and onto a QUEUED one it
+// names a session grok has not created yet — an opaque engine-side failure either way.
+// The accepted half of this guard is pinned by "resume: sends -r <sessionId> …" above,
+// which resumes a completed job; here only the rejections, plus the proof that a
+// completed source still gets past this line.
+test("--resume-job refuses a source job that has not finished yet", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  // running: a live pid, so reconcileDeadPids cannot flip it to failed mid-test.
+  const runningId = seedJob(dataRoot, cwd, { status: "running", pid: process.pid });
+  const queuedId = seedJob(dataRoot, cwd, {}); // no status → queued, never spawned
+
+  for (const [id, status] of [[runningId, "running"], [queuedId, "queued"]]) {
+    const { out, lines } = collect();
+    const code = await runCompanion(["task", "follow up", "--resume-job", id, "--wait", "--json"], {
+      env: { GROK_PLUGIN_DATA: dataRoot },
+      cwd,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    });
+    assert.equal(code, 1, `resuming a ${status} job must be refused`);
+    assert.match(lines.join("\n"), new RegExp(`is still ${status} — wait for it to finish before resuming`));
+  }
+
+  // …and the guard did not eat the feature: a terminal source with a session id still runs.
+  const doneId = seedJob(dataRoot, cwd, { status: "completed", resultText: "prior", sessionId: "prior-session-xyz" });
+  const { out, lines } = collect();
+  const code = await runCompanion(["task", "follow up", "--resume-job", doneId, "--wait", "--json"], {
+    env: { GROK_PLUGIN_DATA: dataRoot },
+    cwd,
+    out,
+    binaryArgv: [process.execPath, FAKE_GROK],
+  });
+  assert.equal(code, 0, lines.join("\n"));
+  assert.doesNotMatch(lines.join("\n"), /wait for it to finish/);
+});
+
+// --- empty-file validation --------------------------------------------------
+
+// JSON.parse("") throws too, but "not valid JSON" is the wrong story for a file the user
+// meant to fill in and didn't. Both checks run before the auth preflight and before any
+// job record exists, so a typo costs nothing.
+test("task rejects an empty (or whitespace-only) --schema file with the emptiness reason, not a parse error", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const dir = makeTempDir("grok-emptyschema-");
+  for (const [name, body] of [["empty.json", ""], ["blank.json", "  \n\t\n"]]) {
+    const schemaPath = path.join(dir, name);
+    fs.writeFileSync(schemaPath, body);
+    const { out, lines } = collect();
+    const code = await runCompanion(["task", "hi", "--schema", schemaPath, "--wait", "--json"], {
+      env: { GROK_PLUGIN_DATA: dataRoot, GROK_BIN: `${process.execPath}` },
+      cwd,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+    });
+    assert.equal(code, 1);
+    assert.match(lines.at(-1), new RegExp(`schema file is empty: ${schemaPath.replace(/[.]/g, "\\.")}`));
+    assert.doesNotMatch(lines.at(-1), /not valid JSON/, "an empty file is not a syntax problem");
+  }
+  assert.equal(
+    listJobs(workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd)).length,
+    0,
+    "a rejected schema must create no job record",
+  );
+});
+
+// An empty --prompt-file used to go out as `-p ""` and die inside the engine
+// ("--single: prompt is empty", headless/cli.rs from_text) after a full spawn.
+test("task rejects an empty or whitespace-only --prompt-file before reaching the engine", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const dir = makeTempDir("grok-emptyprompt-");
+  let spawnCount = 0;
+  for (const [name, body] of [["empty.md", ""], ["blank.md", "  \n\t\n"]]) {
+    const promptPath = path.join(dir, name);
+    fs.writeFileSync(promptPath, body);
+    const { out, lines } = collect();
+    const code = await runCompanion(["task", "--prompt-file", promptPath, "--wait", "--json"], {
+      env: { GROK_PLUGIN_DATA: dataRoot, GROK_BIN: `${process.execPath}` },
+      cwd,
+      out,
+      binaryArgv: [process.execPath, FAKE_GROK],
+      grokSpawnImpl: (bin, args, opts) => {
+        spawnCount += 1;
+        return spawn(bin, args, opts);
+      },
+    });
+    assert.equal(code, 1, `${name} must be rejected`);
+    // One shared message with the no-positional case — the prompt is empty either way,
+    // and the flag it names tells the user which input to fix.
+    assert.match(lines.at(-1), /task requires a non-empty prompt or --prompt-file/);
+  }
+  assert.equal(spawnCount, 0, "an empty prompt must never reach a spawn");
+  assert.equal(
+    listJobs(workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd)).length,
+    0,
+    "a rejected prompt must create no job record",
+  );
+});
+
+// --- the resume tip on a crashed job ----------------------------------------
+
+// The crashed-worker shape (as in "crash-safe resume" above): the id was minted and
+// persisted into request.sessionId before spawn, but the worker died before finalize, so
+// there is no top-level job.sessionId. Reading only that field made both surfaces claim
+// the job was unresumable — the tip vanished from `result`, and --json reported
+// sessionId:null — for exactly the crash the pre-minted id exists to survive.
+test("result on a crashed job still advertises the resume tip and reports its session id", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const stateDir = workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd);
+  const record = createJobRecord({
+    engine: "grok",
+    title: "crashed run",
+    cwd,
+    request: { model: "grok-4.5", sessionId: "pre-spawn-uuid-5678" },
+  });
+  createJob(stateDir, record, "prompt");
+  finalizeJob(stateDir, record.id, { status: "failed", error: "worker process died (reconciled dead pid)" });
+
+  const human = collect();
+  const code = await runCompanion(["result", record.id], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: human.out });
+  assert.equal(code, 1, "a failed job still exits non-zero");
+  assert.match(human.lines.join("\n"), new RegExp(`Tip: continue this thread with: task --resume-job ${record.id}`));
+
+  const json = collect();
+  await runCompanion(["result", record.id, "--json"], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: json.out });
+  const projection = JSON.parse(json.lines.at(-1));
+  assert.equal(projection.sessionId, "pre-spawn-uuid-5678", "a --json consumer must see the resumable session, not null");
+  assert.equal(projection.status, "failed");
 });

@@ -34,7 +34,12 @@ export function renderResult(job, logTail = "") {
   // instead of hiding it behind the error.
   if (job.resultText) lines.push("", job.resultText);
   if (logTail) lines.push("", "--- log tail ---", logTail);
-  if (job.sessionId) {
+  // job.sessionId is only written on a normal finalize; a worker that died
+  // mid-run carries just the pre-minted request.sessionId — exactly the
+  // crash-safe-resume case that id exists for. Reading both fields IS the whole
+  // predicate (grok-companion.mjs's effectiveSessionId), inlined here because
+  // importing it back would make render ↔ companion a cycle.
+  if (job.sessionId ?? job.request?.sessionId) {
     lines.push("", `Tip: continue this thread with: task --resume-job ${job.id} "<follow-up>"`);
   }
   return lines.join("\n");

@@ -10,7 +10,8 @@
 ## 結構角色(判斷,不是清單)
 - **無 `SKILL.md` / `README`** —— grok 沒有自我推薦 surface;commander 靠 fleet 的
   `delegating-to-fleet` 路由 + model-invocable `/grok:task` / `/grok:live` 才找得到它
-  (見 `docs/adr/0001`)。
+  (見 `docs/adr/0001`)。`/grok:image` 雖然也是 model-invocable,但 fleet 的路由表還沒
+  指過來(raster 生圖仍指 `/antigravity:image`),所以目前只是使用者手打的 convenience。
 - `commands/*.md` — slash verb 的薄殼,每支 shell `scripts/grok-companion.mjs <verb>`。
 - `scripts/grok-companion.mjs` — CLI 入口(`runCompanion(argv, deps)`,deps 可注入 seam 測);
   `bin/grok-companion` 是啟動器。
@@ -20,7 +21,8 @@
 ## 進來改要遵守
 - **auth 委派給 grok CLI**(`XAI_API_KEY` 或 `~/.grok/auth.json`);companion **絕不碰 secrets、
   無 profile**。無 auth 的 headless run 會卡在裝置碼授權 → `startJob` 有 preflight 直接擋掉。
-- **`task` 和 `live` 是 model-invocable**(兩支 delegation entry);`cancel/logs/result/status/wait/setup`
+- **`task`、`live`、`image` 是 model-invocable**(三支 delegation entry;`image` 是純 prose 疊在
+  `task` 上的生圖 verb,沒有自己的 script);`cancel/logs/result/status/wait/setup`
   是 user-run(`disable-model-invocation`)。長任務 watch loop 靠**直接 shell companion** 跑 `wait`,
   不靠 model 觸發那些 verb。
 - **`--json-schema` 走非串流**(單一結果物件、無 live `/grok:logs`);一般模式是 `streaming-json`
@@ -41,6 +43,12 @@
 - **fan-out 會洩漏 subagent 文字**:多 agent 跑會把每個 agent 的 text 併成一串、無法 demux
   (實測無論怎麼交代都會漏)。唯一可靠解 —— 叫 leader 用 `<<<GROK_FINAL>>>` / `<<<GROK_END>>>`
   圍住最終報告(見 `commands/task.md`),companion 只取圍欄內的;或 `--no-subagents` 關掉 fan-out。
+- **`image_gen` 的失敗長得像成功**:free / X Basic 這種 tier 在伺服器端被歸零,`image_gen` 直接
+  短路、把「升級 SuperGrok」的推銷文當成**成功的** tool result 回來(錨點見
+  `docs/grok-cli-contract-audit.md` Part 4)。所以 `/grok:image` 的成功判準是**磁碟上的檔案**
+  (存在且非空),不是 grok 說它做完了 —— 這半句有源碼撐著。**還沒實跑驗過、首次 live run 要確認
+  的兩點**:(a) 這種 tier 短路是否真的讓 job exit 0、沒有 error event;(b) 那句 tier 提示是否真的
+  進得了 raw job log(triage 靠 grep `SuperGrok` 子字串,見 `commands/image.md`)。
 
 ## 細節指向
 - 長任務 watch loop(B1:`--background` + `wait` 輪詢 + exit-code 狀態機 10/0/1/2):

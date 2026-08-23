@@ -1,6 +1,6 @@
 ---
 description: Run a headless Grok Build task (grok-4.5) — launch, then wait/poll for the result
-argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort low|medium|high] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort <level>] [--no-subagents] [--schema <path>] [--background|--wait] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 ---
 
 Run the grok companion with the user's arguments and relay its output:
@@ -71,10 +71,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
 - Use `--prompt-file <path>` to pass a prompt stored in a file.
 - Use `--model <id>` or `--effort` to tune the run. Both are validated against a
   catalog Grok fetches at runtime, so `grok models` is the only authority — do not
-  trust a list written down anywhere (including here). Today that catalog holds one
-  model, `grok-4.5` (the plugin default), offering `low|medium|high` effort. A
-  canonical-looking level the model does not offer (`none`, `xhigh`, `max`, …) is
-  **rejected**: the job spawns, then dies with `unknown effort level`.
+  trust a list written down anywhere (including here). Which effort levels exist is
+  **per model**, and both the model list and each model's levels change between
+  releases. A level the chosen model does not offer is **rejected**: the job spawns,
+  then dies with `unknown effort level`. Check `grok models` before passing one.
 - **Structured output**: pass `--schema <path>` (a JSON Schema file) to constrain
   the answer to that shape — `resultText` comes back as JSON matching the schema,
   ready to `JSON.parse`. This runs Grok non-streaming (no live `/grok:logs` for
@@ -89,7 +89,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-companion.mjs" task $ARGUMENTS
   built-in restriction. Composes freely with `--read-only`/`--no-subagents`/resume.
 - Use `--max-turns <n>` as a runaway-cost fuse (handy for `--background` jobs
   nobody is watching live) and `--no-memory` to skip Grok's cross-session
-  memory for a one-off, reproducible run.
+  memory for a one-off, reproducible run. The companion enforces that by setting
+  `GROK_MEMORY=0` for the run, because Grok's own `--no-memory` flag is
+  TUI/ACP-only and does nothing in headless mode — without the env var, a user
+  whose config has `[memory] enabled = true` would get memory anyway.
 - Use `--resume-job <job>` or `--resume-last` to continue a previous Grok session.
 - Never re-run a failed job — it may already have side effects.
 - Report the companion's output back to the user verbatim.

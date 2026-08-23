@@ -1,6 +1,6 @@
 ---
 description: Run a Grok Build task (grok-4.5) as a VISIBLE live shell — a background streaming shell you watch run and see fail, instead of a silent detached job
-argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort low|medium|high] [--no-subagents] [--schema <path>] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
+argument-hint: "<prompt> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--prompt-file <path>] [--model <id>] [--effort <level>] [--no-subagents] [--schema <path>] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]"
 allowed-tools: Bash(node:*)
 ---
 
@@ -66,7 +66,9 @@ memory or another context (it drifts every release), and do not paste an unexpan
 - **`--research` for a curated tool set** (same as `/grok:task`) — restricts to
   `x_search`/`web_search`/`web_fetch`; every other built-in tool is authoritatively
   absent (harder than `--read-only`), MCP tools only get a cooperative `--deny`
-  backstop. `--max-turns <n>` / `--no-memory` behave the same as `/grok:task` too.
+  backstop. `--max-turns <n>` / `--no-memory` behave the same as `/grok:task` too —
+  including `--no-memory` being enforced via `GROK_MEMORY=0`, since Grok's own flag
+  is TUI/ACP-only and inert in headless mode.
 - **`--schema` runs non-streaming.** grok's structured-output mode emits one JSON
   object only at completion, so `/grok:live --schema` has *no* live progress — the
   shell stays quiet until it finishes, giving death-visibility (red on failure) but

@@ -36,7 +36,7 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
 const USAGE = `usage: grok-companion <command> [...]
   setup
-  task <prompt...>|--prompt-file <path> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--model <id>] [--effort low|medium|high] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
+  task <prompt...>|--prompt-file <path> [--read-only] [--research] [--max-turns <n>] [--no-memory] [--model <id>] [--effort <level>] [--no-subagents] [--schema <path>] [--background|--wait|--live] [--json] [--resume-job <job>|--resume-last] [--timeout-ms <n>]
   status [--json]
   result [<job-id>|--last] [--json]
   cancel <job-id> [--json]
@@ -60,6 +60,9 @@ function readSchemaFile(schemaPath, cwd) {
   } catch {
     throw new UsageError(`schema file not readable: ${schemaPath}`);
   }
+  // Emptiness first: JSON.parse("") also throws, but "not valid JSON" is the
+  // wrong story for a file the user meant to fill in and didn't.
+  if (!raw.trim()) throw new UsageError(`schema file is empty: ${schemaPath}`);
   try {
     JSON.parse(raw);
   } catch {
@@ -68,17 +71,45 @@ function readSchemaFile(schemaPath, cwd) {
   return raw;
 }
 
+// Where grok itself looks for a cached token: $GROK_AUTH_PATH, else
+// <grok home>/auth.json, where grok home is $GROK_HOME else <home>/.grok
+// (xai-grok-shell/src/auth/manager.rs:306-313; xai-grok-home/src/lib.rs:29-45
+// resolve_grok_home_from). No base dir at all → nothing to look at, so `null`
+// rather than a relative `.grok/auth.json`.
+function grokAuthFile(env) {
+  if (env.GROK_AUTH_PATH) return env.GROK_AUTH_PATH;
+  const home = env.GROK_HOME || (env.HOME ? path.join(env.HOME, ".grok") : null);
+  return home ? path.join(home, "auth.json") : null;
+}
+
+// Env keys that authenticate model sampling, in grok's own order: XAI_API_KEY,
+// then the legacy GROK_CODE_XAI_API_KEY (read_xai_api_key_env,
+// xai-grok-shell/src/agent/auth_method.rs:26-43), then GROK_AUTH — inline JSON
+// credentials, the highest-priority source of all (auth/manager.rs:315-328).
+// GROK_DEPLOYMENT_KEY is deliberately NOT here: resolve_credentials never
+// consults it (BYOK → cached provider token → session → XAI_API_KEY env,
+// agent/config.rs:4801-4825) — it authenticates grok's backend/management calls,
+// not sampling, so accepting it would wave a deployment-key-only user straight
+// into the hang below.
+const AUTH_ENV_KEYS = ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_AUTH"];
+
 // Auth is delegated to the grok CLI, but a headless run with NO auth does not
 // fail — it prints a device-code URL and blocks on "Waiting for authorization"
-// until the job timeout (1h). Preflight the same two sources `setup` reports and
-// refuse fast. Skip when a custom binary is injected (tests/e2e fakes own their
-// auth) or when explicitly overridden.
+// until the job timeout (1h). Preflight every source grok consults (the same
+// ones `setup` reports) and refuse fast. BYOK / auth_provider_command stay out
+// of scope: GROK_SKIP_AUTH_PREFLIGHT=1 covers them and the refusal says so.
 function hasGrokAuth(env) {
-  if (env.XAI_API_KEY) return true;
-  return Boolean(env.HOME && fs.existsSync(path.join(env.HOME, ".grok", "auth.json")));
+  if (AUTH_ENV_KEYS.some((k) => env[k])) return true;
+  const file = grokAuthFile(env);
+  return Boolean(file && fs.existsSync(file));
 }
+// Skipped only for an in-process fake (deps.binaryArgv — tests/e2e own their
+// auth) or an explicit override. NOT for GROK_BIN: that is a production override
+// pointing at a REAL binary at a non-PATH location (cmdSetup probes it,
+// adapter.mjs spawns it), so exempting it re-opens the failure the guard was
+// written to prevent, per the guard's own documentation above.
 function authPreflightNeeded(env, deps) {
-  return !deps.binaryArgv && !env.GROK_BIN && env.GROK_SKIP_AUTH_PREFLIGHT !== "1";
+  return !deps.binaryArgv && env.GROK_SKIP_AUTH_PREFLIGHT !== "1";
 }
 
 function safeJobId(value) {
@@ -100,7 +131,7 @@ function parseTimeoutMs(value, env) {
   return n;
 }
 
-// --max-turns <n>: a runaway-cost fuse (grok's own clap range is 1.., cli.rs:669).
+// --max-turns <n>: a runaway-cost fuse (grok's own clap range is 1.., cli.rs:685).
 // Validate here so a typo/negative value fails fast instead of at engine spawn.
 function parseMaxTurns(value) {
   if (value === undefined) return null;
@@ -117,7 +148,10 @@ function resultProjection(job) {
     jobId: job.id,
     status: job.status,
     resultText: job.resultText ?? null,
-    sessionId: job.sessionId ?? null,
+    // effectiveSessionId, not job.sessionId: a worker that died before finalize
+    // has only the pre-minted request.sessionId, and a --json consumer that sees
+    // null there cannot tell the job is still resumable (see renderResult).
+    sessionId: effectiveSessionId(job),
     exitCode: job.exitCode ?? null,
     error: job.error ?? null,
     errorKind: job.errorKind ?? null,
@@ -176,11 +210,13 @@ function cmdSetup({ env, out, deps }) {
   } else {
     out(`✓ grok CLI: ${String(probe.stdout).trim()}`);
   }
-  // Auth is delegated to the grok CLI. Report the two accepted sources.
-  const authFile = path.join(env.HOME ?? "", ".grok", "auth.json");
-  if (env.XAI_API_KEY) {
-    out("✓ auth: XAI_API_KEY is set");
-  } else if (env.HOME && fs.existsSync(authFile)) {
+  // Auth is delegated to the grok CLI. Report exactly the sources hasGrokAuth
+  // consults, so what setup prints is what the launch preflight checks.
+  const envKey = AUTH_ENV_KEYS.find((k) => env[k]);
+  const authFile = grokAuthFile(env);
+  if (envKey) {
+    out(`✓ auth: ${envKey} is set`);
+  } else if (authFile && fs.existsSync(authFile)) {
     out(`✓ auth: cached token at ${authFile}`);
   } else {
     out("• auth: none detected — run `!grok login` (SuperGrok / X Premium+) or set XAI_API_KEY");
@@ -202,6 +238,13 @@ function resolveResumeSource({ flags, stateDir }) {
   if (flags["resume-job"]) {
     const source = readJob(stateDir, safeJobId(flags["resume-job"]));
     if (!source) throw new UsageError(`No job ${flags["resume-job"]} to resume`);
+    // Same guard --resume-last applies below. Nothing in grok's session layer
+    // locks a resumed session, so `-r` onto a running job puts two processes on
+    // one session (mid-turn snapshot at best); onto a queued job it names a
+    // session grok has not created yet and fails opaquely in the engine.
+    if (!TERMINAL_STATUSES.has(source.status)) {
+      throw new UsageError(`Job ${source.id} is still ${source.status} — wait for it to finish before resuming`);
+    }
     const sessionId = effectiveSessionId(source);
     if (!sessionId) throw new UsageError(`Job ${source.id} has no session id to resume`);
     return { ...source, sessionId };
@@ -328,7 +371,10 @@ async function cmdTask({ argv, env, out, cwd, stateDir, deps }) {
   } else {
     prompt = positionals.join(" ").trim();
   }
-  if (!prompt) throw new UsageError("task requires a prompt or --prompt-file");
+  // .trim(): the positional path already trims, but a --prompt-file of pure
+  // whitespace is short enough to go out as `-p` and die in the engine with
+  // "--single: prompt is empty" (headless/cli.rs from_text). Fail fast instead.
+  if (!prompt.trim()) throw new UsageError("task requires a non-empty prompt or --prompt-file");
   if (flags.wait && flags.background) {
     throw new UsageError("--wait and --background are mutually exclusive");
   }
@@ -379,6 +425,11 @@ function cmdStatus({ argv, out, stateDir, deps = {} }) {
 }
 
 function cmdResult({ argv, out, stateDir }) {
+  // `--last` is accepted as an EXPLICIT alias for the default and deliberately
+  // needs no branch: listJobs is newest-first, so omitting the job id already
+  // resolves to the last job (a positional still wins over the flag). Kept in
+  // the parse list so `result --last` — advertised by commands/result.md — is
+  // not rejected as an unknown flag.
   const { flags, positionals } = parseArgs(argv, { boolFlags: ["last", "json"] });
   reconcileDeadPids(stateDir);
   const job = positionals[0] ? readJob(stateDir, safeJobId(positionals[0])) : listJobs(stateDir)[0];

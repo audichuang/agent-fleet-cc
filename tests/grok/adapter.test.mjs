@@ -87,12 +87,38 @@ test("buildInvocation: --max-turns <n> only when a positive maxTurns is set", ()
   assert.equal(on[on.indexOf("--max-turns") + 1], "5");
 });
 
-test("buildInvocation: --no-memory only when opted in", () => {
+// The flag alone is INERT in headless: `--no-memory` (cli.rs:664-670, hide=true,
+// "Legacy compatibility flag") feeds PagerArgs::memory_enabled_override(), which only
+// the interactive ConnectFlags literal reads (app/mod.rs:798-799); `-p` dispatches
+// headless::run_single_turn with `memory_enabled_override: None` hardcoded
+// (headless.rs:795). Memory then resolves through
+// BoolFlag::env("GROK_MEMORY").cli(None).config(memory.enabled) (config-types/memory.rs:607-612)
+// with precedence requirement > cli > env > config (config-types/flags.rs:118-135) — so the
+// ENV tier is the only one that can beat a user's `[memory] enabled = true`. Upstream pins
+// it too ("GROK_MEMORY=0 should force-disable even when TOML enables memory",
+// shell/src/config/tests.rs:283). Keep both: the flag costs nothing if upstream wires it up.
+test("buildInvocation: --no-memory sends the flag AND injects GROK_MEMORY=0 (the tier headless actually honours)", () => {
   const a = makeGrokAdapter();
   const off = a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
   assert.ok(!off.argv.includes("--no-memory"));
+  assert.equal(off.env.GROK_MEMORY, undefined, "no opt-in → never touch the user's memory setting");
   const on = a.buildInvocation({ job: { cwd: "/w", request: { noMemory: true } }, prompt: "p" });
   assert.ok(on.argv.includes("--no-memory"));
+  assert.equal(on.env.GROK_MEMORY, "0");
+  // GROK_MEMORY is spread LAST, so it also wins over a GROK_MEMORY=1 arriving through
+  // request.env — the same position that makes it beat the user's shell value, since
+  // buildEngineEnv applies invocation.env after baseEnv (core/env.mjs:20-31).
+  const shellSaysOn = a.buildInvocation({
+    job: { cwd: "/w", request: { noMemory: true, env: { GROK_MEMORY: "1" } } },
+    prompt: "p",
+  });
+  assert.equal(shellSaysOn.env.GROK_MEMORY, "0");
+  // …and an unrelated request env var still rides along untouched.
+  const withOther = a.buildInvocation({
+    job: { cwd: "/w", request: { noMemory: true, env: { FAKE_GROK_MODE: "success" } } },
+    prompt: "p",
+  });
+  assert.equal(withOther.env.FAKE_GROK_MODE, "success");
 });
 
 test("buildInvocation: --research / --max-turns / --no-memory compose freely with --read-only and resume (all orthogonal)", () => {
@@ -359,6 +385,54 @@ test("classifyError buckets grok 1.0.0 sandbox refusals as config, not unknown",
       1,
     ),
     "config",
+  );
+});
+
+// grok is a Rust CLI: its capacity / 5xx / transport failures arrive as PROSE, not as
+// undici codes, so the code-based `endpoint` regex above never saw them and they all fell
+// through to "unknown" — i.e. "no idea, don't retry" for the most retryable class there is.
+// Strings verbatim from the shipped 1.0.5 binary: sampling-types/src/error.rs:593-617
+// (status_user_message), :179 (reqwest stream); shell/src/sampling/error.rs:101
+// (OVERLOADED_USER_MESSAGE), :119-121 (http client init).
+test("classifyError buckets grok's prose capacity/5xx/transport failures as endpoint", () => {
+  const a = makeGrokAdapter();
+  for (const s of [
+    "Grok is temporarily unavailable. Please try again shortly. (HTTP 502)",
+    "Grok is temporarily overloaded. Please try again shortly. (HTTP 529)",
+    "Connection to Grok timed out or was interrupted. Please try again. (HTTP 520)",
+    "Secure connection to Grok failed. (HTTP 525)",
+    "Something went wrong on the server (HTTP 500)",
+    "Model is temporarily overloaded. Try again in a moment.",
+    "http client init failed: builder error: TLS backend not available",
+    "reqwest error stream: error reading a body from connection: unexpected EOF",
+  ]) {
+    assert.equal(a.classifyError(s, 1), "endpoint", s);
+  }
+  // A failed `-r` resume is `config` — same shape of fix as a bad model id (pick a real
+  // session or start fresh). "Failed to restore session from remote" is
+  // app/session_startup.rs:1285/1288; "Session does not exist" is headless.rs:559.
+  assert.equal(a.classifyError("Failed to restore session from remote: 404", 1), "config");
+  assert.equal(a.classifyError("Session does not exist: 6f9d3c2a", 1), "config");
+});
+
+// The two strings the buckets must NOT steal. Both are pinned to "unknown" rather than
+// merely "not endpoint" so a future regex widening in EITHER direction reddens here.
+test("classifyError: the two lookalike strings stay out of the endpoint and config buckets", () => {
+  const a = makeGrokAdapter();
+  // app/error_display.rs:230. The endpoint regex matches the FULL phrase "grok is
+  // temporarily unavailable" precisely so a bare "temporarily unavailable" cannot steal
+  // this one — and it is NOT `auth` either, because the auth regex looks for
+  // "authenticate"/"login", not "Authentication". Unknown is the honest answer here:
+  // it is an auth-SERVICE blip, and neither "fix your login" nor "retry the endpoint".
+  assert.equal(a.classifyError("Authentication temporarily unavailable", 1), "unknown");
+  // session_startup.rs:1134 — grok prints this even when the remote restore SUCCEEDS, and
+  // `config` is checked BEFORE `endpoint`, so matching it would relabel a later endpoint
+  // failure from the same run as a user config mistake.
+  assert.equal(a.classifyError("not found locally, restoring conversation from remote", 1), "unknown");
+  // …and the real endpoint failure that follows such a line must still win.
+  assert.equal(
+    a.classifyError("not found locally, restoring conversation from remote\nGrok is temporarily unavailable. (HTTP 502)", 1),
+    "endpoint",
   );
 });
 

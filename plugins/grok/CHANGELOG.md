@@ -1,5 +1,72 @@
 # grok — changelog
 
+## 0.7.0
+Sync pass against **released `grok 1.0.5`** (upstream `9fabade`; the plugin had been audited
+against `1.0.0` / `8a14c91`). Nothing we send is rejected and nothing we read was renamed —
+`headless/cli.rs` and the whole `headless/reducer/` NDJSON emitter are byte-identical across the
+diff, so Part 2 of the contract has no drift at all. What the pass *did* find were four
+pre-existing defects the durable checklist had been carrying as verified, plus a new verb.
+
+- **`/grok:image` — Grok Imagine, wired.** `image_gen` is registered on the headless path by
+  default (`.default(true)`, `requires_expr = Expr::True`, no `AgentMode::Headless` gate anywhere
+  in the chain), and the absolute path it saves reaches us twice: in grok's final text if we ask
+  for it, and on the `tool_call_update` line's typed `rawOutput`. So the verb is **prose over the
+  existing `task` verb — zero new JS**: a canned `image_gen` prompt, `--no-subagents`, and a
+  600s foreground timeout (the tool alone is allowed 300s in-engine and the proxy can go a minute
+  without a byte). The success criterion is **the file on disk**, never grok's prose: a free /
+  X Basic tier is server-side zero-limited and `image_gen` returns the SuperGrok upsell as a
+  **successful** tool result, so failure looks exactly like success. JPEG magic bytes are a
+  warning only — upstream names every file `.jpg` and saves whatever the API returned.
+- **`--no-memory` was a no-op in the only mode this plugin uses.** `headless.rs` hardcodes
+  `memory_enabled_override: None`; `PagerArgs::memory_enabled_override()` is consumed solely by
+  the interactive `ConnectFlags` path, and `HeadlessOptions` has no memory field at all. So a user
+  with `[memory] enabled = true` who asked for an isolated one-off got memory anyway — exactly
+  the population the promise was aimed at. The flag stays in argv (it costs nothing if upstream
+  ever wires it) and the run now also carries `GROK_MEMORY=0`, the tier headless actually
+  resolves, injected last so it beats a `GROK_MEMORY=1` in the user's shell. Pre-existing since
+  before the previous audit baseline; 1.0.5 only aggravated it by hiding the flag from `--help`
+  and relabelling it "Legacy compatibility flag".
+- **`classifyError`'s `endpoint` bucket was dead against the engine we ship against.** It matched
+  Node/undici codes (`ENOTFOUND`, `ECONNREFUSED`, `fetch failed`, …) which appear in grok's Rust
+  tree only in comments and tests. grok is a Rust CLI: its capacity and 5xx failures arrive as
+  prose ("Grok is temporarily overloaded … (HTTP 529)", "Model is temporarily overloaded. Try
+  again in a moment.", "http client init failed: …"), so every transient failure was labelled
+  `unknown`. Now matched on the real copy — using the full phrase `grok is temporarily
+  unavailable`, because the binary also carries "Authentication temporarily unavailable" and the
+  auth bucket does not catch it. The `config` bucket also gained a failed `-r` resume, which
+  reported `unknown` until now.
+- **The auth preflight checked 2 of grok's sources and hard-refused the rest.** It accepted only
+  `XAI_API_KEY` and a literal `$HOME/.grok/auth.json`, so a user authenticated via `GROK_HOME`,
+  `GROK_AUTH_PATH`, `GROK_AUTH` or the legacy `GROK_CODE_XAI_API_KEY` was told "not
+  authenticated" and the launch never happened. Broadened to those, with the auth file resolved
+  the way grok resolves it. `GROK_DEPLOYMENT_KEY` is deliberately **not** accepted —
+  `resolve_credentials` never consults it, so honouring it would wave a deployment-key-only user
+  into the device-code hang the preflight exists to prevent.
+- **`GROK_BIN` silently disabled that preflight.** It is a real deployment override (a
+  bubblewrap-wrapped grok, a non-PATH install), not just a test seam, so pointing it at a real
+  binary lost the guard entirely and re-opened the failure it was written to prevent. The skip now
+  keys on the in-process fake seam only; `GROK_SKIP_AUTH_PREFLIGHT=1` remains the documented
+  escape hatch.
+- **A crashed job is resumable, and now says so.** The resume tip and the `--json` `sessionId`
+  both read only the post-hoc id that a *normal* finalize writes — so the crash-safe pre-minted
+  `request.sessionId`, which exists precisely for a worker that died mid-run, was hidden in the
+  one shape where it matters most. Both readers use the two-field predicate now.
+- **`--resume-job` no longer accepts a still-running job.** `--resume-last` already refused one;
+  the explicit form validated only that the job existed and had a session id, so `-r` could point
+  at a session another live worker was still appending to. Same guard, both paths.
+- **Fail fast on empty input.** An empty (or whitespace-only) `--schema` or `--prompt-file` died
+  at engine spawn with grok's own message; both now fail locally with the reason.
+- **Stopped re-enumerating a runtime catalog.** `commands/task.md` named `grok-4.5` as the only
+  model and `low|medium|high` as the only efforts — and used `xhigh` as its example of a
+  job-killing level. The live catalog now holds `grok-4.6`, which offers `xhigh` and is the CLI's
+  own default. That claim rotted in 14 days, so the enumeration is gone rather than refreshed:
+  `grok models` is the authority, effort levels are per-model. (The plugin's default is still
+  `grok-4.5` — moving it is a product decision, not a doc fix.)
+- **Anchors re-pinned to the binary we actually run.** Part 1's `cli.rs` pins had drifted +8..+16
+  lines and Part 3's sandbox pins ~50-70 after upstream's 481-line `config/mod.rs` rewrite;
+  behaviour is unchanged across it. `docs/grok-cli-contract-audit.md` carries the new pins, the
+  Imagine surface, and the re-run recipes.
+
 ## 0.6.0
 Sync pass against **released `grok 1.0.0`** and grok-build `8a14c91` (the plugin had
 been audited against `0.2.111` / `c68e39f`). No flag we send is rejected and no field
