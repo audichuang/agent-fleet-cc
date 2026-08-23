@@ -564,6 +564,15 @@ export function resolveJobFile(cwd, jobId) {
   return path.join(ensureJobDir(cwd, jobId), "job.json");
 }
 
+// Pure read-path twin of resolveJobFile: joins only, never mkdirs (same reason
+// saveState's prune uses the bare jobDirPath). A detached reader mid-tick — the
+// watchdog, a SessionEnd hook, the terminal-signal healer — must not RE-CREATE a
+// jobs/<id>/ dir saveState just pruned: an empty dir carries no terminal.lock, so
+// sweepOrphanLockDirs never collects it and sharedListJobs skips it — it leaks forever.
+export function jobFilePath(cwd, jobId) {
+  return path.join(jobDirPath(cwd, jobId), "job.json");
+}
+
 // Resolve a per-job file from an ALREADY-KNOWN physical state dir, without
 // re-deriving it from a workspace path. Used when a job was located across
 // workspaces (its physical dir may not match the slug-hash a re-derivation
@@ -706,7 +715,7 @@ export function ensureTerminalSignal(cwd, jobId, record = null) {
   let stored = record;
   if (!stored) {
     try {
-      stored = readJobFile(resolveJobFile(cwd, jobId));
+      stored = readJobFile(jobFilePath(cwd, jobId));
     } catch {
       return false;
     }

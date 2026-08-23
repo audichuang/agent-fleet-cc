@@ -5,7 +5,8 @@ import {
   renderCancelReport,
   renderJobStatusReport,
   renderReviewResult,
-  renderStoredJobResult
+  renderStoredJobResult,
+  renderTaskResult
 } from "../../plugins/codex/scripts/lib/render.mjs";
 
 test("renderCancelReport confirms cancellation when the job was actually cancelled", () => {
@@ -115,4 +116,62 @@ test("renderJobStatusReport surfaces autoReconciled jobs with PID context", () =
   });
 
   assert.match(output, /Auto-reconciled as failed: worker process \(PID 90016\) exited without reporting\./);
+});
+
+test("renderTaskResult surfaces the failure reason above a failed turn's partial output", () => {
+  // /codex:task's stdout is returned VERBATIM to the user (commands/task.md), so a
+  // failed turn that still produced an agent message must not read as a plain answer.
+  const output = renderTaskResult(
+    {
+      rawOutput: "Here is what I found so far.",
+      failureMessage: "stream disconnected",
+      errorMessage: "Codex ended the turn with a failure: 429 rate limit."
+    },
+    { title: "Codex Task", jobId: null, write: false }
+  );
+
+  assert.match(output, /failed/i);
+  assert.match(output, /429 rate limit\./);
+  // The partial answer is kept, but BELOW the reason.
+  assert.ok(
+    output.indexOf("429 rate limit") < output.indexOf("Here is what I found so far."),
+    "the failure reason must come first, or a verbatim paste hides it"
+  );
+});
+
+test("renderTaskResult leaves a successful turn's output untouched", () => {
+  const output = renderTaskResult({ rawOutput: "All done.", failureMessage: "" }, {});
+  assert.equal(output, "All done.\n");
+});
+
+test("renderStoredJobResult prefixes status and failure reason onto a failed job's stored output", () => {
+  // The rawOutput branch used to preempt the status/errorMessage block entirely, so
+  // /codex:result re-served a failed job's partial answer with no status line at all.
+  const output = renderStoredJobResult(
+    {
+      id: "task-failed",
+      status: "failed",
+      title: "Codex Task",
+      jobClass: "task",
+      errorMessage: "Codex ended the turn with a failure: 429 rate limit."
+    },
+    {
+      threadId: "thr_9",
+      result: { rawOutput: "Here is what I found so far." }
+    }
+  );
+
+  assert.match(output, /Status: failed/);
+  assert.match(output, /429 rate limit\./);
+  assert.match(output, /Here is what I found so far\./);
+  assert.match(output, /Codex session ID: thr_9/);
+});
+
+test("renderStoredJobResult does not prefix a status header onto a completed job", () => {
+  const output = renderStoredJobResult(
+    { id: "task-ok", status: "completed", title: "Codex Task", jobClass: "task" },
+    { result: { rawOutput: "All done." } }
+  );
+
+  assert.equal(output, "All done.\n");
 });

@@ -347,7 +347,12 @@ export function renderNativeReviewResult(result, meta) {
 export function renderTaskResult(parsedResult, meta) {
   const rawOutput = typeof parsedResult?.rawOutput === "string" ? parsedResult.rawOutput : "";
   if (rawOutput) {
-    return rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
+    const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
+    // A failed turn that still produced an agent message must NOT render as a plain
+    // answer: `commands/task.md` tells Claude to return this stdout verbatim, so the
+    // failure reason has to sit ABOVE the partial output or the failure vanishes.
+    const failureReason = String(parsedResult?.errorMessage ?? "").trim();
+    return failureReason ? `Codex turn failed: ${failureReason}\n\n${output}` : output;
   }
 
   const message = String(parsedResult?.failureMessage ?? "").trim() || "Codex did not return a final message.";
@@ -422,12 +427,26 @@ export function renderJobStatusReport(job) {
 export function renderStoredJobResult(job, storedJob) {
   const threadId = storedJob?.threadId ?? job.threadId ?? null;
   const resumeCommand = threadId ? `codex resume ${threadId}` : null;
-  if (isStructuredReviewStoredResult(storedJob) && storedJob?.rendered) {
-    const output = storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
+  // A stored payload from a NON-completed job must never be served as a bare answer:
+  // /codex:result promises the job status, and the captured output of a failed turn is
+  // a partial answer that reads as a successful one without this header. The final
+  // fallback block below already prints status + errorMessage itself.
+  const failureHeader =
+    job?.status && job.status !== "completed"
+      ? `Status: ${job.status}${
+          job.errorMessage ?? storedJob?.errorMessage ? `\n\n${job.errorMessage ?? storedJob.errorMessage}` : ""
+        }\n\n`
+      : "";
+  const withContext = (body) => {
+    const output = body.endsWith("\n") ? body : `${body}\n`;
     if (!threadId) {
-      return output;
+      return `${failureHeader}${output}`;
     }
-    return `${output}\nCodex session ID: ${threadId}\nResume in Codex: ${resumeCommand}\n`;
+    return `${failureHeader}${output}\nCodex session ID: ${threadId}\nResume in Codex: ${resumeCommand}\n`;
+  };
+
+  if (isStructuredReviewStoredResult(storedJob) && storedJob?.rendered) {
+    return withContext(storedJob.rendered);
   }
 
   const rawOutput =
@@ -435,19 +454,11 @@ export function renderStoredJobResult(job, storedJob) {
     (typeof storedJob?.result?.codex?.stdout === "string" && storedJob.result.codex.stdout) ||
     "";
   if (rawOutput) {
-    const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
-    if (!threadId) {
-      return output;
-    }
-    return `${output}\nCodex session ID: ${threadId}\nResume in Codex: ${resumeCommand}\n`;
+    return withContext(rawOutput);
   }
 
   if (storedJob?.rendered) {
-    const output = storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
-    if (!threadId) {
-      return output;
-    }
-    return `${output}\nCodex session ID: ${threadId}\nResume in Codex: ${resumeCommand}\n`;
+    return withContext(storedJob.rendered);
   }
 
   const lines = [

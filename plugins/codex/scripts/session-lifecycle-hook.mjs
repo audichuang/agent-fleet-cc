@@ -20,7 +20,7 @@ import {
   hasActiveBackgroundJobs,
   loadState,
   readJobFile,
-  resolveJobFile,
+  jobFilePath,
   resolveStateFile,
   saveState,
   writeCompletionSignalFile
@@ -96,7 +96,7 @@ function cleanupSessionJobs(cwd, sessionId, deps = {}) {
     const TERMINAL = new Set(["completed", "failed", "cancelled"]);
     let liveRecord = null;
     try {
-      liveRecord = readJobFile(resolveJobFile(workspaceRoot, job.id));
+      liveRecord = readJobFile(jobFilePath(workspaceRoot, job.id));
     } catch {
       liveRecord = null;
     }

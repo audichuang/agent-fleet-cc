@@ -20,7 +20,7 @@ import {
   applyJobPatchIfActive,
   ensureTerminalSignal,
   readJobFile,
-  resolveJobFile,
+  jobFilePath,
   resolveStateDir,
   writeCompletionSignalFile
 } from "./lib/state.mjs";
@@ -36,7 +36,7 @@ export function makeDefaultDeps() {
   return {
     readJob: (cwd, jobId) => {
       try {
-        return readJobFile(resolveJobFile(cwd, jobId));
+        return readJobFile(jobFilePath(cwd, jobId));
       } catch {
         return null;
       }

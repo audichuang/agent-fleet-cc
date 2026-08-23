@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.6.0
+
+**A failed Codex turn no longer reads as a finished answer.** The `--json` payload and
+`/codex:wait` / `/codex:status` always carried the failure; the two paths the slash commands
+actually print did not. `renderTaskResult` short-circuited on a non-empty `rawOutput` and
+returned it bare — and `commands/task.md` tells Claude to relay that stdout verbatim — so a turn
+that produced a partial answer and *then* died (usage limit, tool error, context overflow) was
+handed over as the result. `/codex:result <id>` repeated it: the stored-output branch preempted
+the `Status:` / `errorMessage` block, so the failure header was unreachable whenever any output
+text existed.
+
+- **`renderTaskResult` puts the reason above the partial output** (`Codex turn failed: …`). The
+  reason was already computed two lines from the call — it just was not passed in. A successful
+  turn is byte-identical to before (`failureReasonFor` returns `null` at status 0).
+- **`renderStoredJobResult` prefixes `Status: <status>` + the error message** onto every
+  non-completed job's stored payload, which is what `commands/result.md` promised all along. The
+  three duplicated return blocks collapsed into one helper — net deletion.
+- **`interruptAppServerTurn` stops spawning an app-server that cannot own the turn.** With no
+  recorded broker session it used to start a throwaway `codex app-server`, send `turn/interrupt`
+  for a thread that server had never seen, and log "Codex turn interrupt failed: …" as if a live
+  turn had resisted. It now short-circuits on `getSessionRuntimeStatus(...).mode !== "shared"` and
+  the cancel path logs the honest no-op ("interrupt skipped: <precondition>") instead of dropping
+  it. The auth-status and model-list callers keep their spawn fallback — the guard is local.
+- **Prose stops implying `--write`-less runs are sandboxed.** `resolveSandboxMode` ignores its
+  requested argument and returns `danger-full-access` with `approvalPolicy: never` for every
+  thread — deliberate since 1.0.13, because this fork's target hosts cannot start Codex's bwrap
+  sandbox at all. But `commands/handoff.md` flatly called a Mode A handoff "**read-only**", and
+  `agents/codex-rescue.md` / both skills used "read-only" as routing vocabulary, so omitting
+  `--write` looked like isolation when it is only job metadata. All four now say what actually
+  runs, and name `CODEX_SANDBOX_MODE=read-only` as the one knob that asks for real enforcement.
+  Until now the only honest statement of the hardcode lived in this changelog.
+- **`task` swallows a stray `--wait`.** It was not in `booleanOptions`, and an unrecognised
+  `--flag` becomes a positional — and positionals *are* the prompt, so `/codex:task --wait fix the
+  bug` sent Codex the prompt "--wait fix the bug". `review` already accepted and discarded it.
+- **Read paths stopped creating job directories.** `resolveJobFile` / `resolveJobLogFile` mkdir on
+  the way to a *read*, so a detached watchdog reading a just-pruned job re-created `jobs/<id>/`
+  with no `terminal.lock` — invisible to both the orphan sweep and the job list, leaking forever.
+  A pure `jobFilePath` now serves the three read call sites.
+- **Protocol re-check, no drift.** 639 upstream commits (`646f7c0a91` → `99660ab3c7`, installed CLI
+  0.147.0 → 0.149.0) move the wire schema +5560/−195, but only 6 files carry any deletion, none on
+  our dependency surface, and all three `ClientRequest.json` deletions are *loosening*. Upstream
+  also now proves `thread/resume` and `thread/fork` sit on the auto-review coerce lane rather than
+  the `-32600` reject lane — closing an open question about `buildResumeParams`. Details and the
+  re-run recipe: `docs/codex-protocol-sync-audit.md`.
+
 ## 1.5.0
 
 **`gpt-5.6-luna` becomes a real lane.** OpenAI cut Luna 80% on 2026-07-30 ($0.20 / $1.20 per 1M

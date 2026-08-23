@@ -687,6 +687,9 @@ async function executeTaskRun(request) {
     {
       rawOutput,
       failureMessage,
+      // The render needs the structured reason too: a failed turn that still produced
+      // a final message would otherwise render as a plain successful answer.
+      errorMessage,
       reasoningSummary: result.reasoningSummary
     },
     {
@@ -1043,7 +1046,10 @@ async function handleReview(argv) {
 async function handleTask(argv) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["model", "effort", "cwd", "prompt-file", "expected-worktree", "expected-branch", "expected-base"],
-    booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background"],
+    // "wait" is accepted and discarded (as in handleReviewCommand): an unrecognised
+    // --flag becomes a positional, and positionals ARE the prompt — so a forwarded
+    // `--wait` would otherwise be sent to Codex as part of the prompt text.
+    booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background", "wait"],
     aliasMap: {
       m: "model"
     }
@@ -1329,13 +1335,14 @@ async function handleCancel(argv) {
     // (result.stored.pid) — authoritative over the index snapshot's job.pid, which can
     // be stale or absent. Only signal a pid still alive (never a recycled one).
     interrupt = await interruptAppServerTurn(cwd, { threadId, turnId });
-    if (interrupt.attempted) {
-      appendLogLine(
-        job.logFile,
-        interrupt.interrupted
-          ? `Requested Codex turn interrupt for ${turnId} on ${threadId}.`
-          : `Codex turn interrupt failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
-      );
+    if (interrupt.interrupted) {
+      appendLogLine(job.logFile, `Requested Codex turn interrupt for ${turnId} on ${threadId}.`);
+    } else if (interrupt.attempted) {
+      appendLogLine(job.logFile, `Codex turn interrupt failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`);
+    } else if (interrupt.detail) {
+      // A no-op is not a failure — say which precondition was missing instead of
+      // dropping it (no broker session recorded, no turn identity, no Codex CLI).
+      appendLogLine(job.logFile, `Codex turn interrupt skipped: ${interrupt.detail}`);
     }
 
     // Per-job pid is authoritative; fall back to the index snapshot's pid only when

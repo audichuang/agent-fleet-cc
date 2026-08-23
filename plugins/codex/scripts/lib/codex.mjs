@@ -1236,9 +1236,11 @@ const MODEL_UNAVAILABLE_RE = /(?=[\s\S]*\bmodel\b)[\s\S]*requires a newer versio
 // but `other` is REQUIRED and verified live: Codex maps an error to a code by error
 // VARIANT, not HTTP status, and an upstream 400 is `CodexErrorDetails::UnexpectedStatus`,
 // which falls into the `_ => CodexErrorInfo::Other` catch-all
-// (codex-rs/protocol/src/error.rs `to_codex_protocol_error`, codex-cli 0.146.0). A real
-// rejected turn on 0.146.0 returned `[other]` — so allowing only `badRequest` would
-// silently disable the fallback. Anything NOT in this set is a genuine failure.
+// (codex-rs/protocol/src/error.rs `to_codex_protocol_error`). A real rejected turn
+// returned `[other]` live on codex-cli 0.146.0 — so allowing only `badRequest` would
+// silently disable the fallback. Re-checked for 0.149.0 (the installed binary) by the
+// schema/source pass at upstream main 99660ab3c7, not a fresh live run: no drift on
+// this surface. Anything NOT in this set is a genuine failure.
 const MODEL_GATE_CODES = new Set(["badRequest", "other"]);
 
 // True when a FAILED turn/review result failed specifically because its model was
@@ -1562,6 +1564,20 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId }) {
       interrupted: false,
       transport: null,
       detail: availability.detail
+    };
+  }
+
+  // The turn only exists on the SHARED broker. With no recorded session, `connect`'s
+  // reuseExistingBroker fallback would spawn a throwaway app-server that cannot own
+  // the turn — the RPC then necessarily errors and we would report "interrupt failed"
+  // as if a live turn had resisted. Guard is local on purpose: the auth-status and
+  // model-list callers legitimately want that spawn fallback.
+  if (getSessionRuntimeStatus(process.env, cwd).mode !== "shared") {
+    return {
+      attempted: false,
+      interrupted: false,
+      transport: null,
+      detail: "no shared Codex broker session is recorded; the turn cannot be interrupted from here"
     };
   }
 

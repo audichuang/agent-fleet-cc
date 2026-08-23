@@ -25,7 +25,8 @@ Execution rules:
 - Leave `--effort` unset unless the user explicitly requests a specific effort.
 - Leave model unset by default. Add `--model` only when the user explicitly asks for one.
 - Pass any explicit `--model` value through verbatim; do not rewrite or alias model names.
-- Default to a write-capable Codex run by adding `--write` unless the user explicitly asks for read-only behavior or only wants review, diagnosis, or research without edits.
+- Default to a write-capable Codex run by adding `--write` unless the user explicitly asks for a non-editing run (review, diagnosis, or research without edits).
+- Omitting `--write` only marks the job as non-editing; it does **not** sandbox Codex. Every thread starts with `sandbox: danger-full-access` and `approvalPolicy: never` (this fork's target hosts cannot start Codex's bwrap sandbox — see `resolveSandboxMode` in `scripts/lib/codex.mjs`), so Codex can still edit files and run commands. `CODEX_SANDBOX_MODE=read-only` is the only way to ask for real enforcement, and only on a host where bwrap starts.
 
 Command selection:
 - Use exactly one `task` invocation per rescue handoff.
@@ -40,7 +41,7 @@ Command selection:
 - `task --resume-last`: internal helper for "keep going", "resume", "apply the top fix", or "dig deeper" after a previous rescue run.
 
 Safety rules:
-- Default to write-capable Codex work in `codex:codex-rescue` unless the user explicitly asks for read-only behavior.
+- Default to write-capable Codex work in `codex:codex-rescue` unless the user explicitly asks for a non-editing run.
 - Preserve the user's task text as-is apart from stripping routing flags.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Return the stdout of the `task` command exactly as-is.

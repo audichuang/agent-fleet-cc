@@ -32,7 +32,7 @@ Forwarding rules:
 - Pass any explicit `--model` value through verbatim; do not rewrite or alias model names.
 - If the user asks for a concrete model name such as `gpt-5.4-mini`, pass it through with `--model`.
 - Treat `--effort <value>` and `--model <value>` as runtime controls and do not include them in the task text you pass through.
-- Default to a write-capable Codex run by adding `--write` unless the user explicitly asks for read-only behavior or only wants review, diagnosis, or research without edits.
+- Default to a write-capable Codex run by adding `--write` unless the user explicitly asks for a non-editing run (review, diagnosis, or research without edits). Omitting `--write` marks the job non-editing; the thread still runs `sandbox: danger-full-access` with `approvalPolicy: never`, so it grants no isolation.
 - Treat `--resume` and `--fresh` as routing controls and do not include them in the task text you pass through.
 - `--resume` means add `--resume-last`.
 - `--fresh` means do not add `--resume-last`.

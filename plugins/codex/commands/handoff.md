@@ -50,8 +50,9 @@ cat <<'PROMPT_EOF' > "$TMPFILE"
 PROMPT_EOF
 ```
 2. Run it through Codex with the companion task runner (defaults to gpt-5.6 / xhigh):
-   - Mode A (review handoff) is **read-only** — do NOT add `--write`.
+   - Mode A (review handoff) is a **non-editing run** (review / diagnosis / research) — do NOT add `--write`.
    - Mode B: add `--write` only if the task clearly needs to edit code, or the user passed `--write`.
+   - Omitting `--write` marks the job as non-editing (metadata) — it does **not** sandbox Codex. Every thread starts with `sandbox: danger-full-access` and `approvalPolicy: never`, because this fork's target hosts cannot start Codex's bwrap sandbox at all (see `resolveSandboxMode` in `scripts/lib/codex.mjs`). Codex can therefore still edit files and run commands during a non-editing run; on a host where bwrap does start, `CODEX_SANDBOX_MODE=read-only` is what asks for real enforcement.
 
 Foreground (default):
 ```bash
