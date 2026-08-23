@@ -339,7 +339,13 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       // (HookWriteDenyError::MissingConfigured, hook_write_deny.rs:27-31).
       if (/refusing to start/i.test(s)) return "config";
       // Buckets widened against real grok 0.2.93 failure strings (verified by running).
-      if (/401|unauthorized|forbidden|not logged in|no cached credentials|waiting for authorization|XAI_API_KEY|authenticate|token expired|grok login|sign in/i.test(s)) return "auth";
+      // `authenticat` (not `authenticate`) so grok's own "Authentication temporarily
+      // unavailable" lands here instead of falling through to `unknown`: the endpoint
+      // bucket deliberately requires the FULL "grok is temporarily unavailable" so it
+      // cannot steal this string, which left nobody catching it. It names the right
+      // subsystem even though the failure is transient — `errorKind` is a label, not a
+      // retry signal (only render.mjs and the job record read it).
+      if (/401|unauthorized|forbidden|not logged in|no cached credentials|waiting for authorization|XAI_API_KEY|authenticat|token expired|grok login|sign in/i.test(s)) return "auth";
       if (/429|too many requests|rate limit|usage limit|quota/i.test(s)) return "quota";
       // "model did not produce structured output" — a --json-schema run the model
       // could not satisfy. Actionable in the same way a bad model id is: simplify

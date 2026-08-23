@@ -46,9 +46,12 @@
 - **`image_gen` 的失敗長得像成功**:free / X Basic 這種 tier 在伺服器端被歸零,`image_gen` 直接
   短路、把「升級 SuperGrok」的推銷文當成**成功的** tool result 回來(錨點見
   `docs/grok-cli-contract-audit.md` Part 4)。所以 `/grok:image` 的成功判準是**磁碟上的檔案**
-  (存在且非空),不是 grok 說它做完了 —— 這半句有源碼撐著。**還沒實跑驗過、首次 live run 要確認
-  的兩點**:(a) 這種 tier 短路是否真的讓 job exit 0、沒有 error event;(b) 那句 tier 提示是否真的
-  進得了 raw job log(triage 靠 grep `SuperGrok` 子字串,見 `commands/image.md`)。
+  (存在且非空),不是 grok 說它做完了。2026-08-23 對真 `grok 1.0.5` 實跑過一次(35s、exit 0、
+  431KB JPEG):快樂路徑、headless 的 `image_gen` 註冊(出現在 `available_commands`)、tool 事件
+  進得了 raw job log、`tool_call_update` **沒有 `toolName`** 欄位、`rawOutput` 是
+  `{type:"ImageGen", path, filename, session_folder}` —— 全部核實。**唯一還沒實跑到的**是 tier
+  被歸零那條分支(測試帳號有 SuperGrok),所以「短路是否真的讓 job exit 0、沒有 error event」
+  仍只有源碼證據;triage 靠 grep `SuperGrok` 子字串(見 `commands/image.md`)。
 
 ## 細節指向
 - 長任務 watch loop(B1:`--background` + `wait` 輪詢 + exit-code 狀態機 10/0/1/2):

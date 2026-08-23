@@ -62,6 +62,19 @@ pre-existing defects the durable checklist had been carrying as verified, plus a
   own default. That claim rotted in 14 days, so the enumeration is gone rather than refreshed:
   `grok models` is the authority, effort levels are per-model. (The plugin's default is still
   `grok-4.5` — moving it is a product decision, not a doc fix.)
+- **Live-verified against real `grok 1.0.5`.** One generation (35s, exit 0, a 431KB JPEG)
+  turned three source-read claims into observed ones: `image_gen` really is registered on the
+  headless path (it shows up in `available_commands`), tool events really do reach the raw job
+  log, and the `tool_call_update` line really carries no `toolName` — with `rawOutput` coming
+  back as `{type:"ImageGen", path, filename, session_folder}` where `session_folder` is the bare
+  directory name and `uploaded_url` is simply absent for local output. Only the tier-restricted
+  branch is still source-read (the account under test has SuperGrok, so it never fired). The run
+  also found a doc gap the source could not: **the companion takes no `--cwd`** — the run's cwd
+  is the invoking shell's, which `commands/image.md` now says explicitly.
+- **`Authentication temporarily unavailable` no longer lands in `unknown`.** The `endpoint`
+  bucket deliberately requires the full phrase "grok is temporarily unavailable" so it cannot
+  steal that string — but the `auth` bucket matched `authenticate`, which is not a substring of
+  "Authentication", so nobody caught it. Now `authenticat`, which covers both.
 - **Anchors re-pinned to the binary we actually run.** Part 1's `cli.rs` pins had drifted +8..+16
   lines and Part 3's sandbox pins ~50-70 after upstream's 481-line `config/mod.rs` rewrite;
   behaviour is unchanged across it. `docs/grok-cli-contract-audit.md` carries the new pins, the

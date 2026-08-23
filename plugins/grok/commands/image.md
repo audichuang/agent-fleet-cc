@@ -17,6 +17,13 @@ hand grok**. Grok writes the original into its own session folder under `~/.grok
 reach in and copy it out afterwards. **Grok's own shell has to do the copy**, which is
 why the prompt below ends with a `cp`.
 
+**There is no `--cwd` flag on the companion** (it exits 1 with `Unknown flag: --cwd`) —
+the run's cwd is simply the cwd of the Bash call, and the adapter forwards that to grok.
+So either let `--out` be relative to where the Bash call already runs, or make it
+absolute and confirm it is under that cwd. Resolve this before composing the prompt; a
+`cp` to a path outside grok's cwd is the one failure that still leaves the run looking
+successful.
+
 ## 2. Run it in the FOREGROUND with a long timeout
 
 ```typescript
@@ -85,9 +92,20 @@ Take the job id from `--json` and read the raw stream:
   correlate `toolCallId` back to the earlier `tool_call` line, which is the variant that
   does carry `toolName`.
 - **No `image_gen` `tool_call` at all** → the tool is not registered in this
-  environment. The disablers are `GROK_IMAGE_GEN`, `[features] image_gen` in grok's
-  config, and the remote `imagine_tool_disabled` kill switch. Report it; do not retry
-  blindly.
+  environment. Cheapest confirmation: the `available_commands` line at the top of the raw
+  stream lists every tool the session got, `image_gen` included when it is on. The
+  disablers are `GROK_IMAGE_GEN`, `[features] image_gen` in grok's config, and the remote
+  `imagine_tool_disabled` kill switch. Report it; do not retry blindly.
+
+Verified against real `grok 1.0.5` on 2026-08-23 (one live generation, 35s, exit 0):
+`image_gen` appears in `available_commands` on the headless path; the tool events do reach
+the raw job log; the `tool_call_update` line's keys are exactly `content`, `locations`,
+`rawOutput`, `status`, `toolCallId`, `type` — **no `toolName`**, confirming the grep trap
+above; and `rawOutput` came back as `{"type":"ImageGen","path":…,"filename":"1.jpg",
+"session_folder":"images"}` — note `session_folder` is the bare directory *name*, not a
+path, and `uploaded_url` is simply absent for local output. The tier-restricted branch was
+**not** exercised (the account under test has SuperGrok), so that one bullet is still
+source-read only.
 
 ## 6. Cost
 

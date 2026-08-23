@@ -415,16 +415,16 @@ test("classifyError buckets grok's prose capacity/5xx/transport failures as endp
   assert.equal(a.classifyError("Session does not exist: 6f9d3c2a", 1), "config");
 });
 
-// The two strings the buckets must NOT steal. Both are pinned to "unknown" rather than
-// merely "not endpoint" so a future regex widening in EITHER direction reddens here.
+// The lookalike strings the buckets must not mis-route. Pinned to an exact kind rather
+// than merely "not endpoint" so a future regex widening in EITHER direction reddens here.
 test("classifyError: the two lookalike strings stay out of the endpoint and config buckets", () => {
   const a = makeGrokAdapter();
   // app/error_display.rs:230. The endpoint regex matches the FULL phrase "grok is
   // temporarily unavailable" precisely so a bare "temporarily unavailable" cannot steal
-  // this one — and it is NOT `auth` either, because the auth regex looks for
-  // "authenticate"/"login", not "Authentication". Unknown is the honest answer here:
-  // it is an auth-SERVICE blip, and neither "fix your login" nor "retry the endpoint".
-  assert.equal(a.classifyError("Authentication temporarily unavailable", 1), "unknown");
+  // this one. It belongs to `auth` — the auth regex matches on `authenticat`, which
+  // covers both "authenticate" and "Authentication"; before that it matched neither and
+  // this string fell through to `unknown`, which named no subsystem at all.
+  assert.equal(a.classifyError("Authentication temporarily unavailable", 1), "auth");
   // session_startup.rs:1134 — grok prints this even when the remote restore SUCCEEDS, and
   // `config` is checked BEFORE `endpoint`, so matching it would relabel a later endpoint
   // failure from the same run as a user config mistake.
