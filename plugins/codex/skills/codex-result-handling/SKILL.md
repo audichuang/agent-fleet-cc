@@ -1,6 +1,6 @@
 ---
 name: codex-result-handling
-description: Internal guidance for presenting Codex helper output back to the user
+description: Internal contract for relaying Codex helper output back to the user. Consult it BEFORE presenting any Codex review, rescue, task or result payload — it carries the stop-rule that findings must never be auto-fixed (ask the user first, even when the fix is obvious), the rule that a failed or never-invoked Codex run must be reported rather than replaced with a Claude-side answer, and how to preserve verdicts, severity order, file:line precision and inference-vs-fact boundaries.
 user-invocable: false
 ---
 

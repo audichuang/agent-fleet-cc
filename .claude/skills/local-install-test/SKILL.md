@@ -8,11 +8,7 @@ description: >-
   "how do I install this locally", "how do I test my plugin change", "how do I
   swap in the new version", "本地安裝測試", "直接替換", "我改了 codex plugin 怎麼測",
   or hit "I bumped the version / updated the marketplace but Claude Code still
-  loads the old plugin". It explains the marketplace → cache → installed_plugins
-  pin model, why a version bump is mandatory, that `claude plugin install` does NOT
-  upgrade an already-installed plugin, the two ways to flip the active version
-  (the /plugin UI vs a direct installed_plugins.json edit), and a faster
-  local-path dev loop that needs no git push. Scope: installing/testing THIS
+  loads the old plugin". Scope: installing/testing THIS
   repo's plugins in Claude Code — not generic `npm install`, not authoring plugin
   features, not the hermetic `npm test` suite (that's the e2e-testing skill).
 ---
