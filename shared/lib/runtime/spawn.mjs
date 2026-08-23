@@ -24,13 +24,20 @@ export function killProcessGroup(pid, signal = "SIGTERM", killImpl = process.kil
 }
 
 // TERM 先禮後兵,grace 後 KILL。timer unref — 不留住 event loop。
-// 回傳 SIGKILL 升級的 timer handle,讓呼叫端在 child 已經自己收乾淨之後取消它。
-// 不取消的話,那個 callback 仍會在 graceMs 後對 pgid 開槍 —— pid 已死且 pgid 被系統回收時,
-// 那一槍會打到不相干的 process group。handle 仍然 unref(不該讓它把 process 撐著),
-// 但現在「可取消」是結構上成立的,而不是靠它剛好沒事。
+// TERM 先禮後兵,graceMs 後 KILL 整個 group。
+//
+// **升級 timer 刻意 ref(不 unref)** —— 這是不變量 3(「cancel 必殺乾淨:整個 process group,
+// 孫子不留」)唯一的靠山。它曾經 unref,而那讓保證變成空的:worker-entry 在 runWorker
+// resolve 的瞬間就 `process.exit()`,unref 的 timer 不撐 event loop,所以 leader 比 grace
+// 先關的時候(同 pgid 的孫子改掉 stdio、無視 TERM 活著),那一槍**永遠不會開**,孫子活過
+// job 的終態。ref 之後語意才對:「殺完才准離開」。
+//
+// 代價是 kill 路徑上 process 多活 graceMs —— 那正是我們要的。happy path 完全不呼叫這裡,
+// 所以沒有成本。installCancelForwarder 的 forceExitMs(7000)大於預設 graceMs(5000),
+// 所以硬退出仍在升級之後。
+// 回傳 handle 給呼叫端;**別拿 child 的 'close' 當「group 空了」的證據去取消它**(試過,
+// 那正是上面那個洩漏)。只有能證明 group 已空的呼叫端才有資格取消。
 export function killGroupWithGrace(pid, { graceMs = 5000, scheduleImpl = setTimeout, killImpl = process.kill } = {}) {
   killProcessGroup(pid, "SIGTERM", killImpl);
-  const escalation = scheduleImpl(() => killProcessGroup(pid, "SIGKILL", killImpl), graceMs);
-  escalation?.unref?.();
-  return escalation;
+  return scheduleImpl(() => killProcessGroup(pid, "SIGKILL", killImpl), graceMs);
 }

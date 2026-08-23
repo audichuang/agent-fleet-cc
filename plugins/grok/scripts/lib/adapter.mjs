@@ -91,8 +91,11 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
     //     restore 的進度只走 stderr;
     //   · `REMOTE_RESTORE_TIMEOUT = 90s`(app/session_startup.rs)—— 單是遠端還原就可以合法花 90 秒,
     //     之後才開 session、抓 model catalog。
-    // 也就是說一個健康的 `-r` resume 可以合法安靜遠超過任何我們敢設的預算,而引擎自己的 idle
-    // 上限是 600s —— 120s 曾經被設成預設,結果就是會殺掉健康的 run(被 review 抓到)。
+    //   · model catalog 那段**其實有界**(BUDGET = STARTUP_AUTH_REFRESH + STARTUP_FETCH = 5s+5s)。
+    //     真正沒有源碼保證上限的是 **session opening 本身** —— 那一項才是預設不安全的理由。
+    // 也就是說一個健康的 `-r` resume 可以合法安靜遠超過任何我們敢設的預算:120s 曾經被設成
+    // 預設,結果就是會殺掉健康的 run(被 review 抓到)。完整推導與錨點在 audit doc 的
+    // startup-silence 列 —— 那裡是正本,別在此重抄(root AGENTS.md)。
     // 兩邊代價不對稱:漏抓 = 退回既有行為(那個卡頓本身有 600s 上限、最後會真的報錯);
     // 誤殺 = 直接摧毀使用者的工作。所以預設站在漏抓那邊,把選擇權交給真的踩過的人。
     //
