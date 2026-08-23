@@ -78,7 +78,7 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
     engine: "grok",
     recursionMarker: RECURSION_MARKER,
     wantsWatchdog: false,
-    // 首事件看門狗:headless 的 grok 沉默超過這麼久就殺掉並報 errorKind "stalled"。
+    // 首輸出看門狗:headless 的 grok 在 stdout 上沉默超過這麼久就殺掉並報 errorKind "stalled"。
     // 要防的是一條實際存在的互動式卡頓 —— cached token 過期或是 legacy WebLogin 時,
     // acp_agent.rs:704-732 轉進 authenticate_after_cached_token_unavailable,後者若選到
     // grok.com 就把 meta 整個換成 {"use_oauth": true}(agent_ops.rs:1412-1416),原本的
@@ -86,14 +86,26 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
     // (auth/oidc/login.rs AUTH_CALLBACK_TIMEOUT)。`--background` 時這 10 分鐘完全不可見。
     // 注意:headless.rs 的 authenticate 只在**方法選擇**那層 fail closed,擋不到這條。
     //
-    // 120s 不是猜的下限,是刻意寬鬆:實測一次真跑,第一行 `available_commands` 在數秒內
-    // 就到(session 一開就印),所以 120s 對健康的 run 有兩個數量級的餘裕,不會把冷機
-    // 開機慢誤判成卡死;同時把那 600s 的隱形停頓變成 2 分鐘內的明確失敗。
-    // 例外:image_gen 可以一分多鐘不吐位元組 —— 但那發生在第一個事件**之後**,
-    // 這道關那時已經撤掉,所以 /grok:image 不受影響(已於真跑驗證)。
-    firstEventTimeoutMs: Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS) > 0
-      ? Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS)
-      : 120_000,
+    // 這道關量的是「session 開起來了嗎」,不是「有沒有進度」:解除門檻是 stdout 上**任何
+    // 非空行**,而 grok 一開 session 就印 `available_commands`(實測數秒內到)。所以
+    // 120s 只涵蓋 session 之前那段 —— 冷機開機、model catalog fetch、`-r` 從遠端還原。
+    // 那幾段沒有源碼保證的上限(遠端還原本身就可能吃掉 ~90s),所以 120s 是判斷不是證明;
+    // 真的遇到誤殺就調 GROK_FIRST_EVENT_TIMEOUT_MS,別把門檻改成看 parseEvent。
+    //
+    // **不要**把解除門檻改成「parseEvent 解析成功的事件」。這條被 review 抓過:grok 的
+    // parseEvent 只認 text / end / error,`available_commands` / thought / tool_call /
+    // tool_call_update 全部回 null;而 `--json-schema` 是非串流的,終端物件之前根本沒有
+    // 任何可解析事件 —— 拿 parsed 當門檻等於保證殺掉每一個超過預算的 schema run。
+    // image_gen 那種一分多鐘不吐位元組也一樣:它發生在 session 開起來之後,這道關早已撤掉。
+    // getter,不是常數:`--json-schema` 是**非串流**的,grok 在終端物件之前 stdout 一個
+    // 位元組都不寫(真跑驗過:一個健康的 schema run 被 15s 的預算殺掉),所以那個模式下
+    // 這道關只會誤殺,必須關掉 —— 由整體 timeoutMs 接手。jsonMode 由 buildInvocation 設定,
+    // 而 worker 是在 buildInvocation 之後才讀這個欄位,所以 getter 拿得到正確的模式。
+    get firstEventTimeoutMs() {
+      if (jsonMode) return null;
+      const override = Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS);
+      return override > 0 ? override : 120_000;
+    },
     buildInvocation({ job, prompt }) {
       const r = job.request ?? {};
       jsonMode = Boolean(r.jsonSchema);

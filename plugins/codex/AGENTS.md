@@ -46,10 +46,23 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   (`commands/handoff.md`)。要活過 session 用 `/codex:task --background`。
 - broker 是持久共用的(一次一個 turn、idle 5s 自關),不是每次 spawn;改 broker / turn-ack / idle /
   watchdog 時,event-ordering 測試偶爾 flaky(root gotcha),re-run 一次確認。
+- **`resolveSandboxMode` 忽略它自己的參數**,每個 thread 都是 `danger-full-access` +
+  `approvalPolicy: "never"`(`lib/codex.mjs`,經 buildThreadParams / buildResumeParams;被
+  `tests/codex/sandbox-mode.test.mjs` 釘住)。這是**刻意的**:這個 fork 的目標主機起不了 Codex 的
+  bwrap,連唯讀 turn 都會 abort。後果是 **`--write` 只是 job metadata,不給任何隔離** —— 少給它
+  什麼都沒關住。四個 prose surface 曾經同時把這件事寫錯(暗示省略 `--write` 就等於唯讀),所以改
+  任何講 sandbox / 唯讀的文案前先看這條。真要強制:`CODEX_SANDBOX_MODE=read-only`,且只在 bwrap
+  起得來的主機上。
 - **預設模型 `gpt-5.6-sol` 對 ChatGPT 帳號會間歇被 400**(「requires a newer version of Codex」,同模型
   多數時候可用)。turn 失敗**是 RETURN 不是 throw**,失敗原因有兩種形狀(獨立 `error` notification 與
   terminal `turn/completed` 的 `turn.error`)—— 兩者都要灌進結構化 `errorMessage`(`failureReasonFor`),
-  否則 `--json`/status 只剩裸「failed」。model-unavailable 會**自動單次重試降 `gpt-5.6-terra`**
+  否則 `--json`/status 只剩裸「failed」。**但結構化狀態對了 ≠ 使用者看得到**:`--json`、`wait`、
+  `status` 一直都帶著失敗,而 slash command 實際列印的那兩條 render 路徑(`renderTaskResult`、
+  `renderStoredJobResult`)曾經只回裸輸出 —— 於是一個「吐了半個答案才死」的 turn 被當成完成的答案
+  交出去(`commands/task.md` 叫 Claude 原封不動轉述那份 stdout)。修法靠 `runAppServerTurn` 回傳的
+  **`hadAgentMessage`**:為真才把原因加在部分答案前面;為假時 `finalMessage` **本身就是**那個錯誤,
+  再加前綴會變成「Codex turn failed: Codex turn failed: …」。動 render 或動這個旗標時,兩種形狀都要
+  各驗一次。model-unavailable 會**自動單次重試降 `gpt-5.6-terra`**
   (`isModelUnavailableFailure` + `runWithModelFallback`,可見:progress line + payload `modelFallback`);
   偵測刻意保守,別把 auth/rate-limit 也吃進 fallback。
 - **`context: fork` 別碰**(issue #234)。forked general-purpose subagent **沒有 `Agent` tool**,

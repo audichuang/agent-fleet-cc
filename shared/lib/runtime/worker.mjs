@@ -173,30 +173,39 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       clearTimeout(timer);
       clearTimeout(forceTimer);
       clearTimeout(firstEventTimer);
+      clearTimeout(stalledForceTimer);
       resolve(state);
     };
     let forceTimer = null;
-    // 首事件看門狗(adapter 選填 firstEventTimeoutMs)。要防的不是「跑太久」——
+    // 首輸出看門狗(adapter 選填 firstEventTimeoutMs)。要防的不是「跑太久」——
     // 那是下面的 timeoutMs——而是「headless 的 run 被互動式提示卡住」:引擎沒死、
-    // 沒報錯、也不會吐任何事件,只是在等一個永遠不會來的人類。grok 1.0.5 有一條
-    // 這樣的路:cached token 過期/legacy 時,authenticate_after_cached_token_unavailable
-    // 會遞迴選到互動式 grok.com 並「把原本的 headless meta 換掉」
-    // (xai-grok-shell/src/agent/mvp_agent/agent_ops.rs:1412-1416),然後 OAuth callback
-    // 等 600s(auth/oidc/login.rs AUTH_CALLBACK_TIMEOUT)。`--background` 時完全看不見。
+    // 沒報錯、stdout 一個位元組都不吐,只是在等一個永遠不會來的人類。引擎特定的
+    // 觸發路徑與錨點寫在各自 adapter 宣告 firstEventTimeoutMs 的地方(引擎知識不進
+    // shared runtime)。
     //
     // 刻意做成「按行為判斷」而不是「事前猜憑證」:client 端無法可靠判斷一份憑證能不能用
-    // (試過,兩個方向都會錯),但「該說話的時候不說話」是可觀測的。任何未來的互動式卡頓
-    // 也一併被這道關接住,不必再認得它。
+    // (試過,兩個方向都會錯),但「該說話的時候不說話」是可觀測的。
     //
-    // 只有 stdout 上**解析成功的引擎事件**能解除它 —— 不是任意 raw 行、更不是 stderr。
-    // 互動式提示很可能就印在 stderr,拿 stderr 解除等於自廢這道關。
-    // adapter 沒宣告這個欄位 → 完全不啟用,行為與先前逐位元組相同。
+    // **解除訊號是 stdout 上任何非空行,不是「parseEvent 解析成功的事件」。** 這點是
+    // 血換來的:用 parsed 當門檻會把健康的 run 殺掉,因為 adapter 對自己不需要正規化的
+    // 行回 null 是完全正常的(progress / thought / tool 事件),而非串流模式(例如
+    // JSON-schema)在終端物件之前根本沒有任何「可解析事件」—— 那等於保證誤殺一個支援中的
+    // 功能。把門檻放在「引擎在 stdout 上講話了嗎」才對齊真正的威脅:被互動式提示擋住的
+    // 引擎是**完全安靜**的。
+    //
+    // 兩邊代價不對稱,所以刻意偏向寧可漏抓:漏抓 = 退回既有的整體 timeoutMs 行為(引擎自己
+    // 的 OAuth 等待本身也有上限);誤殺 = 直接摧毀使用者健康的工作。stderr 不算解除,
+    // 互動式提示最可能就印在那裡。adapter 沒宣告這個欄位 → 完全不啟用。
     let firstEventTimer = null;
+    let stalledForceTimer = null;
     const firstEventTimeoutMs = adapter.firstEventTimeoutMs;
     const armFirstEventWatchdog = () => {
       if (!Number.isFinite(firstEventTimeoutMs) || firstEventTimeoutMs <= 0) return;
       firstEventTimer = (deps.scheduleImpl ?? setTimeout)(() => {
         state.stalledBeforeFirstEvent = true;
+        // 這道關開火就代表整體 timeoutMs 沒有意義了(引擎連話都沒講),而且兩個計時器都
+        // 活著會讓終態自相矛盾:status 說 timed-out、errorKind 說 stalled。先把它拆掉。
+        clearTimeout(timer);
         const graceMs = deps.graceMs ?? 5000;
         killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
         const forceMs = graceMs + (deps.forceResolveExtraMs ?? 200);
@@ -205,7 +214,9 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
         // 東西。unref 掉它,event loop 就會在 finalize 之前把 process 抽乾,job 永遠留在
         // running(spec §5 不變量 1:job 必達終態)。timeoutMs 那條路徑 unref 是安全的,
         // 因為那裡引擎通常已經吐過東西、stdout 會關。
-        forceTimer = (deps.scheduleImpl ?? setTimeout)(() => finish(), forceMs);
+        // 用獨立變數:共用 forceTimer 會蓋掉 timeoutMs 那條已排程的 handle,讓一個 ref'd
+        // 計時器沒人清得掉,活到自己燒完為止。
+        stalledForceTimer = (deps.scheduleImpl ?? setTimeout)(() => finish(), forceMs);
       }, firstEventTimeoutMs);
       firstEventTimer?.unref?.();
     };
@@ -257,6 +268,10 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
           // swallow: job integrity outranks a broken progress sink
         }
       }
+      // 引擎在 stdout 上講話了 → 撤掉首輸出看門狗。門檻是「任何非空行」而不是
+      // 「parseEvent 解析成功」,理由見上面 armFirstEventWatchdog 的註解(用 parsed 當門檻
+      // 會誤殺非串流模式與只吐 progress/thought 的健康 run)。
+      if (line.trim()) disarmFirstEventWatchdog();
       logStream.write(line + "\n");
       let parsed;
       try {
@@ -265,9 +280,6 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
         parsed = null; // parseEvent 永不 fatal
       }
       if (parsed) {
-        // 引擎開口了 → 撤掉首事件看門狗。放在 parsed 分支內(而非上面的 raw 行)是刻意的:
-        // 一行解析不出來的雜訊不算「引擎在跑」。
-        disarmFirstEventWatchdog();
         // type: "engine-event" 最後覆蓋 — parseEvent 若回傳引擎自訂的 type 欄位
         // (如 {type:"result",...}),正規化 type 仍必須是 "engine-event"(spec §3)。
         // parsed fields 先攤平,讓 extractResult 能直接存取 e.kind / e.text 等;
@@ -322,6 +334,9 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
   const failed =
     Boolean(outcome.spawnError) ||
     stdinFailed ||
+    // 看門狗開火過就是失敗,不管 child 之後怎麼收尾:一個會處理 SIGTERM 的引擎可以吐一個
+    // 合法終端事件再 exit 0,那樣 job 會落成 completed、而我們剛剛才因為它卡住把它殺掉。
+    outcome.stalledBeforeFirstEvent ||
     outcome.exitCode !== 0 ||
     !result.ok;
   const status = outcome.timedOut ? "timed-out" : failed ? "failed" : "completed";
@@ -335,11 +350,13 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     const adapterError = typeof result.error === "string" && result.error ? result.error : null;
     // 首事件看門狗開火時,引擎的 stderr 常常正是最有用的線索(例如那個沒人會去點的
     // OAuth 授權 URL),所以保留它,只在前面說清楚我們為什麼把它殺掉。
-    const stalledPrefix = `engine produced no event within ${adapter.firstEventTimeoutMs}ms and was killed — a headless run should not be silent this long; the usual cause is the engine blocking on an interactive prompt (e.g. an expired credential falling through to browser OAuth)`;
+    const stalledPrefix = `engine wrote nothing to stdout within ${adapter.firstEventTimeoutMs}ms and was killed — a headless run should not be silent this long; the usual cause is the engine blocking on an interactive prompt (e.g. an expired credential falling through to browser OAuth)`;
     error = stdinFailed
       ? `stdin: ${outcome.stdinError.code ?? outcome.stdinError.message}`
+      // 只截 stderr,不截前綴。整串一起 .slice(-500) 的話,夠長的 stderr 會把「我們為什麼
+      // 殺掉它」連同開頭的授權 URL 一起吃光,只留下一段無頭的引擎雜訊。
       : outcome.stalledBeforeFirstEvent
-        ? `${stalledPrefix}${outcome.stderrTail ? `. engine stderr: ${outcome.stderrTail}` : "."}`.slice(-500)
+        ? `${stalledPrefix}${outcome.stderrTail ? `. engine stderr: ${outcome.stderrTail.slice(-300)}` : "."}`
         : (outcome.spawnError || adapterError || outcome.stderrTail || "engine exited nonzero").slice(-500);
     try {
       // "stalled" ≠ "timeout": timeout 是「跑太久超出預算」,stalled 是「一開口都沒開就啞了」。

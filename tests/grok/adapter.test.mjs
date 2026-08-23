@@ -523,3 +523,20 @@ test("renderResult: the resume tip renders the caller's session verdict, never r
   assert.doesNotMatch(renderResult(failed), /--resume-job/);
   assert.match(renderResult({ ...failed, sessionId: "post-hoc" }), /--resume-job grok-1/);
 });
+
+// 真跑驗過的必死情境:`--json-schema` 是非串流的,grok 在終端物件之前 stdout 完全不寫,
+// 所以首輸出看門狗在那個模式下只會誤殺健康的 run(一個 15s 預算的真實 schema run 就被殺了)。
+// 這個欄位刻意是 getter,而 worker 在 buildInvocation 之後才讀它。
+test("firstEventTimeoutMs is disabled in --json-schema mode (non-streaming writes no stdout until the end)", () => {
+  const a = makeGrokAdapter();
+  // 串流模式:看門狗武裝。
+  a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+  assert.equal(typeof a.firstEventTimeoutMs, "number");
+  assert.ok(a.firstEventTimeoutMs > 0);
+  // schema 模式:必須關掉,否則整體 timeoutMs 之前就被殺。
+  a.buildInvocation({ job: { cwd: "/w", request: { jsonSchema: '{"type":"object"}' } }, prompt: "p" });
+  assert.equal(a.firstEventTimeoutMs, null, "a non-streaming run must not be watched for first stdout");
+  // 切回串流要恢復(同一顆 adapter 會被重用)。
+  a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+  assert.ok(a.firstEventTimeoutMs > 0);
+});

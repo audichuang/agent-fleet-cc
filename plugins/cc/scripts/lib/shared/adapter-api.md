@@ -17,6 +17,7 @@
 | name / engine | string | 顯示名 / 統一 schema 的 engine 值 |
 | recursionMarker | string | buildEngineEnv 強制注入的遞迴守衛變數名 |
 | wantsWatchdog | boolean | reconcile 雙保險的 watchdog 開關宣告(藍圖 §5.7) |
+| firstEventTimeoutMs | number? | **選填**。首輸出看門狗預算:引擎在這段時間內**沒在 stdout 寫出任何非空行**就殺掉,終態 `failed` + errorKind `"stalled"`(刻意與 `timeout` 分開 —— 後者是超出預算,前者是一句都沒說)。防的是 headless 卡在互動式提示(引擎沒死、沒報錯、也不吐事件)。不宣告 = 不啟用,行為與此欄位存在前完全相同;宣告了必須是正有限數(0/NaN/字串會被 `validateProcessAdapter` 擋掉 —— 靜默不武裝是最壞形態)。解除門檻刻意是「stdout 上任何非空行」,**不是** `parseEvent` 解析成功 —— adapter 對 progress / thought / tool 行回 null 是正常的,而非串流模式(JSON-schema)在終端物件前根本沒有可解析事件,拿 parsed 當門檻會保證誤殺健康的 run。stderr 不算解除(互動式提示最可能印在那裡)。解除是永久的(這是啟動關卡,不是 idle watchdog)。代價不對稱所以偏向寧可漏抓:漏抓退回整體 timeoutMs,誤殺直接摧毀使用者的工作。 |
 | buildInvocation({job, prompt}) | fn | → { argv, env, stdinPayload } — env 只放顯式注入(profile 等),消毒由 worker 強制 |
 | parseEvent(rawLine) | fn | → 正規化事件 \| null;junk 行回 null,永不 throw |
 | extractResult(events, exitCode) | fn | → { ok, resultText, sessionId, usage?, error? } — `error` 選填:adapter 從串流解析出的失敗原因,worker 拿它蓋過 stderrTail(供 exit 0 卻在 stdout 宣告失敗的引擎用);沒設就維持原行為 |

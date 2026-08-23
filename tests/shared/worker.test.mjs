@@ -1048,7 +1048,7 @@ test("first-event watchdog: a silent engine is killed and reported as stalled, n
   // 就問不出「這是不是又一次互動式卡頓」。
   assert.equal(job.errorKind, "stalled");
   assert.notEqual(job.status, "timed-out", "the whole-job budget was 60s and was never reached");
-  assert.match(job.error, /produced no event within 40ms/);
+  assert.match(job.error, /wrote nothing to stdout within 40ms/);
   assert.match(job.error, /interactive prompt/);
 });
 
@@ -1120,18 +1120,83 @@ test("first-event watchdog: an adapter that does not declare it is completely un
   assert.equal(job.errorKind, "timeout");
 });
 
-test("first-event watchdog: an UNPARSEABLE stdout line must NOT disarm it either", async () => {
+test("first-event watchdog: ANY non-empty stdout line disarms it, parseable or not", async () => {
   const stateDir = tmp();
-  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  const record = createJobRecord({ engine: "fake", timeoutMs: 300 });
   createJob(stateDir, record, "the prompt");
-  // parseEvent 對這行回傳 null —— 一句 banner / 警告不代表「引擎在跑」。解除只能靠
-  // 解析成功的事件;拿任意 raw 行解除,會讓「先印一句廢話再卡死」的引擎完全隱形。
+  // parseEvent 對這行回傳 null —— 而這行仍然必須解除看門狗。門檻是「引擎在 stdout 上
+  // 講話了嗎」,不是「adapter 想不想正規化這行」:adapter 對 progress / thought / tool
+  // 行回 null 是正常的,拿 parsed 當門檻會殺掉健康的 run。
   const adapter = makeAdapter({ firstEventTimeoutMs: 40, parseEvent: () => null });
   const child = silentChild();
   setImmediate(() => child.stdout.write("grok: checking for updates...\n"));
   await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
   const job = readJob(stateDir, record.id);
-  assert.equal(job.errorKind, "stalled", "an unparseable banner must not count as the engine speaking");
-  // 那行仍然要進 log(稽核不該因為解析不了就丟資料)。
+  assert.notEqual(job.errorKind, "stalled", "the engine spoke on stdout — it is not stalled");
+  // 它最後是被整體預算收掉的,不是被這道關殺的。
+  assert.equal(job.status, "timed-out");
   assert.match(fs.readFileSync(logFilePath(stateDir, record.id), "utf8"), /checking for updates/);
+});
+
+// Codex 審查抓到的必死情境:非串流模式(grok 的 --json-schema)在終端物件之前沒有任何
+// 「可解析事件」,所以用 parsed 當解除門檻會保證誤殺每一個超過預算的 schema run。
+test("first-event watchdog: a non-streaming engine that emits nothing parseable until the end is NOT killed", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  // 整份結果是一個跨行的 JSON 物件:每一行單獨都解析不出來,只有最後合起來才成立。
+  const adapter = makeAdapter({
+    firstEventTimeoutMs: 40,
+    parseEvent: (line) => (line.trim() === "}" ? { kind: "result", text: "done" } : null),
+    extractResult: (events) => {
+      const r = events.find((e) => e.type === "engine-event" && e.kind === "result");
+      return r ? { ok: true, resultText: r.text, sessionId: null } : { ok: false };
+    },
+  });
+  const child = silentChild();
+  const spawnImpl = () => {
+    setImmediate(() => child.stdout.write("{\n"));           // 預算內,但解析不出來
+    setTimeout(() => {                                        // 遠遠超過 firstEventTimeoutMs
+      child.stdout.write('  "text": "done"\n');
+      child.stdout.write("}\n");
+      child.stdout.on("end", () => setImmediate(() => child.emit("close", 0, null)));
+      child.stdout.end();
+    }, 130);
+    return child;
+  };
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: { spawnImpl, graceMs: 5 } });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.status, "completed", "a healthy non-streaming run must survive the watchdog");
+  assert.equal(job.errorKind, null);
+  assert.equal(job.resultText, "done");
+});
+
+// 看門狗開火後,一個會處理 SIGTERM 的引擎還是可以吐個合法終端事件再 exit 0。
+// 沒有把 stalled 併進 failed 判準,那樣會落成 completed —— 我們才剛因為它卡住殺了它。
+test("first-event watchdog: a fired watchdog cannot finalize as completed, even on a clean exit 0", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  const adapter = makeAdapter({
+    firstEventTimeoutMs: 40,
+    parseEvent: () => ({ kind: "result", text: "graceful" }),
+    extractResult: () => ({ ok: true, resultText: "graceful", sessionId: null }),
+  });
+  const child = silentChild();
+  const spawnImpl = () => {
+    // 沉默到看門狗開火,然後「優雅地」收尾 —— 正是會騙過 exitCode 判準的形狀。
+    setTimeout(() => {
+      child.stdout.write('{"kind":"result"}\n');
+      child.stdout.on("end", () => setImmediate(() => child.emit("close", 0, null)));
+      child.stdout.end();
+    }, 60);
+    return child;
+  };
+  // forceResolveExtraMs 給很大:否則 force-resolve 會先贏,exitCode 停在 null,
+  // 於是 `exitCode !== 0` 自己就讓 failed 成立 —— 測試就測不到它名字說的那件事
+  // (child 真的乾淨 exit 0)。這個陷阱是 mutation 驗證抓出來的。
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: { spawnImpl, graceMs: 5, forceResolveExtraMs: 5000 } });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.status, "failed", "we killed it for stalling; a tidy exit 0 must not launder that");
+  assert.equal(job.errorKind, "stalled");
 });

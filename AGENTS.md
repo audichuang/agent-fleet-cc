@@ -23,23 +23,18 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `npm test` — full chain: structure + shared + cc + antigravity + codex + grok + fleet + e2e.
   Run on **Node 24**: codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says
   `>=22.3`, but CI pins 24 for this reason — see `.github/workflows/ci.yml`).
-- `node --test tests/<plugin>/*.test.mjs` — run one plugin's suite (antigravity also needs
-  `--experimental-test-module-mocks`)
-- `npm run test:e2e` — black-box CLI e2e for all 5 plugins (cc + codex + antigravity + fleet + grok;
-  real subprocess, fake engine, no API key)
+- One plugin's suite: `node --test tests/<plugin>/*.test.mjs` (antigravity also needs
+  `--experimental-test-module-mocks`). The hermetic-vs-real-engine split is the `e2e-testing`
+  skill's job — ask it before claiming anything was verified end-to-end.
 - `npm run sync-shared` — after editing `shared/lib/`, re-vendor it into each migrated
   plugin's `scripts/lib/shared/` (`cc`, `codex`, `antigravity`, `grok`). **Commit BOTH the source and
   the vendored copy** — CI drift-checks them.
 - `npm run bump-version <plugin> <patch|minor|major>` — the one way to bump a version; locks
   `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
-  check-version` verifies). It syncs only those two; the per-plugin `.codex-plugin/plugin.json`
-  dual-host manifests (`cc`, `antigravity`) also carry a version and drift silently — hand-sync
-  those, plus antigravity's `.agents/plugins/marketplace.json` `metadata.version` and its
-  standalone-host pair `plugins/antigravity/plugin.json` + `plugins/antigravity/package.json`
-  (npx `--version` reads the former; npm metadata is the latter — both drifted once). (Root
-  `package.json` holds the repo's own version, not a plugin mirror; the root
-  `.agents/plugins/marketplace.json` carries no version — neither needs touching on a plugin
-  bump.)
+  check-version` verifies). **It syncs only those two.** A plugin may carry versions in other
+  manifests that drift silently — the dual-host ones (`cc`, `antigravity`) do, and both have
+  drifted before. So before bumping: `grep -rn '"version"' plugins/<name>` and hand-sync whatever
+  else it finds. Don't trust a written-down inventory here; that list is exactly what rots.
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
@@ -48,6 +43,13 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   tests need no real binaries.
 - Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
   it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
+- **Never enumerate an engine's runtime catalog in shipped prose** — models, effort levels, tool
+  names. Point at the authority instead (grok: `grok models`; codex: the offline recipe in its
+  audit doc) and say the levels are per-model. A written-down list reads authoritative and rots
+  invisibly: grok's rotted inside 14 days, twice, and the second time it was actively telling
+  users that `xhigh` would kill the job while it was the new default model's own top level. Same
+  rule for the audit docs' prose — a pinned source anchor is a contract, an enumerated catalog is
+  a liability.
 - `main` is push-ready: commit a feature/behavior change straight to `main` only after the
   **full CI chain** is green **and** an independent diff review (`/codex:handoff`, another model,
   or a human). CI (`ci.yml`) is more than `npm test` — it also runs a `sync-shared` drift check
@@ -57,6 +59,11 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   machine via a `PreToolUse` hook in `.claude/settings.local.json` (not repo-wide: build:codex
   needs the codex CLI on PATH). Trivial doc/comment edits are exempt; still branch for risky or
   exploratory work.
+- **A fix written in response to a review needs its own review round.** Twice in one session a
+  round of review-driven fixes introduced fresh defects — a wrong bucket, a doubled error string,
+  an unref'd timer that left the job `running` forever — none of which existed before the fix.
+  "The reviewer's findings are addressed" is not the same claim as "the addressing is correct", so
+  re-review the diff that answers a review, and treat a clean second round as the actual gate.
 
 ## Autonomy & approval boundaries
 - **Do without asking:** read/search the repo; run tests (`npm test`, per-plugin suites,
@@ -97,8 +104,6 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - Domain glossary (the project's ubiquitous language): `CONTEXT.md`
 - Architecture decisions (why a shape was chosen, not how): `docs/adr/`
 - Specs / plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/specs/`
-- Per-plugin requirements (CLI login / OAuth / endpoint profiles): each `plugins/<name>/`
-  directory and `README.md`
 - **Engine ↔ CLI contract audits** — every flag/output field a plugin depends on, pinned to a
   source anchor (or, for a closed binary, an evidence class) + the recipe to re-run the check.
   Update the audit doc, not the plugin's `AGENTS.md`, when you learn something about an engine:

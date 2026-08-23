@@ -94,10 +94,16 @@ pre-existing defects the durable checklist had been carrying as verified, plus a
   worker gains an OPTIONAL `firstEventTimeoutMs`, and grok declares 120s. A headless run that
   emits no engine event in that window is killed and reported `errorKind: "stalled"` — kept
   distinct from `timeout`, which means "outgrew its budget" rather than "never spoke at all".
-  Only a *parsed* event on stdout disarms it: not an unparseable banner, and emphatically not
-  stderr, where an interactive prompt is most likely to appear. `image_gen`'s minute-plus silent
-  stretch is unaffected — that happens after the first event, when the watchdog is already gone
-  (verified on a live run). Override with `GROK_FIRST_EVENT_TIMEOUT_MS`. Adapters that do not
+  What disarms it is **any non-empty line on stdout**, not a successfully parsed event — a
+  distinction an independent review caught before this shipped, and the reason it is safe:
+  grok's `parseEvent` returns null for `available_commands`, `thought`, `tool_call` and
+  `tool_call_update`, and `--json-schema` is non-streaming with nothing parseable before its
+  terminal object, so keying on parsed events would have killed every schema run over the
+  budget. stderr does not disarm it — an interactive prompt is most likely to appear there.
+  So the window covers only pre-session silence: grok prints `available_commands` the moment a
+  session opens. 120s is a judgement about cold start / catalog fetch / remote resume, not a
+  proven bound — override with `GROK_FIRST_EVENT_TIMEOUT_MS` if a legitimate start exceeds it.
+  `image_gen`'s minute-plus silent stretch is unaffected: it happens after the session is up. Adapters that do not
   declare the field are bit-for-bit unaffected, so `cc`, `antigravity` and `codex` are unchanged.
 - **Anchors re-pinned to the binary we actually run.** Part 1's `cli.rs` pins had drifted +8..+16
   lines and Part 3's sandbox pins ~50-70 after upstream's 481-line `config/mod.rs` rewrite;

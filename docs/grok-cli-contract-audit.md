@@ -592,8 +592,16 @@ row also names its regex token.
   remote failure too. The routing is right; the reason was wrong.)* The per-token reason, matching
   the table:
   - **Local, never in flight:** `--effort/--reasoning-effort: …` (`headless.rs:684`),
-    `Session does not exist` (`:559`), `model did not produce structured output` (`:270-280`), and
-    the whole row-1/row-8 sandbox word-net. These genuinely issue no request.
+    `Session does not exist` (`:559`), and the whole row-1/row-8 sandbox word-net. These genuinely
+    issue no request, so no 5xx sentence can co-occur with them.
+  - **Post-request, but structurally cannot carry a 5xx:** `model did not produce structured
+    output` (`headless.rs:270-280`). *(Corrected 2026-08-23, third review pass: this was listed
+    above as "never in flight", which is false — it is reached only after a model request comes
+    back, and the run exits **0**. The routing to `config` is still right, for a different reason:
+    it is the `unwrap_or_else` on a request that **succeeded** and merely answered off-schema, so
+    a transport/5xx failure would have short-circuited long before this string could be produced.
+    Two passes in a row got the rationale wrong while getting the routing right — a reminder that
+    a correct verdict does not validate the argument under it.)*
   - **Remote, but mutually exclusive with 5xx:** the `forbidden`/`HTTP 403` tokens
     (`shell/sampling/error.rs:127-136`). One request resolves to **one** status — a 403 response is
     not also a 502/503/529 response, so the two sentences cannot appear in the same failure.
