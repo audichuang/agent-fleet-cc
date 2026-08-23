@@ -7,8 +7,8 @@
 // could silently log the user out of grok itself. Expired token => tell them to
 // run grok once and let it refresh. `XAI_API_KEY` is the fallback for machines
 // with no grok login.
-import { readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,6 +39,9 @@ export function resolveToken({ authFile = defaultAuthFile(), now = Date.now() } 
   const entry = raw && Object.entries(raw).find(([k]) => k.startsWith(ISSUER_PREFIX))?.[1];
   const token = typeof entry?.key === "string" ? entry.key.trim() : "";
   if (token) {
+    // A missing or unparseable `expires_at` deliberately falls THROUGH to the API
+    // rather than failing closed: the token may be perfectly good, and grok owns
+    // that file's shape. A real 401 carries the same fix as the guard below.
     const expiresAt = Date.parse(entry.expires_at ?? "");
     if (Number.isFinite(expiresAt) && expiresAt <= now) {
       throw new ImageError(
@@ -78,6 +81,12 @@ export async function generateImage({
   // then cannot be written is a paid image lost for good — the bytes are in memory
   // and the API's URL is ephemeral.
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+  // ...and refuse a taken destination BEFORE the money is spent. The 'wx' write below
+  // still closes the race and the renamed-extension case; this only avoids paying to
+  // discover a collision we could see for free.
+  if (existsSync(out)) {
+    throw new ImageError(`${out} already exists — refusing to overwrite. Nothing was generated or billed; pick a different --out.`);
+  }
 
   const body = { model, prompt, aspect_ratio: aspect, resolution, response_format: "b64_json" };
   if (quality) body.quality = quality;
@@ -96,7 +105,13 @@ export async function generateImage({
     throw error;
   }
   if (!res.ok) {
-    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    // The body is echoed to the user; a bearer that came back in it must not ride along.
+    // Redact BEFORE truncating, or a token straddling the 300-char cut leaves a fragment.
+    // Only a credential-length string is worth redacting: substring-replacing a 1-char
+    // test token would shred the message, and a 422's enum is the best body we ever get.
+    const raw = await res.text().catch(() => "");
+    const secret = typeof token === "string" && token.length >= 12 ? token : "";
+    const detail = (secret && raw.includes(secret) ? raw.split(secret).join("<redacted>") : raw).slice(0, 300);
     // 401 is the documented shape; a rejected bearer has also been seen to come
     // back as 400 "Incorrect API key provided", so key on the message too.
     if (res.status === 401 || (res.status === 400 && /api key/i.test(detail))) {
@@ -104,7 +119,9 @@ export async function generateImage({
     }
     if (res.status === 403) {
       throw new ImageError(
-        `403 from xAI — this account's tier is not entitled to Imagine over this surface. Upgrade at x.ai/grok, or set XAI_API_KEY to use the metered path. ${detail}`,
+        // xAI does not document what produces a 403 here, so name the likely cause as
+        // likely rather than asserting it.
+        `403 from xAI. The usual cause is that this account's tier is not entitled to Imagine over this surface — set XAI_API_KEY to use the metered path, or upgrade at x.ai/grok. ${detail}`,
       );
     }
     // 422 is worth passing through verbatim: xAI enumerates the whole accepted
@@ -140,7 +157,7 @@ export async function generateImage({
   return { out: saved, bytes: bytes.length, model, mimeType: first.mime_type, renamed: saved !== out };
 }
 
-const FLAGS = { "--out": "out", "--aspect": "aspect", "--model": "model", "--resolution": "resolution", "--quality": "quality" };
+const FLAGS = { "--out": "out", "--prompt-file": "promptFile", "--aspect": "aspect", "--model": "model", "--resolution": "resolution", "--quality": "quality" };
 
 export function parseArgs(argv) {
   const opts = { aspect: "1:1", model: "grok-imagine-image", resolution: "1k" };
@@ -151,6 +168,9 @@ export function parseArgs(argv) {
     if (key) {
       const value = argv[++i];
       if (value === undefined) throw new ImageError(`${flag} needs a value`);
+      // A following flag is not a value: `--out --aspect 16:9` used to set out="--aspect"
+      // and ship "16:9" as the prompt — a billed render of a silently corrupted request.
+      if (value.startsWith("--")) throw new ImageError(`${flag} needs a value, got the flag ${value}`);
       opts[key] = value;
     } else if (flag.startsWith("--")) {
       // Never let a typo'd flag slide into the prompt text — that spends quota on
@@ -177,19 +197,26 @@ export async function main(argv, { stdin = readStdin } = {}) {
   let opts;
   try {
     opts = parseArgs(argv);
+    // --prompt-file is the safe transport: a prompt carrying the caller's heredoc
+    // delimiter used to end the here-document and run the rest as shell. A file has
+    // no such escape, and it keeps the double quotes on-image text needs.
+    if (opts.promptFile) opts.prompt = opts.promptFile === "-" ? await stdin() : readFileSync(opts.promptFile, "utf8").trim();
     if (!opts.prompt) opts.prompt = await stdin();
   } catch (error) {
     process.stderr.write(`imagine: ${error?.message ?? error}\n`);
     return 2;
   }
-  if (!opts.prompt || !opts.out) {
+  if (!opts.prompt) {
     process.stderr.write(
-      'usage: imagine.mjs "<prompt>" --out <path> [--aspect 1:1] [--resolution 1k|2k] [--model <id>] [--quality low|medium]\n' +
-        "       the prompt may also be piped on stdin, which avoids shell quote-stripping:\n" +
-        "       imagine.mjs --out <path> <<'PROMPT'\\n<prompt>\\nPROMPT\n",
+      "usage: imagine.mjs --prompt-file <path|-> [--out <path>] [--aspect 1:1] [--resolution 1k|2k] [--model <id>] [--quality low|medium]\n" +
+        '       the prompt may also be a positional argument ("<prompt>") or piped on stdin, but a file\n' +
+        "       is the only transport a shell cannot corrupt. Without --out the image lands in a fresh temp dir.\n",
     );
     return 2;
   }
+  // No --out: pick a private directory rather than making the caller compute one in
+  // the shell and splice it back into the next command line.
+  if (!opts.out) opts.out = path.join(mkdtempSync(path.join(tmpdir(), "imagine-")), "image.jpg");
   try {
     const r = await generateImage({ ...opts, token: resolveToken() });
     // The disk is the receipt — statSync so we report what actually landed.

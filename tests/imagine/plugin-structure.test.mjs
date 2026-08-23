@@ -19,10 +19,21 @@ test("image is model-invocable — the commander must be able to reach it", () =
 
 test("the command launches the script from CLAUDE_PLUGIN_ROOT, never a cache path", () => {
   const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
-  const launch = body.split("\n").find((l) => /imagine\.mjs/.test(l) && /--out/.test(l));
+  const launch = body.split("\n").find((l) => /imagine\.mjs/.test(l) && /--prompt-file/.test(l));
   assert.ok(launch, "image.md must show the actual launch command");
   assert.match(launch, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/imagine\.mjs/);
   assert.doesNotMatch(launch, /cache\//, "the launch command must not hardcode a versioned cache path");
+});
+
+test("the command carries the prompt in a file, never through the shell", () => {
+  // A quoted heredoc looks safe and is not: a prompt whose own text contains the
+  // delimiter line closes the here-document, and the rest of the prompt runs as shell.
+  // The prompt is model- and user-authored text, so it must never reach a command line.
+  const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
+  assert.match(body, /--prompt-file/, "the documented transport must be a file");
+  assert.doesNotMatch(body, /<<'?[A-Z_]+'?\n/, "no heredoc may carry the prompt");
+  const launch = body.split("\n").find((l) => /imagine\.mjs/.test(l));
+  assert.doesNotMatch(launch, /<the |<prompt|\$ARGUMENTS/, "no prompt text may be spliced into the command line");
 });
 
 test("the command sends the user to the prompt skill before spending quota", () => {

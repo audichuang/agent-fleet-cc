@@ -1052,6 +1052,32 @@ test("first-event watchdog: a silent engine is killed and reported as stalled, n
   assert.match(job.error, /interactive prompt/);
 });
 
+// 這條補的是 killImpl 注入縫的**另一半路徑**。cross-process 的 invariant-3 測試只走
+// timeoutMs;把 firstEventTimeoutMs 這條的 killImpl 拿掉,它照樣全綠 —— 於是 stall 路徑
+// 的 TERM 會偷偷走真 process.kill。這裡用 pid>1(pid<=1 會被 killProcessGroup 擋掉,
+// 縫就變成不可觀測)配假 killImpl,所以沒有任何真的 process group 收到訊號。
+test("first-event watchdog: the group SIGTERM goes through the injected killImpl, not the real process.kill", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  const adapter = makeAdapter({ firstEventTimeoutMs: 40 });
+  const child = silentChild();
+  child.pid = 4242; // 假 killImpl 攔下一切,所以這個 pgid 不會真的被打到
+  const signals = [];
+  await runWorker({
+    stateDir,
+    jobId: record.id,
+    adapter,
+    deps: { ...stalledDeps(child), killImpl: (pid, sig) => signals.push([pid, sig]) },
+  });
+  assert.deepEqual(
+    signals.filter(([, sig]) => sig === "SIGTERM"),
+    [[-4242, "SIGTERM"]],
+    `the stall kill must reach the seam as a group TERM; saw ${JSON.stringify(signals)}`,
+  );
+  assert.equal(readJob(stateDir, record.id).errorKind, "stalled");
+});
+
 test("first-event watchdog: STDERR alone must NOT disarm it (the prompt may print there)", async () => {
   const stateDir = tmp();
   const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });

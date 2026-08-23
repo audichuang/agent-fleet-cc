@@ -35,6 +35,11 @@ plugin 移除,不留重複入口。
   (hermes-agent #26942)。優先吃 `b64_json`,只有 URL 時當場抓 bytes,不要把 URL 傳出去。
 - **不要在 shipped prose 裡列舉 model 目錄**(root `AGENTS.md` 的規則)。預設寫死一個
   `grok-imagine-image` 可以,清單指向免費的 `GET /v1/image-generation-models`。
+  **唯一經 owner 核准的例外**是 `skills/imagine-prompts/references/model-and-params.md`:
+  它的三 model 比較是 36 次實測的結果,不是抄目錄,免費 GET 也拿不到,所以留著 ——
+  代價是它有日期錨點和重驗指令,而且**已經腐爛過一次**(0.1.0 上線前,第 11 行還說預設是
+  `-2.0`,程式和實測段是 `grok-imagine-image`)。改那份文件時,先確認每一句「plugin default」
+  跟 `scripts/imagine.mjs` 的 `model =` 對得上。別把這個例外擴大到其他檔案。
 - 測試 hermetic:注入 `fetchImpl` 與 `authFile`,temp dir 假 auth.json,不連網。
 
 ## 細節指向

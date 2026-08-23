@@ -18,6 +18,16 @@ the file that actually landed on disk.
 - **The prompt gets first-class treatment.** `skills/imagine-prompts/` carries the recipe, worked
   examples, and anti-patterns; `commands/image.md` sends you there before spending quota, because
   there are no free re-rolls.
+- **The prompt travels in a file (`--prompt-file <path|->`), never on a command line.** Shell
+  arguments strip the double quotes on-image text needs, and a here-document is worse: a prompt
+  whose own text contains the delimiter line closes it, and the rest runs as shell. `--out` is
+  optional — without it the script mkdtemps its own directory, so no caller has to compute a path
+  in one shell call and splice it into the next.
+- **Two guards against paying for a request nobody wrote.** A destination that already exists is
+  refused *before* the POST (only the extension-corrected collision can still cost money, and its
+  message says so), and a flag is never accepted as another flag's value — `--out --aspect 16:9`
+  used to render `"16:9"` as the prompt. A response body echoed back in an error has any
+  credential-length token redacted out of it.
 
 Supersedes `/grok:image` (removed in `grok@0.8.0`). Contract and evidence:
 `docs/imagine-xai-image-api-audit.md`.

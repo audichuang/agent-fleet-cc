@@ -149,7 +149,7 @@ codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/
 ```bash
 npm test               # structure + shared + cc + antigravity + codex + grok + imagine + fleet + e2e
 npm run test:cc        # one suite at a time (also test:fleet, test:codex, test:grok, test:imagine, …)
-npm run test:e2e       # black-box CLI end-to-end regression for all 5 job-runtime plugins (real subprocess, fake engine, no API key)
+npm run test:e2e       # black-box CLI end-to-end regression, the 5 plugins with a CLI to drive (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```

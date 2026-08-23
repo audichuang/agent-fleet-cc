@@ -20,7 +20,7 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 (add the plugin to the vendored-runtime target list — CI drift-checks it), and `README.md`.
 
 ## Commands
-- `npm test` — full chain: structure + shared + cc + antigravity + codex + grok + fleet + e2e.
+- `npm test` — full chain: structure + shared + cc + antigravity + codex + grok + imagine + fleet + e2e.
   Run on **Node 24**: codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says
   `>=22.3`, but CI pins 24 for this reason — see `.github/workflows/ci.yml`).
 - One plugin's suite: `node --test tests/<plugin>/*.test.mjs` (antigravity also needs

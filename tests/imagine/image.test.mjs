@@ -107,14 +107,29 @@ test("outPathFor leaves an unknown mime alone rather than guessing", () => {
   assert.equal(outPathFor("/tmp/a.jpg", "image/png"), "/tmp/a.png");
 });
 
-test("generateImage refuses to clobber an existing file, and says the image was billed", async () => {
+test("a destination that is already taken is refused BEFORE the request is paid for", async () => {
   const out = path.join(dir(), "taken.jpg");
   writeFileSync(out, "PRECIOUS");
+  let requested = false;
   await assert.rejects(
-    generateImage({ prompt: "x", out, token: "t", fetchImpl: async () => jpegBody() }),
+    generateImage({ prompt: "x", out, token: "t", fetchImpl: async () => { requested = true; return jpegBody(); } }),
+    (e) => e instanceof ImageError && /refusing to overwrite/.test(e.message) && /never|nothing was generated/i.test(e.message),
+  );
+  assert.equal(requested, false, "the collision was visible for free — we must not pay to discover it");
+  assert.equal(readFileSync(out, "utf8"), "PRECIOUS");
+});
+
+test("a collision only the corrected extension reveals still refuses, and says it was billed", async () => {
+  // --out image.jpg + a PNG response renames to image.png, which the pre-flight check
+  // could not have seen. Here the money IS spent, so the message must say so.
+  const d = dir();
+  writeFileSync(path.join(d, "shot.png"), "PRECIOUS");
+  const png = { ok: true, json: async () => ({ data: [{ b64_json: Buffer.from("PNGBYTES").toString("base64"), mime_type: "image/png" }] }) };
+  await assert.rejects(
+    generateImage({ prompt: "x", out: path.join(d, "shot.jpg"), token: "t", fetchImpl: async () => png }),
     (e) => e instanceof ImageError && /refusing to overwrite/.test(e.message) && /billed/.test(e.message),
   );
-  assert.equal(readFileSync(out, "utf8"), "PRECIOUS");
+  assert.equal(readFileSync(path.join(d, "shot.png"), "utf8"), "PRECIOUS");
 });
 
 test("the output directory is created BEFORE the request, so a paid image is never lost to ENOENT", async () => {
@@ -190,7 +205,70 @@ test("a typo'd flag is an error, never silent prompt text", () => {
   // The old parser folded `--frobnicate hello` into the prompt and spent quota on it.
   assert.throws(() => parseArgs(["--frobnicate", "hello", "--out", "x"]), (e) => /unknown flag/.test(e.message));
   assert.throws(() => parseArgs(["a cat", "--out"]), (e) => /--out needs a value/.test(e.message));
+  // `--out --aspect 16:9` used to set out="--aspect" and ship "16:9" as the prompt:
+  // a billed render of a request nobody wrote. A flag is never another flag's value.
+  assert.throws(
+    () => parseArgs(["cat", "--out", "--aspect", "16:9"]),
+    (e) => /--out needs a value, got the flag --aspect/.test(e.message),
+  );
   assert.deepEqual(parseArgs(["a", "cat", "--out", "x.jpg"]).prompt, "a cat");
+});
+
+test("--prompt-file carries a prompt no shell could: it contains the heredoc delimiter itself", async () => {
+  // The exact prompt that made the old heredoc transport unsafe. A line reading PROMPT
+  // ended the here-document and handed the next line to the shell.
+  const d = dir();
+  const pf = path.join(d, "prompt.txt");
+  const nasty = 'a cat holding a sign reading "PROMPT"\nPROMPT\nrm -rf /nope\n';
+  writeFileSync(pf, nasty);
+  let sent;
+  const authFile = authFileWith({ "https://auth.x.ai::c": { key: "T", expires_at: FUTURE } });
+  process.env.GROK_AUTH_FILE = authFile;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (_u, init) => ((sent = JSON.parse(init.body)), jpegBody());
+  try {
+    const code = await main(["--prompt-file", pf, "--out", path.join(d, "i.jpg")]);
+    assert.equal(code, 0);
+    assert.equal(sent.prompt, nasty.trim(), "every byte of the prompt must reach the model");
+  } finally {
+    globalThis.fetch = origFetch;
+    delete process.env.GROK_AUTH_FILE;
+  }
+});
+
+test("without --out the script picks its own fresh directory, so no path is computed in a shell", async () => {
+  const authFile = authFileWith({ "https://auth.x.ai::c": { key: "T", expires_at: FUTURE } });
+  process.env.GROK_AUTH_FILE = authFile;
+  const origFetch = globalThis.fetch;
+  const origWrite = process.stdout.write.bind(process.stdout);
+  let line = "";
+  process.stdout.write = (chunk) => ((line += chunk), true);
+  globalThis.fetch = async () => jpegBody();
+  try {
+    const code = await main(["a cat"]);
+    process.stdout.write = origWrite;
+    assert.equal(code, 0);
+    const saved = line.match(/IMAGE_SAVED: (\S+)/)?.[1];
+    assert.ok(saved, `expected an IMAGE_SAVED line, got: ${line}`);
+    assert.equal(readFileSync(saved, "utf8"), "JPEGBYTES");
+  } finally {
+    process.stdout.write = origWrite;
+    globalThis.fetch = origFetch;
+    delete process.env.GROK_AUTH_FILE;
+  }
+});
+
+test("a credential error never echoes the bearer back, even if the API reflects it", async () => {
+  const token = "sk-super-secret-1234";
+  await assert.rejects(
+    generateImage({
+      prompt: "x",
+      out: path.join(dir(), "i.jpg"),
+      token,
+      fetchImpl: async () => ({ ok: false, status: 401, text: async () => `bad key ${token} rejected` }),
+    }),
+    (e) => e instanceof ImageError && !e.message.includes(token) && /<redacted>/.test(e.message),
+  );
 });
 
 test("main reads the prompt from stdin, so shell quote-stripping cannot corrupt it", async () => {
