@@ -551,6 +551,25 @@ test("firstEventTimeoutMs is OPT-IN: null by default, and never armed in --json-
     // 切回串流要恢復(同一顆 adapter 會被重用)。
     a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
     assert.equal(a.firstEventTimeoutMs, 45000);
+
+    // 設了但解不出正有限數,**不能**回 null。回 null 等於安靜關掉,使用者以為自己開了防護,
+    // 而 OAuth 那 600 秒照樣在等。要把壞值原樣交出去,讓 worker 記一行 job log。
+    // (這一格是 review 抓到的第六個覆蓋缺口:少了它,把 adapter 改回 `優 > 0 ? 優 : null`
+    //  整個測試套件照樣綠,而 GROK_FIRST_EVENT_TIMEOUT_MS=30s 又變成無聲失效。)
+    for (const bad of ["30s", "abc", "0", "-1", "Infinity"]) {
+      process.env.GROK_FIRST_EVENT_TIMEOUT_MS = bad;
+      a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+      assert.notEqual(
+        a.firstEventTimeoutMs, null,
+        `${bad} must surface as a bad value, not silently disable the guard`,
+      );
+    }
+    // 但空字串/空白 = 沒 opt-in,那是合約允許的關閉,不該當成設錯。
+    for (const empty of ["", "   "]) {
+      process.env.GROK_FIRST_EVENT_TIMEOUT_MS = empty;
+      a.buildInvocation({ job: { cwd: "/w", request: {} }, prompt: "p" });
+      assert.equal(a.firstEventTimeoutMs, null, "an empty value is opt-out, not misconfiguration");
+    }
   } finally {
     if (prev === undefined) delete process.env.GROK_FIRST_EVENT_TIMEOUT_MS;
     else process.env.GROK_FIRST_EVENT_TIMEOUT_MS = prev;

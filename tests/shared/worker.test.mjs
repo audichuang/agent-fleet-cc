@@ -1304,21 +1304,23 @@ test("an absent or null firstEventTimeoutMs is the documented opt-out — no war
 
 // SIGKILL 升級必須可取消。child 已經自己收乾淨之後,那個 callback 仍會在 graceMs 後對 pgid
 // 開槍 —— pid 已死、pgid 被系統回收時,那一槍會打到不相干的 process group。
-test("kill escalation is cancelled once the child has settled", async () => {
+// 反向不變量:child 的 'close' **不代表** process group 空了 —— 同 pgid 的孫子可以改掉
+// stdio、無視 TERM 活下來。所以 SIGKILL 升級必須照樣開火,不能因為 job 落終態就取消
+// (adapter-api.md 不變量 3:孫子不留)。曾經為了 pgid 回收的顧慮把它取消掉,那讓引擎後代
+// 活過 job 終態 —— 用一個未重現的假設換掉一個承重的保證,方向反了。
+test("kill escalation still fires after the child closes — close does not prove the group is empty", async () => {
   const stateDir = tmp();
   const record = createJobRecord({ engine: "fake", timeoutMs: 30 });
   createJob(stateDir, record, "the prompt");
-  // 觀察的是「升級的 callback 有沒有真的跑」。先前的版本斷言 hasRef(),那是空心的 ——
-  // 這些 timer 本來就 unref,所以無論有沒有取消都是 false(mutation 驗證抓到)。
-  const GRACE = 200;
+  const GRACE = 120;
   let escalationsFired = 0;
   const scheduleImpl = (fn, ms) => setTimeout(() => {
-    if (ms === GRACE) escalationsFired += 1;   // killGroupWithGrace 的 SIGKILL 升級
+    if (ms === GRACE) escalationsFired += 1;
     fn();
   }, ms);
   const adapter = makeAdapter();
   const child = silentChild();
-  // child 在整體 timeout 開火之後、grace 到期之前關閉 —— 正是升級該被取消的形狀。
+  // leader 在 timeout 開火後、grace 到期前關閉 —— 孫子留著的形狀就是這樣。
   setTimeout(() => {
     child.stdout.on("end", () => setImmediate(() => child.emit("close", 143, "SIGTERM")));
     child.stdout.end();
@@ -1327,7 +1329,7 @@ test("kill escalation is cancelled once the child has settled", async () => {
     stateDir, jobId: record.id, adapter,
     deps: { spawnImpl: () => child, graceMs: GRACE, forceResolveExtraMs: 400, scheduleImpl },
   });
-  await new Promise((r) => setTimeout(r, 400)); // 撐過 grace,讓沒被取消的升級有機會開槍
-  assert.equal(escalationsFired, 0, "a settled job must not still fire SIGKILL at a recycled pgid");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(escalationsFired, 1, "the group-wide SIGKILL must survive the job finalizing");
   assert.equal(readJob(stateDir, record.id).status, "timed-out");
 });

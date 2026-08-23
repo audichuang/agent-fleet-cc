@@ -485,8 +485,15 @@ everything the verb depends on is engine contract that the next pass has to re-d
     **`restore_progress_on_stdout: false`** — remote-restore progress goes to **stderr only**.
   · `xai-grok-pager/src/app/session_startup.rs` pins
     **`REMOTE_RESTORE_TIMEOUT = 90s`** for pre-TUI remote restore (session state + memory).
-  · Session opening and model-catalog work happen **after** that, with no source-proven ceiling;
-    the engine's own inference idle bound is 600s, so 120s is not an engine contract.
+  · Model-catalog work **is** bounded, and the earlier version of this row was wrong to imply
+    otherwise (corrected 2026-08-23, sixth pass): the first-catalog wait budget is
+    `STARTUP_AUTH_REFRESH_TIMEOUT + STARTUP_FETCH_TIMEOUT` (`xai-grok-shell/src/agent/models.rs`
+    `wait_for_first_catalog_inner`, `const BUDGET`), and both are **5s**
+    (`xai-grok-http/src/lib.rs`), so **10s** total.
+  · What is genuinely unbounded is **session opening itself** — no source-proven ceiling was
+    found for it, and that alone is what makes a default unsafe. (The earlier claim that "the
+    engine's own inference idle bound is 600s" was a **conflation**: 600s is
+    `AUTH_CALLBACK_TIMEOUT`, the OAuth callback wait, not an inference-idle default. Dropped.)
   · The streaming reducer emits nothing at session open (`headless/reducer/mod.rs`, the
     `Reducer::begin` default returns no lines), so there is **no early stdout event to rely on**.
   Consequence for the plugin: `plugins/grok/scripts/lib/adapter.mjs` declares
@@ -495,9 +502,15 @@ everything the verb depends on is engine contract that the next pass has to re-d
   in** (non-streaming writes nothing until its terminal object — a healthy schema run was killed
   by a 15s budget, verified live). A 120s default was shipped and reverted; if a future pass is
   tempted to restore one, this row is the reason not to.
-  Re-check recipe: `rg -n 'restore_progress_on_stdout' crates/codegen/xai-grok-pager/src/headless.rs`
-  · `rg -n 'REMOTE_RESTORE_TIMEOUT' crates/codegen/xai-grok-pager/src/app/session_startup.rs`.
-- **Auth — grok's headless path FAILS CLOSED, so the plugin inherits it for free
+  Re-check recipe — and note what it does and does NOT cover:
+  `rg -n 'restore_progress_on_stdout' crates/codegen/xai-grok-pager/src/headless.rs`
+  · `rg -n 'REMOTE_RESTORE_TIMEOUT' crates/codegen/xai-grok-pager/src/app/session_startup.rs`
+  · `rg -n 'const BUDGET' -A2 crates/codegen/xai-grok-shell/src/agent/models.rs`
+  · `rg -n 'STARTUP_(FETCH|AUTH_REFRESH)_TIMEOUT' crates/codegen/xai-grok-http/src/lib.rs`.
+  Those four verify the restore-output flag, the 90s restore timeout and the 10s catalog budget.
+  They do **not** verify reducer output at session open or the absence of a session-open ceiling —
+  those were read by hand, and re-reading them is the expensive part of the next pass.
+- **Auth — grok's headless path fails closed at METHOD SELECTION, so the plugin inherits that much for free (but see reading 4: a stale advertised token still reaches interactive OAuth)
   (row re-inverted 2026-08-23, second pass).** This row has now been written three ways; the
   history is the lesson, so it is kept.
   1. Originally: "we delegate auth to the CLI and don't need it today."
@@ -522,7 +535,7 @@ everything the verb depends on is engine contract that the next pass has to re-d
      headless**, bounded at 10 minutes and invisible under `--background`.
      Deleting the guard did not open this: the deleted guard only called `existsSync`, so a
      stale `auth.json` passed it and hung anyway. It is covered instead by the **opt-in** stall
-     guard (`firstEventTimeoutMs`, see the startup-silence row below) — opt-in because, as that
+     guard (`firstEventTimeoutMs`, see the startup-silence row above) — opt-in because, as that
      row shows, no default constant is safe. Do not re-read (3) as "interactive login is never
      attempted": that sentence was on four surfaces and all four are now corrected.
 
@@ -536,10 +549,15 @@ everything the verb depends on is engine contract that the next pass has to re-d
   prints as `Error: …` on **stderr** and `exit(1)` (`xai-grok-pager-bin/src/main.rs:1901-1908`).
   The non-interactive message is *"Not signed in. To authenticate without a browser, run: grok
   login --device-code … Alternatively, set the XAI_API_KEY environment variable …"* (`:451-455`).
-  **Consequences we rely on:** an unauthenticated headless run dies in seconds with a
-  self-explanatory reason on both streams — never a hang — and the reason lands in
-  `classifyError`'s `auth` bucket, since the message contains "authenticate" (the bucket matches
-  `authenticat`) and `XAI_API_KEY`. Nothing plugin-side has to detect auth to get that.
+  **Consequences we rely on — scoped to the "no method resolves" case:** a headless run with
+  **no** auth method advertised at all dies in seconds with a self-explanatory reason on both
+  streams, and the reason lands in `classifyError`'s `auth` bucket, since the message contains
+  "authenticate" (the bucket matches `authenticat`) and `XAI_API_KEY`. Nothing plugin-side has to
+  detect auth to get that.
+  **This is NOT "never a hang"** (that phrasing was the surviving fifth variant of this row and
+  is retracted): when a method IS advertised but dead — an expired or legacy-WebLogin
+  `cached_token` — reading 4 above applies and the run waits 600s on interactive OAuth. The
+  fail-closed inheritance covers the empty case, not the stale case.
 
   **Why the guard was a net negative** (host-verified against its own logic — env truthiness plus
   a bare `fs.existsSync`): it **false-refused valid setups** — a per-model `api_key`/`env_key` in

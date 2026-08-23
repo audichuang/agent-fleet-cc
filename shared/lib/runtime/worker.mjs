@@ -174,13 +174,15 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       clearTimeout(forceTimer);
       clearTimeout(firstEventTimer);
       clearTimeout(stalledForceTimer);
-      // child 已經收乾淨了就別再讓 SIGKILL 升級開槍:pid 死了、pgid 被回收之後,
-      // 那一槍會打到不相干的 process group(spawn.mjs killGroupWithGrace 的註解)。
-      for (const t of escalationTimers) clearTimeout(t);
+      // SIGKILL 升級**刻意不取消**。試過取消,那是錯的:child 的 'close' 不代表 process
+      // group 空了 —— 一個同 pgid 的孫子可以改掉 stdio、無視 TERM 繼續活著(本檔下面
+      // force-resolve 的註解講的就是這件事),取消升級等於讓引擎後代活過 job 的終態,違反
+      // adapter-api.md 不變量 3(「cancel 必殺乾淨:整個 process group,孫子不留」)。
+      // pgid 被回收那個危險是真的,但它未被重現,而這個洩漏是被重現過的 —— 拿承重的保證去
+      // 換一個假設,方向是反的。升級本身 unref 且有界,所以放它燒完是可接受的代價。
       resolve(state);
     };
     let forceTimer = null;
-    const escalationTimers = [];
     // 首輸出看門狗(adapter 選填 firstEventTimeoutMs)。要防的不是「跑太久」——
     // 那是下面的 timeoutMs——而是「headless 的 run 被互動式提示卡住」:引擎沒死、
     // 沒報錯、stdout 一個位元組都不吐,只是在等一個永遠不會來的人類。引擎特定的
@@ -229,7 +231,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
         // 活著會讓終態自相矛盾:status 說 timed-out、errorKind 說 stalled。先把它拆掉。
         clearTimeout(timer);
         const graceMs = deps.graceMs ?? 5000;
-        escalationTimers.push(killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout }));
+        killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
         const forceMs = graceMs + (deps.forceResolveExtraMs ?? 200);
         // 這個 force-resolve 刻意**不** unref(與上面 timeoutMs 路徑不同)。一個真的卡住的
         // 引擎不會關 stdout,所以 'close' 永遠不來 —— 這個計時器是唯一能讓 job 落終態的
@@ -255,7 +257,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       // status 是 timed-out 而 error/errorKind 是 stalled —— 持久化的終態自相矛盾。
       disarmFirstEventWatchdog();
       const graceMs = deps.graceMs ?? 5000;
-      escalationTimers.push(killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout }));
+      killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
       // Force-resolve after kill+grace+buffer even when a grandchild holding stdout
       // prevents the 'close' event from ever firing (spec §5 invariant 1: job 必達終態).
       // This mirrors the forceExitMs escape hatch in installCancelForwarder.
