@@ -11,14 +11,21 @@ const adapter = {
   buildInvocation: () => ({ argv: [process.execPath, fixture], env: {}, stdinPayload: "" }),
   parseEvent: (line) => {
     // 把孫子的 pid 交給測試(走 stderr,免得跟 job log 的判定混在一起)
-    try { process.stderr.write("GRANDCHILD " + JSON.parse(line).grandchildPid + "\n"); } catch {}
+    try { const o = JSON.parse(line); process.stderr.write(`GRANDCHILD ${o.grandchildPid}\nREADY ${o.ready}\n`); } catch {}
     return null;
   },
   extractResult: () => ({ ok: false, resultText: null, sessionId: null }),
   classifyError: () => "unknown",
   resumeArgs: () => [],
 };
-runWorker({ stateDir, jobId, adapter, deps: { graceMs: 150 } }).then(
+// killImpl 是判定用的縫:把 worker 實際送出的每個訊號印到 stderr。測試靠這個「entry 在
+// 退出前確實發出了 group SIGKILL」來判定,而不是靠時序 —— 排程的升級與同步收尾都落在
+// killedAt+grace,時間上分不開(review 指出前一版因此可能因錯誤理由而綠)。
+const killImpl = (pid, sig) => {
+  process.stderr.write(`SIGNAL ${pid} ${sig}\n`);
+  return process.kill(pid, sig);
+};
+runWorker({ stateDir, jobId, adapter, deps: { graceMs: 200, killImpl } }).then(
   (code) => process.exit(code),
   () => process.exit(1),
 );

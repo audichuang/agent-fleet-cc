@@ -417,8 +417,8 @@ everything the verb depends on is engine contract that the next pass has to re-d
   - **The companion takes no `--cwd`** (`Unknown flag: --cwd`, exit 1). The run's cwd is the cwd
     of the shell that invokes it, which the adapter then forwards to grok as `--cwd`. Learned by
     hitting it on the live run — `commands/image.md` step 1 now says so.
-  - **Re-check recipe:** `rg -n 'image_gen_enabled' crates/codegen/xai-grok-agent/src/builder.rs`
-    · `rg -n 'SuperGrok feature' crates/codegen/xai-grok-tools/src/implementations/grok_build/image_gen/mod.rs`
+  - **Re-check recipe:** `git show 9fabade:crates/codegen/xai-grok-agent/src/builder.rs | rg -n 'image_gen_enabled'`
+    · `git show 9fabade:crates/codegen/xai-grok-tools/src/implementations/grok_build/image_gen/mod.rs | rg -n 'SuperGrok feature'`
     · `git diff <baseline>..<binary-commit> -- crates/codegen/xai-grok-tools/src/implementations/grok_build/image_gen/mod.rs crates/codegen/xai-grok-shell/src/session/acp_conversion.rs`
     (empty for `8a14c91→9fabade` **and** `9fabade→19d42e3`, checked 2026-08-23).
 - **Tool-level observability — the `updates.jsonl` premise is OBSOLETE, this got cheap.**
@@ -514,10 +514,10 @@ everything the verb depends on is engine contract that the next pass has to re-d
   by a 15s budget, verified live). A 120s default was shipped and reverted; if a future pass is
   tempted to restore one, this row is the reason not to.
   Re-check recipe — and note what it does and does NOT cover:
-  `rg -n 'restore_progress_on_stdout' crates/codegen/xai-grok-pager/src/headless.rs`
-  · `rg -n 'REMOTE_RESTORE_TIMEOUT' crates/codegen/xai-grok-pager/src/app/session_startup.rs`
-  · `rg -n 'const BUDGET' -A2 crates/codegen/xai-grok-shell/src/agent/models.rs`
-  · `rg -n 'STARTUP_(FETCH|AUTH_REFRESH)_TIMEOUT' crates/codegen/xai-grok-http/src/lib.rs`.
+  `git show 9fabade:crates/codegen/xai-grok-pager/src/headless.rs | rg -n 'restore_progress_on_stdout'`
+  · `git show 9fabade:crates/codegen/xai-grok-pager/src/app/session_startup.rs | rg -n 'REMOTE_RESTORE_TIMEOUT'`
+  · `git show 9fabade:crates/codegen/xai-grok-shell/src/agent/models.rs | rg -n -A2 'const BUDGET'`
+  · `git show 9fabade:crates/codegen/xai-grok-http/src/lib.rs | rg -n 'STARTUP_(FETCH|AUTH_REFRESH)_TIMEOUT'`.
   Those four verify the restore-output flag, the 90s restore timeout and the 10s catalog budget.
   They do **not** verify reducer output at session open or the absence of a session-open ceiling —
   those were read by hand, and re-reading them is the expensive part of the next pass.

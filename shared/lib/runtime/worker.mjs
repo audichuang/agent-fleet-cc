@@ -174,20 +174,39 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       clearTimeout(forceTimer);
       clearTimeout(firstEventTimer);
       clearTimeout(stalledForceTimer);
-      // 不變量 3(「cancel 必殺乾淨:整個 process group,孫子不留」)在這裡收尾,**同步**做完。
-      // 為什麼不能靠 killGroupWithGrace 那個排程的升級:worker-entry 在 runWorker resolve
-      // 的瞬間就 `process.exit()`,而 process.exit **無視 ref'd handle**(ref 過,實測無效),
-      // 所以只要 leader 比 grace 先關,那一槍永遠不會開,忽略 TERM 又改掉 stdio 的同 pgid
-      // 孫子就活過了 job 的終態。唯一可靠的時機是「resolve 之前」——此刻 entry 還沒機會退出。
-      // 只在我們真的發過 TERM 的路徑上做(happy path 不碰),而且對已死的 group 是無害 no-op。
-      // 代價:早關的情況下孫子拿到的 grace 比 graceMs 短 —— 它已經無視過一次 TERM,這是它的選擇。
-      if (killInitiated && child?.pid) {
-        killProcessGroup(child.pid, "SIGKILL", deps.killImpl ?? process.kill);
-      }
-      resolve(state);
+      resolveWithGroupReaped();
     };
     let forceTimer = null;
     let killInitiated = false;
+    let killedAt = null;
+    // 不變量 3(「cancel 必殺乾淨:整個 process group,孫子不留」)在 resolve **之前**收尾。
+    // 為什麼不能靠 killGroupWithGrace 那個排程的升級:worker-entry 在 runWorker resolve 的
+    // 瞬間就 `process.exit()`,而 process.exit **無視 ref'd handle**(ref 過,實測無效),
+    // 所以只要 leader 比 grace 先關,那一槍永遠不會開,忽略 TERM 又改掉 stdio 的同 pgid 孫子
+    // 就活過了 job 的終態。唯一可靠的時機是 entry 還沒機會退出的此刻。
+    //
+    // 但**不能立刻開槍**:一個正在「處理」TERM 的後代可能還在做清理(review 重現過:1000ms
+    // grace 下做 400ms 清理的孫子被砍斷)。所以先把剩餘的 grace 等完 —— 承諾過的禮貌要守,
+    // 只是改由我們自己守到底,而不是交給一個會隨 process.exit 消失的排程。
+    // 只在我們真的發過 TERM 的路徑上做;happy path 直接 resolve,一個訊號都不發。
+    const resolveWithGroupReaped = () => {
+      if (!killInitiated || !child?.pid) return resolve(state);
+      const graceMs = deps.graceMs ?? 5000;
+      const remaining = Math.max(0, (killedAt ?? Date.now()) + graceMs - Date.now());
+      const reap = () => {
+        // 刻意**不**先探 leader 的存活。試過,那是錯的:leader 收到 TERM 就自己退出了,探它
+        // 必然失敗,於是整組都不殺 —— 而孫子正活在那個 pgid 裡。「leader 死了」不等於
+        // 「group 空了」,那正是這整條路徑存在的理由。
+        // 代價明說:pid 消失且 pgid 被系統回收時,這一槍會打到不相干的 group。窗口是
+        // 「close 到 killedAt+grace」這段,而不是 kill 之後的整個 grace;pgid 回收本身
+        // 未被重現。拿「一定殺乾淨」換「可能誤傷」是刻意的取捨 —— 反過來已經被證明會讓
+        // 忽略 TERM 的引擎後代永久存活(不變量 3 因此曾經是空的)。
+        killProcessGroup(child.pid, "SIGKILL", deps.killImpl ?? process.kill);
+        resolve(state);
+      };
+      if (remaining === 0) return reap();
+      (deps.scheduleImpl ?? setTimeout)(reap, remaining);
+    };
     // 首輸出看門狗(adapter 選填 firstEventTimeoutMs)。要防的不是「跑太久」——
     // 那是下面的 timeoutMs——而是「headless 的 run 被互動式提示卡住」:引擎沒死、
     // 沒報錯、stdout 一個位元組都不吐,只是在等一個永遠不會來的人類。引擎特定的
@@ -233,6 +252,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
         state.stalledBeforeFirstEvent = true;
         state.armedFirstEventTimeoutMs = firstEventTimeoutMs;
         killInitiated = true;
+        killedAt = Date.now();
         // 這道關開火就代表整體 timeoutMs 沒有意義了(引擎連話都沒講),而且兩個計時器都
         // 活著會讓終態自相矛盾:status 說 timed-out、errorKind 說 stalled。先把它拆掉。
         clearTimeout(timer);
@@ -259,6 +279,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     const timer = setTimeout(() => {
       state.timedOut = true;
       killInitiated = true;
+      killedAt = Date.now();
       // 整體預算先到就把首輸出看門狗拆掉。兩個期限重疊時(例如 --timeout-ms 119000 對 120s 的
       // 看門狗,或兩者相等),child 若在 grace 期間沒關,看門狗還武裝著就會再開火一次,結果
       // status 是 timed-out 而 error/errorKind 是 stalled —— 持久化的終態自相矛盾。

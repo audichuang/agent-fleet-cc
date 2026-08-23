@@ -7,6 +7,13 @@
 1. job 必達終態(completed | failed | cancelled | timed-out),永不卡 running。
 2. 事件必寫 events.ndjson(job-created / spawned / engine-event / result / finalized)。
 3. cancel 必殺乾淨:整個 process group,孫子不留。
+   **已知缺口(2026-08-23,誠實標註,勿當成已滿足):** 這條在 `runWorker` **自己發起**的
+   kill 路徑(timeout / stall)上成立 —— `finish()` 會等完剩餘 grace 後同步送整組 SIGKILL,
+   刻意排在 resolve 之前,因為 worker-entry 一 resolve 就 `process.exit()`,而 `process.exit()`
+   **無視** ref'd handle,任何排程的升級都會隨它消失。**尚未涵蓋**:(a)
+   `installCancelForwarder` 自己那條 —— 它從 signal handler 送 TERM,再靠自己的 unref
+   `forceExitMs` 退出,同一個空窗;(b) 用 `setsid` 跳出 group 的後代(`spawn.mjs` 一直註明
+   射程外)。(a) 是**既有**缺口,不是本輪造成,但在修好之前這條不變量不能被讀成無條件。
 4. result 必冪等:重複讀取同一 job 的 result 永遠一致。
 5. exitCode 可為 null(session 型引擎無單一退出碼)。
 

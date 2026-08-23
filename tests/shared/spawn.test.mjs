@@ -54,19 +54,10 @@ test("killProcessGroup never throws on dead/invalid pgid", () => {
   killProcessGroup(null, "SIGTERM");
 });
 
-// 不變量 3(「cancel 必殺乾淨:整個 process group,孫子不留」)唯一的靠山是這個 timer 會
-// **真的開火**。它曾經 unref,而 worker-entry 在 runWorker resolve 的瞬間就 process.exit()
-// —— unref 的 timer 不撐 event loop,所以 leader 比 grace 先關時那一槍永遠不會開,孫子就活
-// 過了 job 的終態。所以這裡直接釘「它是 ref 的」:那是 process 不會提早離開的唯一保證。
-// 不變量 3 的**可觀測**測試(取代先前那條斷言 hasRef() 的代理版本 —— review 正確指出
-// hasRef 只釘得住字面上的 .unref() 改動,證不到 production 的退出邊界)。
-// 這裡真的跑 runWorker,真的生一個無視 TERM 的同 pgid 孫子,然後斷言 runWorker resolve
-// 之後孫子已經死了 —— 那個時間點就是 worker-entry 會 process.exit() 的時間點。
-// 不變量 3 的**可觀測**測試。前兩個版本都不算:斷言 hasRef() 是代理指標;in-process 跑
-// runWorker 也不算 —— 測試行程不會顯式 exit,所以排程的 unref 升級照樣開火,把「有沒有同步
-// 殺」這件事完全掩蓋掉(mutation 不打紅)。只有跨過真正的退出邊界才證得到:
-// 起一個複製 production worker-entry 形狀(`.then(code => process.exit(code))`)的子行程,
-// 等它退出,然後看那個無視 TERM 的同 pgid 孫子還在不在。
+// 不變量 3(「cancel 必殺乾淨:整個 process group,孫子不留」)的靠山**不是**這個排程的
+// 升級 —— worker-entry 一 resolve 就 process.exit(),而 process.exit 無視 ref'd handle,
+// 所以它在真入口上根本不保證開火(ref 過,實測無效)。真正的保證是 runWorker 在 resolve
+// 之前同步送的那一發;下面那條跨行程測試才是它的證明。
 test("invariant 3: a TERM-ignoring grandchild does not survive a real worker entry's process.exit", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-inv3-"));
   const record = createJobRecord({ engine: "fake", timeoutMs: 300 });
@@ -81,8 +72,16 @@ test("invariant 3: a TERM-ignoring grandchild does not survive a real worker ent
   await new Promise((resolve) => proc.once("close", resolve));
   const m = stderr.match(/GRANDCHILD (\d+)/);
   assert.ok(m, `entry must report the grandchild pid; stderr was: ${stderr}`);
+  assert.match(stderr, /READY true/, "the fixture must confirm the descendant installed its TERM handler");
   const grandchildPid = Number(m[1]);
-  // 入口已經 process.exit() 了。排程的升級隨那個行程一起消失,所以孫子若還活著就是永遠活著。
+  // 判定一:worker **在 resolve 之前**確實發出了整組 SIGKILL。負 pid = process group。
+  // 這條不依賴時序,所以排程的升級不可能冒充它(兩者都落在 killedAt+grace)。
+  assert.match(
+    stderr, /SIGNAL -\d+ SIGKILL/,
+    `the worker must issue a group SIGKILL before resolving; signals were: ${stderr}`,
+  );
+  // 判定二:效果。入口已經 process.exit() 了,排程的升級隨它一起消失,所以孫子若還活著就是
+  // 永遠活著。
   assert.ok(
     await waitGone(grandchildPid, 1500),
     "the descendant outlived the worker entry — invariant 3 is only satisfiable by killing before resolve",
