@@ -7,7 +7,7 @@
 // could silently log the user out of grok itself. Expired token => tell them to
 // run grok once and let it refresh. `XAI_API_KEY` is the fallback for machines
 // with no grok login.
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,7 +84,9 @@ export async function generateImage({
   // ...and refuse a taken destination BEFORE the money is spent. The 'wx' write below
   // still closes the race and the renamed-extension case; this only avoids paying to
   // discover a collision we could see for free.
-  if (existsSync(out)) {
+  // lstat, not existsSync: existsSync follows the link, so a DANGLING symlink reads as
+  // free and then fails the 'wx' write after the image is paid for.
+  if (lstatSync(out, { throwIfNoEntry: false })) {
     throw new ImageError(`${out} already exists — refusing to overwrite. Nothing was generated or billed; pick a different --out.`);
   }
 
@@ -107,11 +109,10 @@ export async function generateImage({
   if (!res.ok) {
     // The body is echoed to the user; a bearer that came back in it must not ride along.
     // Redact BEFORE truncating, or a token straddling the 300-char cut leaves a fragment.
-    // Only a credential-length string is worth redacting: substring-replacing a 1-char
-    // test token would shred the message, and a 422's enum is the best body we ever get.
+    // Every accepted credential, not just the long ones — a length threshold here only
+    // existed to protect a test fixture's one-character "token", which is backwards.
     const raw = await res.text().catch(() => "");
-    const secret = typeof token === "string" && token.length >= 12 ? token : "";
-    const detail = (secret && raw.includes(secret) ? raw.split(secret).join("<redacted>") : raw).slice(0, 300);
+    const detail = (token && raw.includes(token) ? raw.split(token).join("<redacted>") : raw).slice(0, 300);
     // 401 is the documented shape; a rejected bearer has also been seen to come
     // back as 400 "Incorrect API key provided", so key on the message too.
     if (res.status === 401 || (res.status === 400 && /api key/i.test(detail))) {
@@ -170,7 +171,9 @@ export function parseArgs(argv) {
       if (value === undefined) throw new ImageError(`${flag} needs a value`);
       // A following flag is not a value: `--out --aspect 16:9` used to set out="--aspect"
       // and ship "16:9" as the prompt — a billed render of a silently corrupted request.
-      if (value.startsWith("--")) throw new ImageError(`${flag} needs a value, got the flag ${value}`);
+      if (value.startsWith("--")) {
+        throw new ImageError(`${flag} needs a value, got the flag ${value}. For a path that really starts with --, write ./${value}`);
+      }
       opts[key] = value;
     } else if (flag.startsWith("--")) {
       // Never let a typo'd flag slide into the prompt text — that spends quota on
@@ -200,7 +203,16 @@ export async function main(argv, { stdin = readStdin } = {}) {
     // --prompt-file is the safe transport: a prompt carrying the caller's heredoc
     // delimiter used to end the here-document and run the rest as shell. A file has
     // no such escape, and it keeps the double quotes on-image text needs.
-    if (opts.promptFile) opts.prompt = opts.promptFile === "-" ? await stdin() : readFileSync(opts.promptFile, "utf8").trim();
+    //
+    // When it is given it is THE source — never a preference that falls back to stdin or
+    // to the positional words on empty. Precedence that changes with the file's CONTENT is
+    // how a caller ends up billed for a prompt they cannot see.
+    if (opts.promptFile) {
+      if (opts.prompt) throw new ImageError("--prompt-file and a positional prompt are two prompts; pass one.");
+      // Bytes as-is: the promise is verbatim transport. .trim() only decides emptiness.
+      opts.prompt = opts.promptFile === "-" ? await stdin() : readFileSync(opts.promptFile, "utf8");
+      if (!opts.prompt.trim()) throw new ImageError(`${opts.promptFile} is empty — nothing to render.`);
+    }
     if (!opts.prompt) opts.prompt = await stdin();
   } catch (error) {
     process.stderr.write(`imagine: ${error?.message ?? error}\n`);
@@ -214,10 +226,12 @@ export async function main(argv, { stdin = readStdin } = {}) {
     );
     return 2;
   }
-  // No --out: pick a private directory rather than making the caller compute one in
-  // the shell and splice it back into the next command line.
-  if (!opts.out) opts.out = path.join(mkdtempSync(path.join(tmpdir(), "imagine-")), "image.jpg");
+
   try {
+    // No --out: pick a private directory rather than making the caller compute one in the
+    // shell and splice it back into the next command line. Inside the try — an unusable
+    // TMPDIR must fail as the same one-line reason as everything else, not a stack trace.
+    if (!opts.out) opts.out = path.join(mkdtempSync(path.join(tmpdir(), "imagine-")), "image.jpg");
     const r = await generateImage({ ...opts, token: resolveToken() });
     // The disk is the receipt — statSync so we report what actually landed.
     const note = r.renamed ? ` — extension corrected to match ${r.mimeType}` : "";

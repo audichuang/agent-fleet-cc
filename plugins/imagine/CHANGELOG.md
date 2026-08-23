@@ -18,11 +18,14 @@ the file that actually landed on disk.
 - **The prompt gets first-class treatment.** `skills/imagine-prompts/` carries the recipe, worked
   examples, and anti-patterns; `commands/image.md` sends you there before spending quota, because
   there are no free re-rolls.
-- **The prompt travels in a file (`--prompt-file <path|->`), never on a command line.** Shell
+- **`/imagine:image` transports the prompt in a file (`--prompt-file <path|->`).** Shell
   arguments strip the double quotes on-image text needs, and a here-document is worse: a prompt
-  whose own text contains the delimiter line closes it, and the rest runs as shell. `--out` is
-  optional — without it the script mkdtemps its own directory, so no caller has to compute a path
-  in one shell call and splice it into the next.
+  whose own text contains the delimiter line closes it, and the rest runs as shell. A positional
+  prompt still works for a caller who has one safely in hand; the command doc, the prompt skill and
+  its examples all use the file. `--out` is optional — without it the script mkdtemps its own
+  directory, so no caller has to compute a path in one shell call and splice it into the next. The
+  file is transported verbatim: given `--prompt-file`, nothing falls back to stdin or to positional
+  words, and an empty file is a usage error rather than a silent substitution.
 - **Two guards against paying for a request nobody wrote.** A destination that already exists is
   refused *before* the POST (only the extension-corrected collision can still cost money, and its
   message says so), and a flag is never accepted as another flag's value — `--out --aspect 16:9`

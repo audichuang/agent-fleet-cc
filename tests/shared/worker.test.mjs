@@ -1028,6 +1028,10 @@ function silentChild({ stderr = "" } = {}) {
   return child;
 }
 
+// 大於任何實務上的 pid_max(Linux 預設 4194304),所以就算 killImpl 沒接上、訊號漏到真的
+// process.kill,也不可能命中任何存在的 process group。
+const UNSIGNALABLE_PID = 2_147_483_647;
+
 const stalledDeps = (child) => ({
   spawnImpl: () => child,
   graceMs: 5,
@@ -1054,15 +1058,18 @@ test("first-event watchdog: a silent engine is killed and reported as stalled, n
 
 // 這條補的是 killImpl 注入縫的**另一半路徑**。cross-process 的 invariant-3 測試只走
 // timeoutMs;把 firstEventTimeoutMs 這條的 killImpl 拿掉,它照樣全綠 —— 於是 stall 路徑
-// 的 TERM 會偷偷走真 process.kill。這裡用 pid>1(pid<=1 會被 killProcessGroup 擋掉,
-// 縫就變成不可觀測)配假 killImpl,所以沒有任何真的 process group 收到訊號。
+// 的 TERM 會偷偷走真 process.kill。
+//
+// pid 不能用 1(pid<=1 被 killProcessGroup 擋掉,縫就不可觀測),但也不能用 4242:當
+// forwarding 被拿掉來驗證這條測試會紅時,訊號就會落到真的 process.kill(-4242) 上。
+// UNSIGNALABLE_PID 大於任何 Linux pid_max,所以連 mutation 跑起來都打不到任何東西。
 test("first-event watchdog: the group SIGTERM goes through the injected killImpl, not the real process.kill", async () => {
   const stateDir = tmp();
   const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
   createJob(stateDir, record, "the prompt");
   const adapter = makeAdapter({ firstEventTimeoutMs: 40 });
   const child = silentChild();
-  child.pid = 4242; // 假 killImpl 攔下一切,所以這個 pgid 不會真的被打到
+  child.pid = UNSIGNALABLE_PID;
   const signals = [];
   await runWorker({
     stateDir,
@@ -1072,7 +1079,7 @@ test("first-event watchdog: the group SIGTERM goes through the injected killImpl
   });
   assert.deepEqual(
     signals.filter(([, sig]) => sig === "SIGTERM"),
-    [[-4242, "SIGTERM"]],
+    [[-UNSIGNALABLE_PID, "SIGTERM"]],
     `the stall kill must reach the seam as a group TERM; saw ${JSON.stringify(signals)}`,
   );
   assert.equal(readJob(stateDir, record.id).errorKind, "stalled");

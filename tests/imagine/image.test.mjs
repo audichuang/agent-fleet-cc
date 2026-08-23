@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -49,7 +49,7 @@ test("resolveToken falls back to XAI_API_KEY when there is no grok login", (t) =
 
 test("generateImage writes the b64 payload to <out>", async () => {
   const out = path.join(dir(), "image.jpg");
-  const r = await generateImage({ prompt: "a cat", out, token: "t", fetchImpl: async () => jpegBody() });
+  const r = await generateImage({ prompt: "a cat", out, token: "xai-test-bearer-0123456789", fetchImpl: async () => jpegBody() });
   assert.equal(readFileSync(out, "utf8"), "JPEGBYTES");
   assert.equal(r.bytes, 9);
 });
@@ -65,7 +65,7 @@ test("generateImage asks for b64_json — without it the API only ever returns a
     out: path.join(dir(), "i.jpg"),
     aspect: "16:9",
     resolution: "2k",
-    token: "t",
+    token: "xai-test-bearer-0123456789",
     fetchImpl,
   });
   assert.deepEqual(body, {
@@ -81,8 +81,8 @@ test("--quality rides along only when asked for", async () => {
   const bodies = [];
   const fetchImpl = async (_u, init) => (bodies.push(JSON.parse(init.body)), jpegBody("eA=="));
   const out = () => path.join(dir(), "i.jpg");
-  await generateImage({ prompt: "x", out: out(), token: "t", fetchImpl });
-  await generateImage({ prompt: "x", out: out(), token: "t", quality: "low", fetchImpl });
+  await generateImage({ prompt: "x", out: out(), token: "xai-test-bearer-0123456789", fetchImpl });
+  await generateImage({ prompt: "x", out: out(), token: "xai-test-bearer-0123456789", quality: "low", fetchImpl });
   assert.ok(!("quality" in bodies[0]));
   assert.equal(bodies[1].quality, "low");
 });
@@ -94,7 +94,7 @@ test("a PNG response is not written into a .jpg filename", async () => {
     ok: true,
     json: async () => ({ data: [{ b64_json: Buffer.from("PNGBYTES").toString("base64"), mime_type: "image/png" }] }),
   });
-  const r = await generateImage({ prompt: "x", out, resolution: "2k", token: "t", fetchImpl });
+  const r = await generateImage({ prompt: "x", out, resolution: "2k", token: "xai-test-bearer-0123456789", fetchImpl });
   assert.equal(path.extname(r.out), ".png");
   assert.equal(r.renamed, true);
   assert.ok(!existsSync(out), "must not also leave a mislabelled .jpg behind");
@@ -112,7 +112,7 @@ test("a destination that is already taken is refused BEFORE the request is paid 
   writeFileSync(out, "PRECIOUS");
   let requested = false;
   await assert.rejects(
-    generateImage({ prompt: "x", out, token: "t", fetchImpl: async () => { requested = true; return jpegBody(); } }),
+    generateImage({ prompt: "x", out, token: "xai-test-bearer-0123456789", fetchImpl: async () => { requested = true; return jpegBody(); } }),
     (e) => e instanceof ImageError && /refusing to overwrite/.test(e.message) && /never|nothing was generated/i.test(e.message),
   );
   assert.equal(requested, false, "the collision was visible for free — we must not pay to discover it");
@@ -126,7 +126,7 @@ test("a collision only the corrected extension reveals still refuses, and says i
   writeFileSync(path.join(d, "shot.png"), "PRECIOUS");
   const png = { ok: true, json: async () => ({ data: [{ b64_json: Buffer.from("PNGBYTES").toString("base64"), mime_type: "image/png" }] }) };
   await assert.rejects(
-    generateImage({ prompt: "x", out: path.join(d, "shot.jpg"), token: "t", fetchImpl: async () => png }),
+    generateImage({ prompt: "x", out: path.join(d, "shot.jpg"), token: "xai-test-bearer-0123456789", fetchImpl: async () => png }),
     (e) => e instanceof ImageError && /refusing to overwrite/.test(e.message) && /billed/.test(e.message),
   );
   assert.equal(readFileSync(path.join(d, "shot.png"), "utf8"), "PRECIOUS");
@@ -142,7 +142,7 @@ test("the output directory is created BEFORE the request, so a paid image is nev
     requested = true;
     return jpegBody();
   };
-  await generateImage({ prompt: "x", out, token: "t", fetchImpl });
+  await generateImage({ prompt: "x", out, token: "xai-test-bearer-0123456789", fetchImpl });
   assert.ok(requested);
   assert.equal(readFileSync(out, "utf8"), "JPEGBYTES");
 });
@@ -155,7 +155,7 @@ test("generateImage downloads a url-only response immediately (the URL is epheme
     if (seen.length === 1) return { ok: true, json: async () => ({ data: [{ url: "https://imgen.x.ai/tmp-1" }] }) };
     return { ok: true, arrayBuffer: async () => new TextEncoder().encode("DOWNLOADED").buffer };
   };
-  await generateImage({ prompt: "a cat", out, token: "t", fetchImpl });
+  await generateImage({ prompt: "a cat", out, token: "xai-test-bearer-0123456789", fetchImpl });
   assert.equal(seen[1], "https://imgen.x.ai/tmp-1");
   assert.equal(readFileSync(out, "utf8"), "DOWNLOADED");
 });
@@ -163,7 +163,7 @@ test("generateImage downloads a url-only response immediately (the URL is epheme
 test("credential rejection is recognised as 401 AND as the 400 the API actually sends", async () => {
   const fail = (status, text) => async () => ({ ok: false, status, text: async () => text });
   const call = (status, text) =>
-    generateImage({ prompt: "x", out: path.join(dir(), "i.jpg"), token: "t", fetchImpl: fail(status, text) });
+    generateImage({ prompt: "x", out: path.join(dir(), "i.jpg"), token: "xai-test-bearer-0123456789", fetchImpl: fail(status, text) });
   await assert.rejects(call(401, "nope"), (e) => /refresh/.test(e.message));
   await assert.rejects(
     call(400, '{"error":"Incorrect API key provided."}'),
@@ -180,7 +180,7 @@ test("a 422 is passed through verbatim — xAI enumerates the legal enum in it",
     generateImage({
       prompt: "x",
       out: path.join(dir(), "i.jpg"),
-      token: "t",
+      token: "xai-test-bearer-0123456789",
       fetchImpl: async () => ({ ok: false, status: 422, text: async () => enumMsg }),
     }),
     (e) => e.message.includes(enumMsg),
@@ -192,7 +192,7 @@ test("a hung request fails with a stated timeout instead of blocking forever", a
     generateImage({
       prompt: "x",
       out: path.join(dir(), "i.jpg"),
-      token: "t",
+      token: "xai-test-bearer-0123456789",
       timeoutMs: 5,
       fetchImpl: (_u, init) =>
         new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))),
@@ -229,11 +229,60 @@ test("--prompt-file carries a prompt no shell could: it contains the heredoc del
   try {
     const code = await main(["--prompt-file", pf, "--out", path.join(d, "i.jpg")]);
     assert.equal(code, 0);
-    assert.equal(sent.prompt, nasty.trim(), "every byte of the prompt must reach the model");
+    assert.equal(sent.prompt, nasty, "every byte of the prompt must reach the model, trailing newline included");
   } finally {
     globalThis.fetch = origFetch;
     delete process.env.GROK_AUTH_FILE;
   }
+});
+
+test("--prompt-file is THE source: it never silently falls back, and never doubles up", async () => {
+  const d = dir();
+  const empty = path.join(d, "empty.txt");
+  writeFileSync(empty, "   \n");
+  const authFile = authFileWith({ "https://auth.x.ai::c": { key: "T", expires_at: FUTURE } });
+  process.env.GROK_AUTH_FILE = authFile;
+  const origFetch = globalThis.fetch;
+  let requested = false;
+  globalThis.fetch = async () => { requested = true; return jpegBody(); };
+  try {
+    // An empty file used to fall through to stdin — precedence that turns on the file's
+    // CONTENT, which is how you get billed for a prompt you cannot see.
+    assert.equal(await main(["--prompt-file", empty], { stdin: async () => "a cat" }), 2);
+    // Two prompts is a usage error, not a silent winner.
+    const pf = path.join(d, "p.txt");
+    writeFileSync(pf, "a dog");
+    assert.equal(await main(["a cat", "--prompt-file", pf]), 2);
+    assert.equal(requested, false, "neither malformed invocation may reach the API");
+  } finally {
+    globalThis.fetch = origFetch;
+    delete process.env.GROK_AUTH_FILE;
+  }
+});
+
+test("a DANGLING symlink at the destination is caught before the request, not after the bill", async () => {
+  const d = dir();
+  const out = path.join(d, "link.jpg");
+  symlinkSync(path.join(d, "nowhere.jpg"), out); // points at nothing: existsSync reads it as free
+  let requested = false;
+  await assert.rejects(
+    generateImage({ prompt: "x", out, token: "xai-test-bearer-0123456789", fetchImpl: async () => { requested = true; return jpegBody(); } }),
+    (e) => e instanceof ImageError && /nothing was generated/i.test(e.message),
+  );
+  assert.equal(requested, false, "the name is taken — a dangling link still fails the wx write");
+});
+
+test("a short credential is redacted too — the threshold that protected a test fixture is gone", async () => {
+  const token = "sk-shortish";
+  await assert.rejects(
+    generateImage({
+      prompt: "x",
+      out: path.join(dir(), "i.jpg"),
+      token,
+      fetchImpl: async () => ({ ok: false, status: 401, text: async () => `key ${token} rejected` }),
+    }),
+    (e) => e instanceof ImageError && !e.message.includes(token),
+  );
 });
 
 test("without --out the script picks its own fresh directory, so no path is computed in a shell", async () => {

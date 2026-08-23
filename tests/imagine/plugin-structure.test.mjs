@@ -29,11 +29,25 @@ test("the command carries the prompt in a file, never through the shell", () => 
   // A quoted heredoc looks safe and is not: a prompt whose own text contains the
   // delimiter line closes the here-document, and the rest of the prompt runs as shell.
   // The prompt is model- and user-authored text, so it must never reach a command line.
+  // Every doc that shows an invocation, not just the command: the command MAKES you read
+  // the skill first, so a heredoc surviving there is the same defect one file over.
+  const docs = [
+    "commands/image.md",
+    "skills/imagine-prompts/SKILL.md",
+    "skills/imagine-prompts/references/examples.md",
+    "skills/imagine-prompts/references/model-and-params.md",
+  ];
+  for (const rel of docs) {
+    const text = fs.readFileSync(path.join(ROOT, rel), "utf8");
+    assert.doesNotMatch(text, /<<'?[A-Z_]+'?\n/, `${rel} must not carry the prompt in a heredoc`);
+    // an invocation, not prose that merely names the script: it carries at least one flag
+    for (const line of text.split("\n").filter((l) => /imagine\.mjs/.test(l) && /\s--\w/.test(l))) {
+      assert.match(line, /--prompt-file/, `${rel}: every shown invocation must use --prompt-file (${line.trim()})`);
+      assert.doesNotMatch(line, /<the |<prompt|\$ARGUMENTS/, `${rel}: no prompt text on a command line`);
+    }
+  }
   const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
   assert.match(body, /--prompt-file/, "the documented transport must be a file");
-  assert.doesNotMatch(body, /<<'?[A-Z_]+'?\n/, "no heredoc may carry the prompt");
-  const launch = body.split("\n").find((l) => /imagine\.mjs/.test(l));
-  assert.doesNotMatch(launch, /<the |<prompt|\$ARGUMENTS/, "no prompt text may be spliced into the command line");
 });
 
 test("the command sends the user to the prompt skill before spending quota", () => {

@@ -56,7 +56,7 @@ every accepted ratio in the message, which is better than any list this plugin c
 On success the script prints one line and exits 0:
 
 ```
-IMAGE_SAVED: /abs/path/image.png (6872209 bytes, grok-imagine-image-2.0) — extension corrected to match image/png
+IMAGE_SAVED: /abs/path/image.png (6872209 bytes, grok-imagine-image) — extension corrected to match image/png
 ```
 
 The byte count is from `statSync` **after** the write — disk evidence, not prose. **Report the
@@ -79,7 +79,8 @@ rather than re-diagnosing:
   request ("nothing was generated or billed"), just pick another `--out`. Caught after the
   extension was corrected ("generated and billed"), the bytes are gone unless you re-run with a
   different `--out`.
-- **exit 2** → a usage error (unknown flag, missing value, no prompt). Nothing was billed.
+- **exit 2** → a usage error (unknown flag, missing value, no prompt, an unreadable or empty
+  `--prompt-file`, or a prompt given twice). Nothing was billed.
 
 ## 4. Cost
 

@@ -8,13 +8,14 @@ description: Craft the prompt for a Grok Imagine still-image render, and choose 
 There are no free re-rolls and no `seed` — every call spends quota and a re-run will not
 reproduce the last image. The prompt is the whole job.
 
-**Pass the prompt on stdin, via a quoted heredoc.** Good prompts contain double quotes; a shell
-argument silently strips them.
+**Write the prompt to a file and pass `--prompt-file`.** Good prompts contain double quotes,
+which a shell argument silently strips — and a here-document is worse than useless here: a prompt
+whose own text contains the delimiter line closes it, and whatever follows runs as shell. A file
+has no such escape. Omit `--out` unless the user named a path; the script picks its own directory
+and prints where the image landed.
 
 ```bash
-node …/imagine.mjs --out /abs/path/image.jpg --aspect 3:2 <<'PROMPT'
-<the prompt, verbatim>
-PROMPT
+node …/imagine.mjs --prompt-file /abs/path/prompt.txt --aspect 3:2
 ```
 
 ## What the recipe is actually for
