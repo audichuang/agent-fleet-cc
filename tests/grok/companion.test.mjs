@@ -638,6 +638,10 @@ test("no credentials: the launch goes ahead and grok's own fail-closed message l
   assert.equal(json.status, "failed");
   assert.equal(json.errorKind, "auth");
   assert.match(json.error, /grok login --device-code/);
+  // The pre-minted request.sessionId is on the record (it was persisted before spawn), but
+  // grok authenticates BEFORE opening a session, so nothing was ever created to resume.
+  assert.ok(jobs[0].request.sessionId, "the record still carries the pre-minted id");
+  assert.equal(json.sessionId, null, "a pre-session failure must not advertise the pre-minted id");
 });
 
 // --- --resume-job onto a non-terminal job -----------------------------------
@@ -744,16 +748,20 @@ test("task rejects an empty or whitespace-only --prompt-file before reaching the
   );
 });
 
-// --- the resume tip on a crashed job ----------------------------------------
+// --- the resume tip: positive session provenance -----------------------------
 
 // The crashed-worker shape (as in "crash-safe resume" above): the id was minted and
 // persisted into request.sessionId before spawn, but the worker died before finalize, so
 // there is no top-level job.sessionId. Reading only that field made both surfaces claim
 // the job was unresumable — the tip vanished from `result`, and --json reported
 // sessionId:null — for exactly the crash the pre-minted id exists to survive.
-test("result on a crashed job still advertises the resume tip and reports its session id", async () => {
-  const dataRoot = makeDataRoot();
-  const cwd = makeTempDir("grok-ws-");
+// The other half of the same predicate: that pre-minted id exists BEFORE spawn, and grok
+// AUTHENTICATES BEFORE IT OPENS A SESSION (headless.rs:461 `authenticate`; the "Couldn't
+// start session" bail at :852 — both emit a stdout `{"type":"error"}` line, which is why
+// an `error` engine-event proves nothing), so "the process spawned" is not evidence. The
+// signal that separates them is an engine-event from the prompt turn, which only runs
+// after open_session returned (headless.rs:1109). Anchors: grok-build @ 9fabade == 1.0.5.
+function seedPreMintedJob(dataRoot, cwd, { sessionEvent }) {
   const stateDir = workspaceStateDir(resolveDataRoot({ GROK_PLUGIN_DATA: dataRoot }), cwd);
   const record = createJobRecord({
     engine: "grok",
@@ -762,16 +770,47 @@ test("result on a crashed job still advertises the resume tip and reports its se
     request: { model: "grok-4.5", sessionId: "pre-spawn-uuid-5678" },
   });
   createJob(stateDir, record, "prompt");
+  markJobRunning(stateDir, record.id, { pid: process.pid });
+  // Both jobs SPAWNED — that is the whole point: the spawned event cannot tell them apart.
+  appendEvent(jobDir(stateDir, record.id), "spawned", { pid: process.pid });
+  appendEvent(jobDir(stateDir, record.id), "engine-event", sessionEvent);
   finalizeJob(stateDir, record.id, { status: "failed", error: "worker process died (reconciled dead pid)" });
+  return record.id;
+}
+
+test("result on a crashed job still advertises the resume tip and reports its session id", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  // A `text` line: the model was already answering, so the session existed.
+  const crashed = seedPreMintedJob(dataRoot, cwd, { sessionEvent: { kind: "text", text: "half an ans" } });
 
   const human = collect();
-  const code = await runCompanion(["result", record.id], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: human.out });
+  const code = await runCompanion(["result", crashed], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: human.out });
   assert.equal(code, 1, "a failed job still exits non-zero");
-  assert.match(human.lines.join("\n"), new RegExp(`Tip: continue this thread with: task --resume-job ${record.id}`));
+  assert.match(human.lines.join("\n"), new RegExp(`Tip: continue this thread with: task --resume-job ${crashed}`));
 
   const json = collect();
-  await runCompanion(["result", record.id, "--json"], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: json.out });
+  await runCompanion(["result", crashed, "--json"], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: json.out });
   const projection = JSON.parse(json.lines.at(-1));
   assert.equal(projection.sessionId, "pre-spawn-uuid-5678", "a --json consumer must see the resumable session, not null");
   assert.equal(projection.status, "failed");
+});
+
+// The failure that spawned but never got a session: grok's own stdout error line, the
+// shape a no-credentials run produces. `--resume-job` on this id would fail in the engine
+// ("Session does not exist"), so neither surface may advertise it.
+test("result on a pre-session failure advertises no resume tip and no session id", async () => {
+  const dataRoot = makeDataRoot();
+  const cwd = makeTempDir("grok-ws-");
+  const preSession = seedPreMintedJob(dataRoot, cwd, {
+    sessionEvent: { kind: "error", message: "Not signed in. To authenticate without a browser, run: grok login --device-code" },
+  });
+
+  const human = collect();
+  await runCompanion(["result", preSession], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: human.out });
+  assert.doesNotMatch(human.lines.join("\n"), /--resume-job/, "no session was ever opened — the tip would fail");
+
+  const json = collect();
+  await runCompanion(["result", preSession, "--json"], { env: { GROK_PLUGIN_DATA: dataRoot }, cwd, out: json.out });
+  assert.equal(JSON.parse(json.lines.at(-1)).sessionId, null, "the pre-minted id must not leak as a phantom resume target");
 });

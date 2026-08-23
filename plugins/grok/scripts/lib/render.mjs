@@ -22,7 +22,7 @@ export function renderStatus(jobs, livenessById = {}) {
     .join("\n");
 }
 
-export function renderResult(job, logTail = "") {
+export function renderResult(job, logTail = "", resumeSessionId = job?.sessionId ?? null) {
   const head = `[${job.id}] ${job.status} (model=${job.request?.model ?? "grok-4.5"})`;
   if (job.status === "completed") {
     return `${head}\n\n${job.resultText ?? "(no result text)"}`;
@@ -34,33 +34,16 @@ export function renderResult(job, logTail = "") {
   // instead of hiding it behind the error.
   if (job.resultText) lines.push("", job.resultText);
   if (logTail) lines.push("", "--- log tail ---", logTail);
-  // job.sessionId is only written on a normal finalize; a worker that died
-  // mid-run carries just the pre-minted request.sessionId — exactly the
-  // crash-safe-resume case that id exists for. Reading both fields IS the whole
-  // predicate (grok-companion.mjs's effectiveSessionId), inlined here because
-  // importing it back would make render ↔ companion a cycle.
-  //
-  // …but that id is minted BEFORE spawn, so on a job where grok never ran it names a
-  // session that does not exist, and `--resume-job` fails on a tip we printed. Gate on
-  // the only signal the JOB RECORD carries for "the engine never started": the failure
-  // kind. `not-installed` is classifyError's ENOENT / exit-127 verdict (the binary
-  // never executed); `spawn` is the companion's background-launch failure
-  // (grok-companion.mjs); and a raw spawn throw with another errno (`spawn <path>
-  // EACCES`) classifies as `unknown`, so match the error text too. Everything else —
-  // exit-nonzero, timed-out, reconciled dead worker — means grok was spawned and may
-  // well hold the session.
-  // Why not the alternatives: `pid` is the WORKER's own pid, stamped by markJobRunning
-  // BEFORE the spawn (shared runtime/worker.mjs:101), so it is set even when the spawn
-  // throws; `exitCode` is null on BOTH a signal-killed timeout and a reconciled dead
-  // worker (the very crash this tip exists for, reconcile.mjs); and `status` is
-  // "failed" on both sides. Only the kind separates them.
-  // ponytail: a job cancelled while still `queued` never spawned either and still gets
-  // the tip; read the `spawned` event (events.ndjson) if that ever matters.
-  const neverSpawned =
-    job.errorKind === "not-installed" ||
-    job.errorKind === "spawn" ||
-    /^spawn /.test(job.error ?? "");
-  if (!neverSpawned && (job.sessionId ?? job.request?.sessionId)) {
+  // resumeSessionId is the CALLER's session-provenance verdict — grok-companion.mjs's
+  // resumableSessionId, which only hands over an id it can prove a session existed for.
+  // Never derive it here from job.request.sessionId: that id is minted BEFORE spawn, so on
+  // a job that died before grok opened a session (no credentials, bad flag, failed session
+  // create) it names a session that does not exist and `--resume-job` fails on a tip we
+  // printed. The verdict needs the job's event log, which render has no stateDir to read.
+  // Default: the post-hoc job.sessionId, which comes off the `end`/json event and is
+  // therefore self-proving — a caller that forgets the argument loses tips, never invents
+  // one.
+  if (resumeSessionId) {
     lines.push("", `Tip: continue this thread with: task --resume-job ${job.id} "<follow-up>"`);
   }
   return lines.join("\n");

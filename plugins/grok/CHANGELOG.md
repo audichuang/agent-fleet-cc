@@ -80,6 +80,25 @@ pre-existing defects the durable checklist had been carrying as verified, plus a
   bucket deliberately requires the full phrase "grok is temporarily unavailable" so it cannot
   steal that string — but the `auth` bucket matched `authenticate`, which is not a substring of
   "Authentication", so nobody caught it. Now `authenticat`, which covers both.
+- **A first-event watchdog replaces the deleted auth gate — behaviour, not credential guessing.**
+  Deleting the preflight left one real exposure, found by an independent review and confirmed in
+  the 1.0.5 source: `headless.rs`'s `authenticate` fails closed only at *method selection*, and
+  `cached_token` passes that gate. When the token turns out to be expired or a legacy `WebLogin`,
+  `acp_agent.rs:704-732` hands off to `authenticate_after_cached_token_unavailable`, which — if it
+  lands on grok.com — **replaces the request meta wholesale** with `{"use_oauth": true}`
+  (`agent_ops.rs:1412-1416`), destroying the headless marker, and the browser OAuth callback then
+  waits 600s (`auth/oidc/login.rs`). Under `--background` that is ten invisible minutes.
+  The old gate did not protect against this either — it only called `existsSync`, so an existing
+  but stale `auth.json` sailed straight through. So the fix is not a better credential oracle
+  (two review rounds proved that path wrong in both directions) but an observable one: the shared
+  worker gains an OPTIONAL `firstEventTimeoutMs`, and grok declares 120s. A headless run that
+  emits no engine event in that window is killed and reported `errorKind: "stalled"` — kept
+  distinct from `timeout`, which means "outgrew its budget" rather than "never spoke at all".
+  Only a *parsed* event on stdout disarms it: not an unparseable banner, and emphatically not
+  stderr, where an interactive prompt is most likely to appear. `image_gen`'s minute-plus silent
+  stretch is unaffected — that happens after the first event, when the watchdog is already gone
+  (verified on a live run). Override with `GROK_FIRST_EVENT_TIMEOUT_MS`. Adapters that do not
+  declare the field are bit-for-bit unaffected, so `cc`, `antigravity` and `codex` are unchanged.
 - **Anchors re-pinned to the binary we actually run.** Part 1's `cli.rs` pins had drifted +8..+16
   lines and Part 3's sandbox pins ~50-70 after upstream's 481-line `config/mod.rs` rewrite;
   behaviour is unchanged across it. `docs/grok-cli-contract-audit.md` carries the new pins, the

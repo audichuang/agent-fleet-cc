@@ -561,7 +561,12 @@ async function executeReviewRun(request) {
       {
         status: result.status,
         stdout: result.reviewText,
-        stderr: result.stderr
+        stderr: result.stderr,
+        // The render needs the reason too, or a failed review that still captured
+        // review text prints as a finished one. No hadAgentMessage gate here:
+        // reviewText comes only from an exitedReviewMode item, never from the error
+        // text, so it can never BE the reason (see renderNativeReviewResult).
+        errorMessage
       },
       { reviewLabel: reviewName, targetLabel: target.label, reasoningSummary: result.reasoningSummary }
     );
@@ -628,7 +633,11 @@ async function executeReviewRun(request) {
     rendered: renderReviewResult(parsed, {
       reviewLabel: reviewName,
       targetLabel: context.target.label,
-      reasoningSummary: result.reasoningSummary
+      reasoningSummary: result.reasoningSummary,
+      // Same gate as executeTaskRun: a turn that returned a VALID review JSON and then
+      // died parses cleanly and would otherwise render a clean verdict. Only pass the
+      // reason when there was a real agent message to distinguish it from.
+      ...(result.hadAgentMessage ? { errorMessage } : {})
     }),
     summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.finalMessage, errorMessage ?? `${reviewName} finished.`),
     // Structured failure reason (same contract as executeTaskRun) so a failed

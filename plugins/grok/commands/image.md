@@ -9,27 +9,43 @@ is the existing `task` verb driven by a canned prompt, so **nothing here passes
 `$ARGUMENTS` through**: parse `--out` / `--aspect` yourself and fold them into the
 prompt text below.
 
-## 1. Resolve the output path
+## 1. Reserve the output path
 
-`--out <path>` if given, else the first FREE `./grok-image-N.jpg` (start at `N=1`, bump
-until the name is unused). The target **must not already exist**: an explicit `--out`
-that is already there → stop and ask before spending quota, never overwrite. Generating
-into a name nothing occupies is what makes step 4's gate proof that *this* run produced
-the file — no mtime or inode bookkeeping to get wrong. It **must sit inside the cwd you
-hand grok**. Grok writes the original into its own session folder under `~/.grok`
-(`<session_folder>/images/<n>.jpg`, in a directory named after the URL-encoded cwd).
+Default (no `--out`) — reserve a fresh directory and put the image inside it:
+
+```bash
+d=$(mktemp -d ./grok-image-XXXXXX) && echo "$PWD/${d#./}/image.jpg"
+```
+
+The printed absolute path is `<OUT>`. `mkdir` is atomic, so that directory is
+**exclusively this run's**: no concurrent `/grok:image` can pick the same name, nothing
+else is in it, and `<OUT>` cannot already exist. That — not a scan for a free
+`grok-image-N.jpg` — is what makes step 4's gate proof that *this* run produced the file,
+with no mtime or inode bookkeeping to get wrong. Two of these in flight at once cannot
+overwrite each other.
+
+With an explicit `--out <path>`: if it already exists, stop and ask before spending
+quota, never overwrite — but the guarantee is genuinely weaker there. The check and
+grok's `cp` are seconds apart, so another process, or a symlink planted at that path, can
+still win the race, and step 4 cannot tell that apart from a healthy run. The default
+path has no such window; `--out` trades it for a name the user chose.
+
 **Grok's own shell does the copy** — that is why the prompt below ends with a `cp` — but
 only because grok already holds the absolute path mid-turn, so it is one step instead of a
-parse-the-log round trip. It is **not** a permissions matter: those paths are `0700`/`0600`
-but owned by the same user running this session, so you can read and copy them yourself
-(verified 2026-08-23), which is exactly what step 5's recovery branch does.
+parse-the-log round trip. It is **not** a permissions matter: grok writes the original
+into its own session folder under `~/.grok` at `0700`/`0600`, owned by the same user
+running this session, so you can read and copy it yourself (verified 2026-08-23), which is
+exactly what step 5's recovery branch does. The copy is a **convenience, not a
+sandbox-independent guarantee** — whether it lands depends on the profile the run got, see
+step 3.
 
 **There is no `--cwd` flag on the companion** (it exits 1 with `Unknown flag: --cwd`) —
 the run's cwd is simply the cwd of the Bash call, and the adapter forwards that to grok.
-So either let `--out` be relative to where the Bash call already runs, or make it
-absolute and confirm it is under that cwd. Resolve this before composing the prompt; a
-`cp` to a path outside grok's cwd is the one failure that still leaves the run looking
-successful.
+So a relative `--out` lands wherever the Bash call already runs, which is also why the
+snippet above resolves `<OUT>` to an absolute path before it goes into the prompt. A
+destination **outside** that cwd is not forbidden: with the default profile (`off`) no
+sandbox is applied at all, so `/tmp/result.jpg` works fine. What decides it is whether the
+destination is writable under the run's profile — step 3's business.
 
 ## 2. Run it in the FOREGROUND with a long timeout
 
@@ -61,20 +77,28 @@ The prompt to pass, with the placeholders filled in:
 
 ## 3. Flags to never pass
 
-- **Never `--read-only`.** Grok's session folder under `~/.grok` stays writable even
-  under the sandbox, so generation *succeeds* and only the `cp` into the repo fails —
-  the worst failure mode there is: half-done, and the run still looks fine.
+- **Never `--read-only`.** It leaves only `~/.grok` and the temp dirs writable, so
+  generation *succeeds* (the session folder is under `~/.grok`) and it is the `cp` into the
+  cwd that the profile blocks — when the sandbox actually applies; it can also refuse to
+  start, or silently not enforce, so do not read this as a guarantee in either direction
+  (mechanisms and anchors: the contract audit's Part 3). The worst case is the one to
+  design against: half-done, and the run still looks fine.
+  A `/tmp` destination would in fact survive even here, which is the point: the copy is
+  not sandbox-independent, it just needs a writable destination. A managed or custom
+  profile can take the cwd out of the writable set the same way; the other built-ins
+  (`workspace`, `devbox`, `strict`) all keep it writable.
 - **Never `--research`.** Its tool allowlist is authoritative, and it drops `image_gen`
   outright.
 
 ## 4. Verify the FILE, never grok's prose
 
-The pass/fail gate is **a regular, non-empty file at a path that did not exist before
-this run**: `test -f "<OUT>" && test -s "<OUT>"`, with step 1's "must not already exist"
-supplying the freshness half. Every clause is load-bearing — `test -s` on its own is
-happy with a non-empty **directory** (so `--out .` "passes" while the `cp` landed
-somewhere else or failed outright), and just as happy with the previous run's leftover
-`grok-image-1.jpg` when this run generated nothing at all. Grok's `IMAGE_SAVED:` line is
+The pass/fail gate is **a regular, non-empty file at `<OUT>`**: `test -f "<OUT>" && test
+-s "<OUT>"`. Step 1 supplies the freshness half — on the default path `<OUT>` sits in a
+directory this run created empty and exclusively, so a non-empty regular file there was
+written by this run. Every clause is load-bearing — `test -s` on its own is happy with a
+non-empty **directory** (so `--out .` "passes" while the `cp` landed somewhere else or
+failed outright), and with an explicit `--out` just as happy with a leftover file from an
+earlier run when this run generated nothing at all. Grok's `IMAGE_SAVED:` line is
 a convenience for reading the log, not evidence — same as any other model text:
 untrusted, and no substitute for looking at the disk.
 

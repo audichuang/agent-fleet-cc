@@ -240,11 +240,22 @@ export function renderSetupReport(report) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+// A FAILED review must not render as a finished one — same rule, and the same
+// distinct-reason gate, as renderTaskResult. The caller passes meta.errorMessage ONLY
+// when the turn produced a real agent message: with none, `finalMessage` IS the error
+// text (codex.mjs resolveFinalMessage), which the "Raw final message:" block below
+// already prints, so a header would say the same sentence twice.
+function reviewFailureLines(meta) {
+  const reason = String(meta?.errorMessage ?? "").trim();
+  return reason ? [`Codex review failed: ${reason}`, ""] : [];
+}
+
 export function renderReviewResult(parsedResult, meta) {
   if (!parsedResult.parsed) {
     const lines = [
       `# Codex ${meta.reviewLabel}`,
       "",
+      ...reviewFailureLines(meta),
       "Codex did not return valid structured JSON.",
       "",
       `- Parse error: ${parsedResult.parseError}`
@@ -264,6 +275,7 @@ export function renderReviewResult(parsedResult, meta) {
     const lines = [
       `# Codex ${meta.reviewLabel}`,
       "",
+      ...reviewFailureLines(meta),
       `Target: ${meta.targetLabel}`,
       "Codex returned JSON with an unexpected review shape.",
       "",
@@ -284,6 +296,7 @@ export function renderReviewResult(parsedResult, meta) {
   const lines = [
     `# Codex ${meta.reviewLabel}`,
     "",
+    ...reviewFailureLines(meta),
     `Target: ${meta.targetLabel}`,
     `Verdict: ${data.verdict}`,
     "",
@@ -327,12 +340,29 @@ export function renderNativeReviewResult(result, meta) {
     ""
   ];
 
+  // Same defect as renderTaskResult had: a non-empty body must not suppress the
+  // failure. This path needs NO provenance flag, unlike the task path — `reviewText`
+  // has exactly one source, an `exitedReviewMode` item (codex.mjs), so it is never a
+  // fallback copy of the error text and a non-zero status alone is a safe gate.
+  // Text-plus-failure is an ordinary upstream sequence, not a race: `ReviewTask` emits
+  // `exit_review_mode` (the item carrying the review text) BEFORE the terminal event
+  // (codex-rs/core/src/tasks/review.rs:87), while the turn's status is computed from
+  // the error recorded by the END of the turn (`handle_turn_complete` reads
+  // `turn_summary.last_error`, codex-rs/app-server/src/bespoke_event_handling.rs) —
+  // both at upstream 99660ab3c7. An interrupt landing in that window lands the same way
+  // (TurnStatus::Interrupted, which buildResultStatus also reports as non-zero).
+  if (result.status !== 0) {
+    // `failureReasonFor` falls back to stderr, which the block below prints verbatim,
+    // and the reason can equally be the body itself. State it once.
+    const reason = String(result.errorMessage ?? "").trim();
+    const distinct = reason && !stdout.includes(reason) && !stderr.includes(reason);
+    lines.push(distinct ? `Codex review failed: ${reason}` : "Codex review failed.", "");
+  }
+
   if (stdout) {
     lines.push(stdout);
   } else if (result.status === 0) {
     lines.push("Codex review completed without any stdout output.");
-  } else {
-    lines.push("Codex review failed.");
   }
 
   if (stderr) {

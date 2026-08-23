@@ -1006,3 +1006,132 @@ test("spawn failure (ENOENT) → errorKind is not-installed, not unknown", async
   );
   assert.match(job.error, /ENOENT/, "error field must contain the spawn error message");
 });
+
+// ─── 首事件看門狗(adapter 選填 firstEventTimeoutMs) ──────────────────────────
+// 防的不是「跑太久」(那是 timeoutMs),而是「headless 的 run 卡在互動式提示」:
+// 引擎沒死、沒報錯、也不吐事件,只是在等一個不會來的人類。真實案例見
+// plugins/grok/scripts/lib/adapter.mjs 的 firstEventTimeoutMs 註解(grok 的 cached
+// token 過期時會遞迴進瀏覽器 OAuth 並等 600s)。
+//
+// 全部用 pid=1:killProcessGroup 對 pid<=1 直接 return,所以測試永遠不會真的對
+// 一個存在的 process group 發訊號(4242 有極小機率是真的 pgid)。殺法本身由
+// spawn.test.mjs 驗,這裡只驗「看門狗做了什麼決定、job 落到什麼終態」。
+function silentChild({ stderr = "" } = {}) {
+  const child = new EventEmitter();
+  child.pid = 1;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = { write() {}, end() {}, on() {} };
+  child.kill = () => {};
+  // stdout 刻意永不 end、永不寫任何一行 —— 這就是「卡住」的形狀。
+  if (stderr) setImmediate(() => child.stderr.write(stderr));
+  return child;
+}
+
+const stalledDeps = (child) => ({
+  spawnImpl: () => child,
+  graceMs: 5,
+  forceResolveExtraMs: 5,
+});
+
+test("first-event watchdog: a silent engine is killed and reported as stalled, not timeout", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  const adapter = makeAdapter({ firstEventTimeoutMs: 40 });
+  const child = silentChild();
+  // runWorker 的回傳值不是 job 判決(它結尾一律 return 0);終態只看 job 記錄。
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.status, "failed");
+  // "stalled" 必須跟 "timeout" 分開:後者是超出預算,前者是一開口都沒開。混在一起
+  // 就問不出「這是不是又一次互動式卡頓」。
+  assert.equal(job.errorKind, "stalled");
+  assert.notEqual(job.status, "timed-out", "the whole-job budget was 60s and was never reached");
+  assert.match(job.error, /produced no event within 40ms/);
+  assert.match(job.error, /interactive prompt/);
+});
+
+test("first-event watchdog: STDERR alone must NOT disarm it (the prompt may print there)", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  const adapter = makeAdapter({ firstEventTimeoutMs: 40 });
+  // 這行就是真實世界那個「印在 stderr 的授權 URL」。拿它解除看門狗 = 自廢這道關。
+  const child = silentChild({ stderr: "Visit https://accounts.grok.com/authorize?code=... to continue\n" });
+  // runWorker 的回傳值不是 job 判決(它結尾一律 return 0);終態只看 job 記錄。
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.errorKind, "stalled");
+  // stderr 是最有用的線索(那個沒人會去點的 URL),所以殺掉時要把它一起交出去。
+  assert.match(job.error, /accounts\.grok\.com/);
+});
+
+test("first-event watchdog: one parsed engine event disarms it for the rest of the job", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  const adapter = makeAdapter({ firstEventTimeoutMs: 40 });
+  adapter.parseEvent = (line) => {
+    try {
+      const e = JSON.parse(line);
+      return e.kind === "result" ? { kind: "result", text: e.text } : { kind: "noise" };
+    } catch {
+      return null;
+    }
+  };
+  adapter.extractResult = (events) => {
+    const r = events.find((e) => e.type === "engine-event" && e.kind === "result");
+    return r ? { ok: true, resultText: r.text, sessionId: null } : { ok: false };
+  };
+  const child = fakeChild({ lines: ['{"kind":"noise"}'] });
+  child.pid = 1;
+  const spawnImpl = () => {
+    // 第一個事件在看門狗預算內到達,結果行遠遠在它之後 —— 撤掉就該永久撤掉,
+    // 不是每個事件都重新武裝(那會變成 idle watchdog,不是這道關的語意)。
+    setImmediate(() => {
+      child.stdout.write('{"kind":"noise"}\n');
+      setTimeout(() => {
+        child.stdout.write('{"kind":"result","text":"done"}\n');
+        child.stdout.on("end", () => setImmediate(() => child.emit("close", 0, null)));
+        child.stdout.end();
+      }, 120); // > firstEventTimeoutMs:證明撤除是永久的
+    });
+    return child;
+  };
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: { spawnImpl, graceMs: 5 } });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.status, "completed");
+  assert.equal(job.resultText, "done");
+  assert.equal(job.errorKind, null);
+});
+
+test("first-event watchdog: an adapter that does not declare it is completely unaffected", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 150 });
+  createJob(stateDir, record, "the prompt");
+  const adapter = makeAdapter(); // 沒有 firstEventTimeoutMs
+  const child = silentChild();
+  // runWorker 的回傳值不是 job 判決(它結尾一律 return 0);終態只看 job 記錄。
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+  const job = readJob(stateDir, record.id);
+  // 沉默的引擎仍然只被整體預算收掉 → timed-out/timeout,絕不是 stalled。
+  assert.equal(job.status, "timed-out");
+  assert.equal(job.errorKind, "timeout");
+});
+
+test("first-event watchdog: an UNPARSEABLE stdout line must NOT disarm it either", async () => {
+  const stateDir = tmp();
+  const record = createJobRecord({ engine: "fake", timeoutMs: 60_000 });
+  createJob(stateDir, record, "the prompt");
+  // parseEvent 對這行回傳 null —— 一句 banner / 警告不代表「引擎在跑」。解除只能靠
+  // 解析成功的事件;拿任意 raw 行解除,會讓「先印一句廢話再卡死」的引擎完全隱形。
+  const adapter = makeAdapter({ firstEventTimeoutMs: 40, parseEvent: () => null });
+  const child = silentChild();
+  setImmediate(() => child.stdout.write("grok: checking for updates...\n"));
+  await runWorker({ stateDir, jobId: record.id, adapter, deps: stalledDeps(child) });
+  const job = readJob(stateDir, record.id);
+  assert.equal(job.errorKind, "stalled", "an unparseable banner must not count as the engine speaking");
+  // 那行仍然要進 log(稽核不該因為解析不了就丟資料)。
+  assert.match(fs.readFileSync(logFilePath(stateDir, record.id), "utf8"), /checking for updates/);
+});

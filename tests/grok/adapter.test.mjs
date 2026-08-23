@@ -496,27 +496,30 @@ test("classifyError: ownership beats substring luck (403, failed-resume, spawn E
   // substring to another bucket. The bare `relay` token in `endpoint` used to steal
   // this one.
   assert.equal(a.classifyError("spawn /opt/relay/grok ENOENT", 1), "not-installed");
+  // 4. …and that spawn evidence has to beat the sandbox-REFUSAL matcher too, which is a
+  // bare phrase test: a GROK_BIN whose directory is literally named "refusing to start"
+  // used to be reported as a sandbox config problem instead of a missing binary.
+  assert.equal(a.classifyError("spawn /tmp/refusing to start/grok ENOENT", 1), "not-installed");
 });
 
-// The pre-minted request.sessionId is minted before spawn, so the resume tip must not
-// advertise it on a job where grok never ran.
-test("renderResult: resume tip needs evidence the engine actually ran", () => {
-  const crashed = renderResult({
+// renderResult no longer DECIDES whether a resume target exists — it renders the
+// caller's verdict (grok-companion.mjs's resumableSessionId, which reads the event log
+// this module cannot see). Provenance itself is pinned in tests/grok/companion.test.mjs
+// ("resume tip + --json sessionId need a session-created signal…"); here only the
+// contract: never invent a tip from the pre-minted request.sessionId.
+test("renderResult: the resume tip renders the caller's session verdict, never request.sessionId", () => {
+  const failed = {
     id: "grok-1",
     status: "failed",
     // reconcile.mjs's dead-worker repair: no exitCode, no errorKind — the exact crash
     // the pre-minted id exists for.
     error: "worker process died (reconciled dead pid)",
     request: { sessionId: "11111111-1111-4111-8111-111111111111" },
-  });
-  assert.match(crashed, /--resume-job grok-1/);
-
-  for (const job of [
-    { id: "grok-2", status: "failed", errorKind: "not-installed", error: "spawn grok ENOENT", request: { sessionId: "22222222-2222-4222-8222-222222222222" } },
-    { id: "grok-3", status: "failed", errorKind: "spawn", error: "EACCES: permission denied", request: { sessionId: "33333333-3333-4333-8333-333333333333" } },
-    // spawn throw with an errno classifyError has no bucket for → errorKind "unknown"
-    { id: "grok-4", status: "failed", errorKind: "unknown", error: "spawn /opt/grok EACCES", request: { sessionId: "44444444-4444-4444-8444-444444444444" } },
-  ]) {
-    assert.doesNotMatch(renderResult(job), /--resume-job/, job.id);
-  }
+  };
+  assert.match(renderResult(failed, "", failed.request.sessionId), /--resume-job grok-1/);
+  assert.doesNotMatch(renderResult(failed, "", null), /--resume-job/);
+  // Default when a caller passes nothing: the post-hoc job.sessionId (self-proving — it
+  // came off the `end`/json event), and NEVER the pre-mint.
+  assert.doesNotMatch(renderResult(failed), /--resume-job/);
+  assert.match(renderResult({ ...failed, sessionId: "post-hoc" }), /--resume-job grok-1/);
 });

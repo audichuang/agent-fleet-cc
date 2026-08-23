@@ -131,16 +131,18 @@ function parseMaxTurns(value) {
   return n;
 }
 
-function resultProjection(job) {
+// sessionId defaults to the post-hoc job.sessionId (self-proving — it came off the
+// `end`/json event). Callers pass resumableSessionId(stateDir, job) so a worker that
+// died mid-conversation still reports its pre-minted id; what neither ever does is
+// leak that pre-mint on a job that died before grok opened a session (see
+// resumableSessionId).
+function resultProjection(job, sessionId = job?.sessionId ?? null) {
   return {
     engine: "grok",
     jobId: job.id,
     status: job.status,
     resultText: job.resultText ?? null,
-    // effectiveSessionId, not job.sessionId: a worker that died before finalize
-    // has only the pre-minted request.sessionId, and a --json consumer that sees
-    // null there cannot tell the job is still resumable (see renderResult).
-    sessionId: effectiveSessionId(job),
+    sessionId,
     exitCode: job.exitCode ?? null,
     error: job.error ?? null,
     errorKind: job.errorKind ?? null,
@@ -222,8 +224,47 @@ function cmdSetup({ env, out, deps }) {
 // SAME id, minted+persisted before spawn (see startJob) — it survives a worker
 // crash that never reaches finalize, which is the entire point of pre-generating
 // it. Prefer the post-hoc one when present (belt-and-braces; they should match).
+// This is the UNGATED read, used only by the explicit `--resume-job` / `--resume-last`
+// paths. Anything that ADVERTISES a resume target (the tip, the --json projection) must
+// use resumableSessionId below instead — see the why there.
 function effectiveSessionId(job) {
   return job?.sessionId ?? job?.request?.sessionId ?? null;
+}
+
+// Positive session-created provenance for the pre-minted id — the predicate behind
+// every resume tip and every --json sessionId.
+//
+// job.sessionId is proof by construction: it is the id off the `end`/json event, so a
+// session existed. job.request.sessionId is not — it is minted BEFORE spawn (startJob),
+// and grok AUTHENTICATES BEFORE IT OPENS A SESSION, so a plain no-credentials run spawns
+// fine and still has no session. Anchors, all grok-build @ 9fabade (== grok 1.0.5):
+// headless.rs:461 `authenticate` runs first and bails; :852 emits "Couldn't start session"
+// — both print a stdout `{"type":"error"}` line with nothing behind it. So an `error`
+// engine-event is NOT proof, and neither is our own `spawned` event (stamped before the
+// child's first byte, runtime/worker.mjs) nor errorKind (auth/config/parse failures all
+// die post-spawn, pre-session).
+// What we CAN read is the first line of the prompt turn, which only starts after
+// open_session returned (headless.rs:1109). Session-open itself prints nothing in
+// --output-format streaming-json (begin_session → AcpReducer, whose `begin` is the trait
+// default returning no lines, headless/reducer/mod.rs:344-346), so there is no dedicated
+// "session created" line to look for — but every `text`/`end` line, and the single
+// json-mode object, comes out of that turn and therefore implies the session existed.
+// Deliberately conservative: a crash during a tool call before the first text chunk logs
+// only thought/tool_call lines, which parseEvent drops, so the tip is suppressed on a job
+// that may well be resumable. A missing tip costs nothing; a tip that fails costs trust —
+// and `--resume-job <id>` still forwards the id for a user who knows better
+// (resolveResumeSource, deliberately NOT gated on this), where grok's own "Session does
+// not exist" is the authoritative answer.
+const SESSION_LIVE_KINDS = new Set(["text", "end", "json"]);
+
+function resumableSessionId(stateDir, job) {
+  if (!job) return null;
+  if (job.sessionId) return job.sessionId;
+  if (!job.request?.sessionId) return null;
+  const sessionWasLive = readEvents(jobDir(stateDir, job.id)).some(
+    (e) => e.type === "engine-event" && SESSION_LIVE_KINDS.has(e.kind),
+  );
+  return sessionWasLive ? job.request.sessionId : null;
 }
 
 function resolveResumeSource({ flags, stateDir }) {
@@ -311,7 +352,7 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
       const message = String(error?.message ?? error);
       finalizeJob(stateDir, record.id, { status: "failed", error: message, errorKind: "spawn" });
       const finished = readJob(stateDir, record.id);
-      out(flags.json ? JSON.stringify(resultProjection(finished)) : `grok: failed to launch background worker: ${message}`);
+      out(flags.json ? JSON.stringify(resultProjection(finished, resumableSessionId(stateDir, finished))) : `grok: failed to launch background worker: ${message}`);
       return 1;
     }
     child.unref();
@@ -347,7 +388,10 @@ async function startJob({ prompt, flags, env, out, cwd, stateDir, deps }) {
     forwarder.dispose();
   }
   const finished = readJob(stateDir, record.id);
-  out(flags.json ? JSON.stringify(resultProjection(finished)) : renderResult(finished, readLogTail(stateDir, record.id)));
+  const finishedSessionId = resumableSessionId(stateDir, finished);
+  out(flags.json
+    ? JSON.stringify(resultProjection(finished, finishedSessionId))
+    : renderResult(finished, readLogTail(stateDir, record.id), finishedSessionId));
   return finished.status === "completed" ? 0 : 1;
 }
 
@@ -407,9 +451,10 @@ function cmdStatus({ argv, out, stateDir, deps = {} }) {
   out(
     flags.json
       ? JSON.stringify(
-          jobs.map((j) =>
-            livenessById[j.id] ? { ...resultProjection(j), liveness: livenessById[j.id] } : resultProjection(j),
-          ),
+          jobs.map((j) => {
+            const projected = resultProjection(j, resumableSessionId(stateDir, j));
+            return livenessById[j.id] ? { ...projected, liveness: livenessById[j.id] } : projected;
+          }),
         )
       : renderStatus(jobs, livenessById),
   );
@@ -429,7 +474,10 @@ function cmdResult({ argv, out, stateDir }) {
     out(flags.json ? JSON.stringify({ error: "no jobs" }) : "No grok jobs in this workspace.");
     return 1;
   }
-  out(flags.json ? JSON.stringify(resultProjection(job)) : renderResult(job, job.status === "completed" ? "" : readLogTail(stateDir, job.id)));
+  const sessionId = resumableSessionId(stateDir, job);
+  out(flags.json
+    ? JSON.stringify(resultProjection(job, sessionId))
+    : renderResult(job, job.status === "completed" ? "" : readLogTail(stateDir, job.id), sessionId));
   return job.status === "completed" ? 0 : 1;
 }
 
@@ -483,7 +531,8 @@ async function cmdWait({ argv, out, stateDir, deps = {} }) {
     // the right exit code instead of a false "still running" + exit 10.
     if (live && TERMINAL_STATUSES.has(live.status)) {
       const fresh = readJob(stateDir, jobId) ?? job;
-      out(flags.json ? JSON.stringify(resultProjection(fresh)) : renderResult(fresh, ""));
+      const freshSessionId = resumableSessionId(stateDir, fresh);
+      out(flags.json ? JSON.stringify(resultProjection(fresh, freshSessionId)) : renderResult(fresh, "", freshSessionId));
       return waitExitCode(live.status);
     }
     // Still running: one compact liveness line, then exit 10 so the commander
@@ -491,14 +540,15 @@ async function cmdWait({ argv, out, stateDir, deps = {} }) {
     // authoritative projected status for the prefix.
     out(
       flags.json
-        ? JSON.stringify({ ...resultProjection(job), liveness: live })
+        ? JSON.stringify({ ...resultProjection(job, resumableSessionId(stateDir, job)), liveness: live })
         : `[${jobId}] ${live?.status ?? job.status}  ${live ? formatLiveness(live) : ""}`.trimEnd(),
     );
     return WAIT_TIMEOUT_EXIT;
   }
   // Terminal: relay the FULL result exactly once (the liveness line never
   // replaces it). Exit 0 completed / 2 cancelled / 1 failed|timed-out.
-  out(flags.json ? JSON.stringify(resultProjection(job)) : renderResult(job, ""));
+  const waitedSessionId = resumableSessionId(stateDir, job);
+  out(flags.json ? JSON.stringify(resultProjection(job, waitedSessionId)) : renderResult(job, "", waitedSessionId));
   return waitExitCode(job.status);
 }
 

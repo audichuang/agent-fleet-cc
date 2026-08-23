@@ -397,6 +397,17 @@ rl.on("line", (line) => {
           send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
         }
+        // Full review text captured (exitedReviewMode), THEN a terminal
+        // turn/completed carrying turn.error — the upstream-real sequence where the
+        // review body exists and the turn still failed. No standalone error
+        // notification precedes it, so the client's terminal-error arm never fires and
+        // the render is what has to surface the failure.
+        if (BEHAVIOR === "output-then-turn-error") {
+          send({ method: "turn/started", params: { threadId: reviewThread.id, turn: buildTurn(turnId) } });
+          send({ method: "item/completed", params: { threadId: reviewThread.id, turnId, item: { type: "exitedReviewMode", id: turnId, review: nativeReviewText(message.params.target) } } });
+          send({ method: "turn/completed", params: { threadId: reviewThread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });
+          break;
+        }
         emitTurnCompleted(reviewThread.id, turnId, [
           {
             started: { type: "enteredReviewMode", id: turnId, review: "current changes" }
@@ -476,6 +487,16 @@ rl.on("line", (line) => {
         const payload = message.params.outputSchema && message.params.outputSchema.properties && message.params.outputSchema.properties.verdict
           ? structuredReviewPayload(prompt)
           : taskPayload(prompt, thread.name && thread.name.startsWith("Codex Companion Task") && prompt.includes("Continue from the current thread state"));
+
+        // The structured-review twin of the review/start branch above: a VALID review
+        // JSON lands as the final agent message, then the turn dies. It parses cleanly,
+        // so only the render can show that the verdict came from a failed turn.
+        if (BEHAVIOR === "output-then-turn-error") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "item/completed", params: { threadId: thread.id, turnId, item: { type: "agentMessage", id: "msg_" + turnId, text: payload, phase: "final_answer" } } });
+          send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });
+          break;
+        }
 
         if (
           BEHAVIOR === "with-subagent" ||

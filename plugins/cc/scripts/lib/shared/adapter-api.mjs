@@ -22,6 +22,14 @@ export function validateProcessAdapter(adapter) {
   if (typeof adapter.wantsWatchdog !== "boolean") {
     problems.push("wantsWatchdog must be a boolean (reconcile policy declaration)");
   }
+  // 選填:首事件看門狗預算(ms)。不宣告 = 不啟用,行為與加入此欄位前完全相同,
+  // 所以既有 adapter 不必動。宣告了就必須是正有限數 —— 一個 0/NaN/字串會讓
+  // runWorker 靜默不武裝這道關,那正是「看起來有防護、其實沒有」的最壞形態。
+  if (adapter.firstEventTimeoutMs !== undefined && adapter.firstEventTimeoutMs !== null) {
+    if (!Number.isFinite(adapter.firstEventTimeoutMs) || adapter.firstEventTimeoutMs <= 0) {
+      problems.push("firstEventTimeoutMs, when declared, must be a positive finite number of ms");
+    }
+  }
   for (const key of REQUIRED_FUNCTIONS) {
     if (typeof adapter[key] !== "function") {
       problems.push(`${key} must be a function`);

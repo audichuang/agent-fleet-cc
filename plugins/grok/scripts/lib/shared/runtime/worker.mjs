@@ -149,6 +149,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       stdinError: null,
       spawnError: null,
       timedOut: false,
+      stalledBeforeFirstEvent: false,
     };
     try {
       child = spawnEngine({
@@ -171,9 +172,48 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       settled = true;
       clearTimeout(timer);
       clearTimeout(forceTimer);
+      clearTimeout(firstEventTimer);
       resolve(state);
     };
     let forceTimer = null;
+    // 首事件看門狗(adapter 選填 firstEventTimeoutMs)。要防的不是「跑太久」——
+    // 那是下面的 timeoutMs——而是「headless 的 run 被互動式提示卡住」:引擎沒死、
+    // 沒報錯、也不會吐任何事件,只是在等一個永遠不會來的人類。grok 1.0.5 有一條
+    // 這樣的路:cached token 過期/legacy 時,authenticate_after_cached_token_unavailable
+    // 會遞迴選到互動式 grok.com 並「把原本的 headless meta 換掉」
+    // (xai-grok-shell/src/agent/mvp_agent/agent_ops.rs:1412-1416),然後 OAuth callback
+    // 等 600s(auth/oidc/login.rs AUTH_CALLBACK_TIMEOUT)。`--background` 時完全看不見。
+    //
+    // 刻意做成「按行為判斷」而不是「事前猜憑證」:client 端無法可靠判斷一份憑證能不能用
+    // (試過,兩個方向都會錯),但「該說話的時候不說話」是可觀測的。任何未來的互動式卡頓
+    // 也一併被這道關接住,不必再認得它。
+    //
+    // 只有 stdout 上**解析成功的引擎事件**能解除它 —— 不是任意 raw 行、更不是 stderr。
+    // 互動式提示很可能就印在 stderr,拿 stderr 解除等於自廢這道關。
+    // adapter 沒宣告這個欄位 → 完全不啟用,行為與先前逐位元組相同。
+    let firstEventTimer = null;
+    const firstEventTimeoutMs = adapter.firstEventTimeoutMs;
+    const armFirstEventWatchdog = () => {
+      if (!Number.isFinite(firstEventTimeoutMs) || firstEventTimeoutMs <= 0) return;
+      firstEventTimer = (deps.scheduleImpl ?? setTimeout)(() => {
+        state.stalledBeforeFirstEvent = true;
+        const graceMs = deps.graceMs ?? 5000;
+        killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
+        const forceMs = graceMs + (deps.forceResolveExtraMs ?? 200);
+        // 這個 force-resolve 刻意**不** unref(與上面 timeoutMs 路徑不同)。一個真的卡住的
+        // 引擎不會關 stdout,所以 'close' 永遠不來 —— 這個計時器是唯一能讓 job 落終態的
+        // 東西。unref 掉它,event loop 就會在 finalize 之前把 process 抽乾,job 永遠留在
+        // running(spec §5 不變量 1:job 必達終態)。timeoutMs 那條路徑 unref 是安全的,
+        // 因為那裡引擎通常已經吐過東西、stdout 會關。
+        forceTimer = (deps.scheduleImpl ?? setTimeout)(() => finish(), forceMs);
+      }, firstEventTimeoutMs);
+      firstEventTimer?.unref?.();
+    };
+    const disarmFirstEventWatchdog = () => {
+      if (!firstEventTimer) return;
+      clearTimeout(firstEventTimer);
+      firstEventTimer = null;
+    };
     const timeoutMs = running.timeoutMs ?? 60 * 60 * 1000;
     const timer = setTimeout(() => {
       state.timedOut = true;
@@ -188,6 +228,7 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       forceTimer?.unref?.();
     }, timeoutMs);
     timer.unref?.();
+    armFirstEventWatchdog();
 
     child.stdin.on("error", (error) => {
       state.stdinError = state.stdinError ?? error;
@@ -224,6 +265,9 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
         parsed = null; // parseEvent 永不 fatal
       }
       if (parsed) {
+        // 引擎開口了 → 撤掉首事件看門狗。放在 parsed 分支內(而非上面的 raw 行)是刻意的:
+        // 一行解析不出來的雜訊不算「引擎在跑」。
+        disarmFirstEventWatchdog();
         // type: "engine-event" 最後覆蓋 — parseEvent 若回傳引擎自訂的 type 欄位
         // (如 {type:"result",...}),正規化 type 仍必須是 "engine-event"(spec §3)。
         // parsed fields 先攤平,讓 extractResult 能直接存取 e.kind / e.text 等;
@@ -289,13 +333,22 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
     // "engine exited nonzero" 會持久化一句與 exitCode 矛盾的假話。沒設這欄的
     // adapter 拿到 undefined → 行為完全不變。
     const adapterError = typeof result.error === "string" && result.error ? result.error : null;
+    // 首事件看門狗開火時,引擎的 stderr 常常正是最有用的線索(例如那個沒人會去點的
+    // OAuth 授權 URL),所以保留它,只在前面說清楚我們為什麼把它殺掉。
+    const stalledPrefix = `engine produced no event within ${adapter.firstEventTimeoutMs}ms and was killed — a headless run should not be silent this long; the usual cause is the engine blocking on an interactive prompt (e.g. an expired credential falling through to browser OAuth)`;
     error = stdinFailed
       ? `stdin: ${outcome.stdinError.code ?? outcome.stdinError.message}`
-      : (outcome.spawnError || adapterError || outcome.stderrTail || "engine exited nonzero").slice(-500);
+      : outcome.stalledBeforeFirstEvent
+        ? `${stalledPrefix}${outcome.stderrTail ? `. engine stderr: ${outcome.stderrTail}` : "."}`.slice(-500)
+        : (outcome.spawnError || adapterError || outcome.stderrTail || "engine exited nonzero").slice(-500);
     try {
-      errorKind = outcome.timedOut
-        ? "timeout"
-        : adapter.classifyError(outcome.spawnError || adapterError || outcome.stderrTail, outcome.exitCode);
+      // "stalled" ≠ "timeout": timeout 是「跑太久超出預算」,stalled 是「一開口都沒開就啞了」。
+      // 分開才問得出「這是不是又一次互動式卡頓」,而不是跟長任務混在一起。
+      errorKind = outcome.stalledBeforeFirstEvent
+        ? "stalled"
+        : outcome.timedOut
+          ? "timeout"
+          : adapter.classifyError(outcome.spawnError || adapterError || outcome.stderrTail, outcome.exitCode);
     } catch {
       errorKind = "unknown";
     }

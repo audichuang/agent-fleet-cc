@@ -78,6 +78,22 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
     engine: "grok",
     recursionMarker: RECURSION_MARKER,
     wantsWatchdog: false,
+    // 首事件看門狗:headless 的 grok 沉默超過這麼久就殺掉並報 errorKind "stalled"。
+    // 要防的是一條實際存在的互動式卡頓 —— cached token 過期或是 legacy WebLogin 時,
+    // acp_agent.rs:704-732 轉進 authenticate_after_cached_token_unavailable,後者若選到
+    // grok.com 就把 meta 整個換成 {"use_oauth": true}(agent_ops.rs:1412-1416),原本的
+    // headless 標記就此消失,然後瀏覽器 OAuth callback 等 600s
+    // (auth/oidc/login.rs AUTH_CALLBACK_TIMEOUT)。`--background` 時這 10 分鐘完全不可見。
+    // 注意:headless.rs 的 authenticate 只在**方法選擇**那層 fail closed,擋不到這條。
+    //
+    // 120s 不是猜的下限,是刻意寬鬆:實測一次真跑,第一行 `available_commands` 在數秒內
+    // 就到(session 一開就印),所以 120s 對健康的 run 有兩個數量級的餘裕,不會把冷機
+    // 開機慢誤判成卡死;同時把那 600s 的隱形停頓變成 2 分鐘內的明確失敗。
+    // 例外:image_gen 可以一分多鐘不吐位元組 —— 但那發生在第一個事件**之後**,
+    // 這道關那時已經撤掉,所以 /grok:image 不受影響(已於真跑驗證)。
+    firstEventTimeoutMs: Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS) > 0
+      ? Number(process.env.GROK_FIRST_EVENT_TIMEOUT_MS)
+      : 120_000,
     buildInvocation({ job, prompt }) {
       const r = job.request ?? {};
       jsonMode = Boolean(r.jsonSchema);
@@ -331,7 +347,18 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
     },
     classifyError(stderrTail, exitCode) {
       const s = String(stderrTail ?? "");
-      // FIRST, above everything: grok's sandbox startup refusal. The phrase is
+      // FIRST, above even the refusal phrase: the CANONICAL spawn-throw shape. What
+      // classifyError gets on a spawn failure is Node's own message verbatim
+      // (`spawn /opt/relay/grok ENOENT` — state.spawnError, runtime/worker.mjs), and it
+      // embeds a user-controlled PATH, so ANY later regex can steal a missing binary — the
+      // refusal matcher below included (`GROK_BIN=/tmp/refusing to start/grok`). Matching
+      // the whole one-line shape rather than a bare token is what makes this safe to put
+      // first: refusal PROSE that merely mentions such a path is multi-line and/or does not
+      // end in ENOENT, so it stays with the refusal bucket where it belongs (no /m flag,
+      // deliberately). exit-127 / "command not found" stay BELOW the refusal — they are
+      // shell prose, not this shape.
+      if (/^spawn .*ENOENT$/i.test(s.trim())) return "not-installed";
+      // SECOND: grok's sandbox startup refusal. The phrase is
       // unambiguous (grok prints it only from refuse_unprotected / the macOS gate),
       // and it has to outrank every generic bucket because the refusal text embeds
       // user-controlled paths verbatim — a configured hooks-path of `/tmp/quota`,
@@ -339,13 +366,12 @@ export function makeGrokAdapter({ stateDir = null } = {}) {
       // `quota` / `endpoint` / `not-installed`
       // (HookWriteDenyError::MissingConfigured, hook_write_deny.rs:27-31).
       if (/refusing to start/i.test(s)) return "config";
-      // SECOND: spawn-level evidence. ENOENT / exit 127 means the engine binary never
-      // executed, so no later bucket's claim about grok's behaviour can be true. It has
-      // to be decided BEFORE the prose buckets because what classifyError gets here is
-      // the spawn error verbatim (`spawn /opt/relay/grok ENOENT` — the worker passes
-      // state.spawnError, runtime/worker.mjs), and that string embeds a user-controlled
-      // PATH: any bucket whose regex matches a substring of the path steals a missing
-      // binary. The bare `relay` token that used to sit in `endpoint` did exactly that;
+      // THIRD: the remaining spawn-level evidence — exit 127 and shell "command not
+      // found". Same reasoning as the ENOENT shape above (the binary never executed, so no
+      // later bucket's claim about grok's behaviour can be true), and still ahead of every
+      // prose bucket because this text too can embed a user-controlled PATH: any bucket
+      // whose regex matches a substring of the path steals a missing binary. The bare
+      // `relay` token that used to sit in `endpoint` did exactly that;
       // it is gone (grok only ever says "relay" about session-SHARE connections —
       // extensions/notification.rs:1214-1225, "Status updates for relay sync (session
       // sharing) feature" — never in headless failure prose).

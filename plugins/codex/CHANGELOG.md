@@ -3,13 +3,14 @@
 ## 1.6.0
 
 **A failed Codex turn no longer reads as a finished answer.** The `--json` payload and
-`/codex:wait` / `/codex:status` always carried the failure; the two paths the slash commands
-actually print did not. `renderTaskResult` short-circuited on a non-empty `rawOutput` and
-returned it bare — and `commands/task.md` tells Claude to relay that stdout verbatim — so a turn
-that produced a partial answer and *then* died (usage limit, tool error, context overflow) was
-handed over as the result. `/codex:result <id>` repeated it: the stored-output branch preempted
-the `Status:` / `errorMessage` block, so the failure header was unreachable whenever any output
-text existed.
+`/codex:wait` / `/codex:status` always carried the failure; not one of the four renders the slash
+commands actually print did. Every one had the same shape of bug: a non-empty body
+short-circuited the failure. `renderTaskResult` returned `rawOutput` bare — and
+`commands/task.md` tells Claude to relay that stdout verbatim — so a turn that produced a partial
+answer and *then* died (usage limit, tool error, context overflow) was handed over as the result.
+`/codex:result <id>` repeated it: the stored-output branch preempted the `Status:` /
+`errorMessage` block, so the failure header was unreachable whenever any output text existed. And
+both review renders printed captured review text without ever consulting the turn's status.
 
 - **`renderTaskResult` puts the reason above a PARTIAL answer** (`Codex turn failed: …`). The
   reason was already computed two lines from the call — it just was not passed in. Only a real
@@ -26,6 +27,20 @@ text existed.
   agent message stores the error text as its `rawOutput`, and a failed structured review reprints
   it under `Raw final message:`. Substring test, not a provenance flag — no stored record carries
   provenance, and the review body is a case no flag on the task payload would cover.
+- **Both review renders say when the review FAILED** (`Codex review failed: …`, above the body).
+  `renderNativeReviewResult` printed `reviewText` and reached its "Codex review failed." line only
+  when there was *no* text; `renderReviewResult` rendered a clean `Verdict:` for any JSON that
+  happened to parse. Neither is theoretical: `ReviewTask` emits `exit_review_mode` — the item
+  carrying the review text — *before* the turn's terminal event
+  (`codex-rs/core/src/tasks/review.rs:87`), while the turn's status is computed from the error
+  recorded by the *end* of the turn (`handle_turn_complete` reads `turn_summary.last_error`,
+  `codex-rs/app-server/src/bespoke_event_handling.rs`), both at upstream `99660ab3c7` — so full
+  review text plus a failed (or interrupted) turn is an ordinary sequence. The native path needs
+  no `hadAgentMessage` gate: `reviewText` has one source, an `exitedReviewMode` item, so it can
+  never *be* the error text; it skips the reason only when the body or the printed stderr block
+  already carries it. The adversarial path takes the same gate as `renderTaskResult`, for the same
+  reason — with no agent message, `finalMessage` *is* the reason and the parse-error branch
+  already prints it.
 - **`interruptAppServerTurn` stops spawning an app-server that cannot own the turn.** With no
   recorded broker session it used to start a throwaway `codex app-server`, send `turn/interrupt`
   for a thread that server had never seen, and log "Codex turn interrupt failed: …" as if a live

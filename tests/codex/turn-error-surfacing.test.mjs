@@ -282,10 +282,17 @@ test("e2e: `review --json` surfaces turn.error from a failed turn/completed (no 
 // The failure header is for a PARTIAL answer only. When the turn produced no agent
 // message, resolveFinalMessage already falls back to the turn error text, so rawOutput
 // IS the reason and prefixing it says the same thing twice — the exact case the header
-// was written for read WORSE than before. These three run the real companion CLI, so
-// they also pin the plumbing in executeTaskRun (render gets errorMessage only when
+// was written for read WORSE than before. These run the real companion CLI, so they
+// also pin the plumbing in executeTaskRun (render gets errorMessage only when
 // result.hadAgentMessage); a unit test that injects errorMessage into renderTaskResult
 // cannot see that line at all.
+//
+// THE PAIR IS ONE TEST EACH FOR THE TWO HALVES — do not "simplify" either away:
+//   - "WITH a partial answer" pins that the header EXISTS (no-header code reds it). It
+//     cannot pin the conditional: unconditional prefixing also passes it, because a
+//     partial answer is exactly the case where the header is wanted either way.
+//   - "with NO agent message" pins that the header is CONDITIONAL (unconditional
+//     prefixing doubles the reason and reds it). It is the only test that can.
 test("e2e: a failed turn WITH a partial answer prefixes the reason above it", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
@@ -327,3 +334,79 @@ test("e2e: a failed turn with NO agent message states the reason exactly once", 
 // failureMessage fallback, which prints result.error.message with no header. Nothing
 // can double there, so there is nothing to pin — the doubling needs turn.error, which
 // is what the test above drives.
+
+// Same failure-hiding defect, one function over: BOTH review renders printed a
+// non-empty body without consulting the failed status. The sequence is upstream-real,
+// not a race — ReviewTask emits exit_review_mode (the item carrying the review text)
+// before the terminal event (codex-rs/core/src/tasks/review.rs:87) while the turn's
+// status is computed from the error recorded by the END of the turn
+// (handle_turn_complete, codex-rs/app-server/src/bespoke_event_handling.rs), both at
+// upstream 99660ab3c7. The "output-then-turn-error" fixture sends no `error`
+// notification, so the client's terminal-error arm never fires: the render is the only
+// place the failure can surface.
+test("e2e: a failed native review does not render its captured review text as a finished review", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "output-then-turn-error");
+  initGitRepo(repo);
+  fs.mkdirSync(path.join(repo, "src"));
+  fs.writeFileSync(path.join(repo, "src", "app.js"), "export const value = 1;\n");
+  run("git", ["add", "src/app.js"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "src", "app.js"), "export const value = 2;\n");
+
+  const result = run("node", [SCRIPT, "review"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /Codex review failed: .*401 Unauthorized/);
+  assert.ok(
+    result.stdout.indexOf("Codex review failed") < result.stdout.indexOf("No material issues found."),
+    "the failure must sit above the review text, or a verbatim paste reads as a clean review"
+  );
+});
+
+// The conditional half of the adversarial gate, exactly as on the task path: with NO
+// agent message, finalMessage IS the error text, so the parse-error branch already
+// prints it under "Raw final message:" and a header would say it twice. (The test below
+// pins the other half: that the header exists at all.)
+test("e2e: a failed adversarial review with NO agent message states the reason exactly once", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "turn-completed-error");
+  initGitRepo(repo);
+  fs.mkdirSync(path.join(repo, "src"));
+  fs.writeFileSync(path.join(repo, "src", "app.js"), "export const value = 1;\n");
+  run("git", ["add", "src/app.js"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "src", "app.js"), "export const value = 2;\n");
+
+  const result = run("node", [SCRIPT, "adversarial-review"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  assert.equal(
+    (result.stdout.match(/401 Unauthorized/g) ?? []).length,
+    1,
+    "the reason must not be repeated as a header on top of the body that already is it"
+  );
+});
+
+test("e2e: a failed adversarial review does not render its valid verdict as a finished review", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "output-then-turn-error");
+  initGitRepo(repo);
+  fs.mkdirSync(path.join(repo, "src"));
+  fs.writeFileSync(path.join(repo, "src", "app.js"), "export const value = 1;\n");
+  run("git", ["add", "src/app.js"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "src", "app.js"), "export const value = 2;\n");
+
+  const result = run("node", [SCRIPT, "adversarial-review"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /Codex review failed: .*401 Unauthorized/);
+  assert.ok(
+    result.stdout.indexOf("Codex review failed") < result.stdout.indexOf("Verdict:"),
+    "the failure must sit above the verdict it came with"
+  );
+});
