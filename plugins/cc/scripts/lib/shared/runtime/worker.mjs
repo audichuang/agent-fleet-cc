@@ -257,7 +257,14 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
         // 活著會讓終態自相矛盾:status 說 timed-out、errorKind 說 stalled。先把它拆掉。
         clearTimeout(timer);
         const graceMs = deps.graceMs ?? 5000;
-        killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
+        killGroupWithGrace(child.pid, {
+          graceMs,
+          scheduleImpl: deps.scheduleImpl ?? setTimeout,
+          // killImpl 也要傳下去:少了它,這個注入縫只有一半有效 —— reap 走 deps.killImpl
+          // 而 TERM 走真 process.kill,於是測試看得到 SIGKILL 卻看不到 SIGTERM,
+          // 「等完 grace 才開槍」就變成不可觀測(review 抓到)。
+          ...(deps.killImpl ? { killImpl: deps.killImpl } : {}),
+        });
         const forceMs = graceMs + (deps.forceResolveExtraMs ?? 200);
         // 這個 force-resolve 刻意**不** unref(與上面 timeoutMs 路徑不同)。一個真的卡住的
         // 引擎不會關 stdout,所以 'close' 永遠不來 —— 這個計時器是唯一能讓 job 落終態的
@@ -285,7 +292,14 @@ export async function runWorker({ stateDir, jobId, adapter, deps = {} }) {
       // status 是 timed-out 而 error/errorKind 是 stalled —— 持久化的終態自相矛盾。
       disarmFirstEventWatchdog();
       const graceMs = deps.graceMs ?? 5000;
-      killGroupWithGrace(child.pid, { graceMs, scheduleImpl: deps.scheduleImpl ?? setTimeout });
+      killGroupWithGrace(child.pid, {
+        graceMs,
+        scheduleImpl: deps.scheduleImpl ?? setTimeout,
+        // killImpl 也要傳下去:少了它,這個注入縫只有一半有效 —— reap 走 deps.killImpl
+        // 而 TERM 走真 process.kill,於是測試看得到 SIGKILL 卻看不到 SIGTERM,
+        // 「等完 grace 才開槍」就變成不可觀測(review 抓到)。
+        ...(deps.killImpl ? { killImpl: deps.killImpl } : {}),
+      });
       // Force-resolve after kill+grace+buffer even when a grandchild holding stdout
       // prevents the 'close' event from ever firing (spec §5 invariant 1: job 必達終態).
       // This mirrors the forceExitMs escape hatch in installCancelForwarder.

@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Multi-host plugin for delegating tasks and code reviews to Google Antigravity CLI (agy). Drop-in replacement for the deprecated gemini-cli plugin surface.",
-    "version": "0.6.0"
+    "version": "0.6.1"
   },
   "plugins": [
     {

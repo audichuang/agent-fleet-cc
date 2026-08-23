@@ -17,7 +17,9 @@ const grandchild = spawn(
   ["-e", `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(ready)}, 'x'); setInterval(() => {}, 1000);`],
   { stdio: "ignore" },
 );
-const deadline = Date.now() + 5000;
+// 這個預算必須遠低於測試的 job timeoutMs,否則 TERM 會在 leader 印出 pid 之前就到,
+// 測試就會因為缺 PID 而紅(review 用模擬 600ms 啟動重現過)。
+const deadline = Date.now() + 1500;
 while (!fs.existsSync(ready) && Date.now() < deadline) {
   try { fs.readFileSync("/proc/self/stat"); } catch {} // 忙等,不引入 async
 }

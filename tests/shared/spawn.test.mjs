@@ -60,7 +60,9 @@ test("killProcessGroup never throws on dead/invalid pgid", () => {
 // 之前同步送的那一發;下面那條跨行程測試才是它的證明。
 test("invariant 3: a TERM-ignoring grandchild does not survive a real worker entry's process.exit", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-inv3-"));
-  const record = createJobRecord({ engine: "fake", timeoutMs: 300 });
+  // timeoutMs 要留給 fixture 的 readiness 握手足夠餘裕(它的預算是 1500ms):TERM 若在
+  // leader 印出 pid 之前就到,測試會因為缺 PID 而紅,那是假紅不是真紅。
+  const record = createJobRecord({ engine: "fake", timeoutMs: 3000 });
   createJob(stateDir, record, "the prompt");
   const entry = path.join(here, "fixtures", "worker-entry-shape.mjs");
   const engineFixture = path.join(here, "fixtures", "term-ignoring-grandchild.mjs");
@@ -74,11 +76,23 @@ test("invariant 3: a TERM-ignoring grandchild does not survive a real worker ent
   assert.ok(m, `entry must report the grandchild pid; stderr was: ${stderr}`);
   assert.match(stderr, /READY true/, "the fixture must confirm the descendant installed its TERM handler");
   const grandchildPid = Number(m[1]);
-  // 判定一:worker **在 resolve 之前**確實發出了整組 SIGKILL。負 pid = process group。
-  // 這條不依賴時序,所以排程的升級不可能冒充它(兩者都落在 killedAt+grace)。
-  assert.match(
-    stderr, /SIGNAL -\d+ SIGKILL/,
-    `the worker must issue a group SIGKILL before resolving; signals were: ${stderr}`,
+  // 判定一:worker 在 resolve 之前對**引擎自己那個 group** 發出了 SIGKILL。
+  // 綁定到 leader 的 pgid,不是任意負數 —— review 把 reap 改成 signal child.pid+1,
+  // 而寬鬆的 /SIGNAL -\d+ SIGKILL/ 照樣綠(記到錯的 group,真正殺掉它的是那個沒被記錄的
+  // 排程升級)。所以這裡必須指名。
+  const lm = stderr.match(/LEADER (\d+)/);
+  assert.ok(lm, `entry must report the leader pid; stderr was: ${stderr}`);
+  const leaderPid = Number(lm[1]);
+  const kill = stderr.match(new RegExp(`SIGNAL -${leaderPid} SIGKILL (\\d+)`));
+  assert.ok(kill, `worker must SIGKILL the engine's own group (-${leaderPid}); signals were: ${stderr}`);
+  // 判定一之二:它**等完了 grace**,不是立刻開槍。round 9 的立即版會砍斷正在處理 TERM
+  // 的後代;把它改回立即,44 條 shared 測試全綠 —— 這個斷言就是補上那個缺口。
+  const term = stderr.match(new RegExp(`SIGNAL -${leaderPid} SIGTERM (\\d+)`));
+  assert.ok(term, `expected a group SIGTERM first; signals were: ${stderr}`);
+  const waited = Number(kill[1]) - Number(term[1]);
+  assert.ok(
+    waited >= 150,
+    `SIGKILL must wait out the grace (graceMs=200), waited ${waited}ms; signals were: ${stderr}`,
   );
   // 判定二:效果。入口已經 process.exit() 了,排程的升級隨它一起消失,所以孫子若還活著就是
   // 永遠活著。

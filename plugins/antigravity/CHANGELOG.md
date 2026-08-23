@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-08-24
+
+### Fixed
+- Shared runtime: the two engine-timeout kill paths in `runWorker` (`firstEventTimeoutMs` and
+  `timeoutMs`) now forward `deps.killImpl` into `killGroupWithGrace`. Without it the injection
+  seam was only half wired — the reap went through `deps.killImpl` while the SIGTERM went
+  straight to the real `process.kill`, so "waits out the grace before escalating" was
+  unobservable from a test. Runtime behavior against a real engine is unchanged; the fix makes
+  the grace window provable.
+
 ## [0.6.0] — 2026-07-23
 
 ### Added
