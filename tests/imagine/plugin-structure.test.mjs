@@ -26,13 +26,14 @@ test("the command launches the script from CLAUDE_PLUGIN_ROOT, never a cache pat
 });
 
 test("the command carries the prompt in a file, never through the shell", () => {
-  // A quoted heredoc looks safe and is not: a prompt whose own text contains the
-  // delimiter line closes the here-document, and the rest of the prompt runs as shell.
-  // The prompt is model- and user-authored text, so it must never reach a command line.
+  // A quoted heredoc looks safe and is not: a prompt whose own text contains the delimiter
+  // line closes the here-document, and the rest of the prompt runs as shell. The prompt is
+  // model- and user-authored text, so it must never reach a command line.
   //
-  // The lock walks EVERY shipped .md and checks whole fenced blocks, not single lines.
-  // The earlier same-line version had two holes a mutation found: a wrapped invocation
-  // slipped through, and a doc added later was simply not in the hardcoded list.
+  // Three unambiguous invariants, deliberately NOT a shell parser. An earlier version of
+  // this test classified each line inside a fence as command-or-prose; it rejected
+  // legitimate `export`/`curl`/loop blocks and still missed heredoc spellings it had not
+  // thought of. A guard that has to guess at shell syntax is a guard you cannot trust.
   const docs = [];
   (function walk(dir) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -47,26 +48,32 @@ test("the command carries the prompt in a file, never through the shell", () => 
   for (const file of docs) {
     const rel = path.relative(ROOT, file);
     const text = fs.readFileSync(file, "utf8");
-    assert.doesNotMatch(text, /<<\s*'?[A-Za-z_][A-Za-z0-9_]*'?\s*$/m, `${rel} must not carry the prompt in a heredoc`);
-    // whole fenced blocks: a command wrapped over several lines is still one block
-    for (const [, lang, block] of text.matchAll(/```(\w*)\n([\s\S]*?)```/g)) {
+    // 1. No heredoc, in any spelling. `<<` has no other use in this plugin's prose, so the
+    //    bare operator is the whole check — no delimiter grammar to get wrong.
+    assert.doesNotMatch(text, /<</, `${rel} must not use a heredoc (<<) — the prompt goes in a file`);
+    // 2. Every shown invocation names --prompt-file and carries no prompt text. Fences are
+    //    matched by their run of backticks or tildes, so a four-backtick or ~~~ fence counts.
+    for (const [, , , block] of text.matchAll(/^([`~]{3,})(\w*)\n([\s\S]*?)^\1\s*$/gm)) {
       if (!/imagine\.mjs/.test(block)) continue;
-      assert.match(lang, /^(bash|sh|shell|console|typescript)?$/, `${rel}: unexpected fence language ${lang}`);
       invocations++;
       assert.match(block, /--prompt-file/, `${rel}: every shown invocation must use --prompt-file:\n${block}`);
       assert.doesNotMatch(block, /<the |<prompt|\$ARGUMENTS/, `${rel}: no prompt text may reach a command line:\n${block}`);
-      // the prompt body must not sit in a shell fence at all — pasted whole, an
-      // uncommented prose line is a command. It belongs in its own text fence.
-      if (/^(bash|sh|shell|console)$/.test(lang)) {
-        for (const line of block.split("\n")) {
-          const t = line.trim();
-          if (!t || t.startsWith("#") || /^(node|d=|\$)/.test(t) || t.endsWith("\\")) continue;
-          assert.fail(`${rel}: a shell fence must hold only the command; found prose: ${t.slice(0, 60)}`);
-        }
-      }
     }
   }
   assert.ok(invocations >= 9, `expected the command plus the eight worked examples, saw ${invocations}`);
+});
+
+test("each worked example keeps its prompt in its own text fence, not in the shell fence", () => {
+  // The pasteable hazard this pins: an example once held the command AND the prompt body in
+  // one ```bash fence, where only the `# prompt.txt:` marker was a comment — pasted whole,
+  // the prose ran as a command. Pairing the counts catches a body drifting back in without
+  // any guessing about what a shell line looks like.
+  const ex = fs.readFileSync(path.join(ROOT, "skills/imagine-prompts/references/examples.md"), "utf8");
+  const count = (re) => [...ex.matchAll(re)].length;
+  const prompts = count(/^```text$/gm);
+  const commands = count(/^```bash$/gm);
+  assert.equal(prompts, commands, `every example is one prompt fence + one command fence; saw ${prompts} vs ${commands}`);
+  assert.ok(commands >= 8, `expected the eight worked examples, saw ${commands}`);
 });
 
 test("the command sends the user to the prompt skill before spending quota", () => {

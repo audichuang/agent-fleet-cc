@@ -10,8 +10,8 @@ Two things to know before you copy one:
 
 - **The prompt goes in a file, via `--prompt-file`.** Several of these contain double quotes
   around on-image text, which a shell argument strips silently — and a here-document would let a
-  prompt containing its own delimiter line escape into the shell. Each block below shows the flags;
-  write the prompt text underneath it to a file and point `--prompt-file` at that.
+  prompt containing its own delimiter line escape into the shell. Each example below is a prompt
+  block first — save that to a file — then the command to run it with.
 - **Most of these name `--model grok-imagine-image-2.0`, which is not the plugin default and
   costs about 3x per image.** That is a deliberate choice for finish, not a requirement — drop
   the flag to render on the default, and read `model-and-params.md` first: 2.0 has the best
@@ -163,4 +163,3 @@ node …/imagine.mjs --prompt-file /abs/path/prompt.txt --aspect 3:2 --model gro
 ```
 
 Authored. Diagrams are the hardest image case because they are typography plus geometry, so this leans on both text rules at once: quoted labels with a stated role and position, and short strings. Run it at resolution="2k" — small glyphs are exactly what 1k loses. It also carries the only kind of negation with published support: two concrete, scoped exclusions ('no gradients and no drop shadows', 'no other text') rather than a broad style manifesto. Expect to iterate; no source claims any model gets label placement right first try.
-
