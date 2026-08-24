@@ -1,9 +1,9 @@
 # agent-fleet-cc — agent working rules
 
-A Claude Code plugin marketplace: 6 plugins (`codex`, `antigravity`, `cc`, `grok`,
-`fleet`, `imagine`). Each `plugins/<name>/` is the exact install payload; engine knowledge lives
-per plugin, the job runtime is shared in `shared/lib/`. Tests mirror each plugin under
-`tests/<name>/`.
+A Claude Code plugin marketplace. Each `plugins/<name>/` is the exact install payload and one
+entry in `.claude-plugin/marketplace.json` — that file is the roster, so don't keep a copy of it
+here. Engine knowledge lives per plugin, the job runtime is shared in `shared/lib/`, and tests
+mirror each plugin under `tests/<name>/`.
 
 **These plugins ship to other people's machines** — this is a product, not a personal
 setup. When you learn something reusable (an engine quirk, a model to prefer/avoid, a
@@ -13,16 +13,16 @@ memory — that helps one session on one machine, and users never see it.
 
 ## IRONCLAD — do not touch siblings
 When working on one plugin, do **NOT** modify other plugins or their tests
-(`plugins/{codex,antigravity,cc,grok,fleet,imagine}/`, `tests/{codex,antigravity,cc,grok,fleet,imagine}/`).
+(anything under another `plugins/<name>/` or `tests/<name>/`).
 When **adding** a sibling plugin, the only existing files you may edit are:
 `.claude-plugin/marketplace.json`, `tests/fleet-structure.test.mjs` (the marketplace
 consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-shared.mjs`
 (add the plugin to the vendored-runtime target list — CI drift-checks it), and `README.md`.
 
 ## Commands
-- `npm test` — full chain: structure + shared + cc + antigravity + codex + grok + imagine + fleet + e2e.
-  Run on **Node 24**: codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says
-  `>=22.3`, but CI pins 24 for this reason — see `.github/workflows/ci.yml`).
+- `npm test` — the full chain; `package.json` says what it is made of. Run on **Node 24**:
+  codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says `>=22.3`, but CI
+  pins 24 for this reason — see `.github/workflows/ci.yml`).
 - One plugin's suite: `node --test tests/<plugin>/*.test.mjs` (antigravity also needs
   `--experimental-test-module-mocks`). The hermetic-vs-real-engine split is the `e2e-testing`
   skill's job — ask it before claiming anything was verified end-to-end.
@@ -34,13 +34,20 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   check-version` verifies). **It syncs only those two.** A plugin may carry versions in other
   manifests that drift silently — the dual-host ones (`cc`, `antigravity`) do, and both have
   drifted before. So before bumping: `grep -rn '"version"' plugins/<name>` and hand-sync whatever
-  else it finds. Don't trust a written-down inventory here; that list is exactly what rots.
+  else it finds. Don't trust a written-down inventory here; that list is exactly what rots. Same
+  for the CHANGELOG: only some plugins keep one, so `ls plugins/<name>/CHANGELOG.md` before you
+  assume — that asymmetry is why a bump lands with no entry describing it.
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
   `node:assert/strict`, and are hermetic — fake binaries, redirected `CLAUDE_PLUGIN_DATA`,
   no network. Prefer injectable seams (spawn / env / fs) over calling them directly so
   tests need no real binaries.
+- **Prove a new or tightened test bites, both ways:** delete the behaviour it guards and watch it
+  go red, then feed it the input it must accept and watch it stay green. `git log` holds more than
+  one fix for a test that was green for the wrong reason. A guard that has to *guess* — at shell
+  syntax, at a heredoc spelling — fails both ways at once, so prefer an invariant with no grammar
+  to get wrong.
 - Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
   it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
 - **Never enumerate an engine's runtime catalog in shipped prose** — models, effort levels, tool
@@ -59,11 +66,14 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   machine via a `PreToolUse` hook in `.claude/settings.local.json` (not repo-wide: build:codex
   needs the codex CLI on PATH). Trivial doc/comment edits are exempt; still branch for risky or
   exploratory work.
-- **A fix written in response to a review needs its own review round.** Twice in one session a
-  round of review-driven fixes introduced fresh defects — a wrong bucket, a doubled error string,
-  an unref'd timer that left the job `running` forever — none of which existed before the fix.
-  "The reviewer's findings are addressed" is not the same claim as "the addressing is correct", so
-  re-review the diff that answers a review, and treat a clean second round as the actual gate.
+- **A fix answering a review needs its own review round, and the gate is a *clean* round — not
+  the second one.** Review-driven fixes keep introducing fresh defects: a wrong bucket, a doubled
+  error string, an unref'd timer that left the job `running` forever. imagine 0.1.0 took four
+  rounds; 2–4 each found a defect the previous fix introduced, round 4's inside the test round 3
+  added. Rounds cost real quota — agree a fifth with the user instead of looping.
+- **Don't touch the worktree while a review runs against this repo.** A reviewer worth having
+  mutates the source to check a test actually bites, then restores it — and that `git restore`
+  reverts your uncommitted edits too.
 
 ## Autonomy & approval boundaries
 - **Do without asking:** read/search the repo; run tests (`npm test`, per-plugin suites,

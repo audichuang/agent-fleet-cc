@@ -48,12 +48,16 @@ test("the command carries the prompt in a file, never through the shell", () => 
   for (const file of docs) {
     const rel = path.relative(ROOT, file);
     const text = fs.readFileSync(file, "utf8");
-    // 1. No heredoc, in any spelling. `<<` has no other use in this plugin's prose, so the
-    //    bare operator is the whole check — no delimiter grammar to get wrong.
-    assert.doesNotMatch(text, /<</, `${rel} must not use a heredoc (<<) — the prompt goes in a file`);
-    // 2. Every shown invocation names --prompt-file and carries no prompt text. Fences are
-    //    matched by their run of backticks or tildes, so a four-backtick or ~~~ fence counts.
+    // Fences are matched by their own run of backticks or tildes, so a four-backtick or
+    // `~~~` fence counts. Everything below is checked INSIDE fences only: prose that
+    // discusses the rule legitimately contains the operator, and a guard that fires on its
+    // own documentation is a false positive — the failure direction that makes a guard
+    // untrustworthy (this one bit this very file first time out).
     for (const [, , , block] of text.matchAll(/^([`~]{3,})(\w*)\n([\s\S]*?)^\1\s*$/gm)) {
+      // 1. No heredoc, in any spelling. The bare `<<` operator is the whole check — there is
+      //    no delimiter grammar to get wrong, and no command here has another use for it.
+      assert.doesNotMatch(block, /<</, `${rel}: a code block must not use a heredoc (<<) — the prompt goes in a file:\n${block}`);
+      // 2. Every shown invocation names --prompt-file and carries no prompt text.
       if (!/imagine\.mjs/.test(block)) continue;
       invocations++;
       assert.match(block, /--prompt-file/, `${rel}: every shown invocation must use --prompt-file:\n${block}`);

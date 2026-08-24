@@ -40,6 +40,12 @@ plugin 移除,不留重複入口。
   代價是它有日期錨點和重驗指令,而且**已經腐爛過一次**(0.1.0 上線前,第 11 行還說預設是
   `-2.0`,程式和實測段是 `grok-imagine-image`)。改那份文件時,先確認每一句「plugin default」
   跟 `scripts/imagine.mjs` 的 `model =` 對得上。別把這個例外擴大到其他檔案。
+- **Prompt 一律走 `--prompt-file`,不要 heredoc、不要拼進命令列。** prompt 是 model / 使用者
+  authored 的文字:它自己含一行 delimiter 就會關掉 here-document,後面那幾行當 shell 執行;
+  當成 shell argument 則會被靜默剝掉 on-image text 需要的雙引號。`--out` 可省略(script 自己
+  mkdtemp),免得有人在一個 Bash call 算出路徑、再拼進下一個。這條由
+  `tests/imagine/plugin-structure.test.mjs` 強制:它走過每一份 shipped `.md`,禁 `<<`、要求每個
+  提到 script 的 fence 都有 `--prompt-file`。改文件時別想繞過它 —— 它就是那個缺陷的疫苗。
 - 測試 hermetic:注入 `fetchImpl` 與 `authFile`,temp dir 假 auth.json,不連網。
 
 ## 細節指向
