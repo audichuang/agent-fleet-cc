@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.6.1
+
+**The stop-rule that forbids auto-fixing Codex's findings was never reaching the model.** Nine
+surfaces hand Codex's own output back to the user; the contract for presenting it lives in the
+`codex-result-handling` skill, and exactly one — `/codex:result` — named it. Every other verb
+relayed Codex verbatim without ever mentioning it, so nothing told Claude the skill was relevant.
+The gap is not theoretical: in a recorded session a Codex review came back `DO NOT PUSH` and its
+findings were patched on the spot instead of being put to the user. The skill that fires reliably
+in this plugin is the one a command tells Claude to load by name — `handoff.md` does that for
+`gpt-5-6-prompting`, and nothing did it for this one.
+
+Nine commands now name the skill at the point the output arrives: `handoff`, `rescue`, `task`,
+`review`, `adversarial-review`, `execute-plan`, `logs`, `attach`, and `result`. `logs` and
+`attach` are in that list because the persisted log they stream ends with the job's `Final
+output` — a review's findings reach the user through them as surely as through `result`. `wait`
+is deliberately **not**: it renders `renderJobStatusReport` (job details and hints), while
+`renderStoredJobResult` is `result`'s alone.
+
+All nine now allow `Skill` in `allowed-tools`; eight of them newly gain it, `handoff` already
+had it. That field **pre-approves** a tool for the invoking turn; it is not an availability gate
+(`disallowed-tools` is), so the grant does not make the skill loadable — it keeps loading it from
+costing a permission prompt at the one moment the stop-rule has to arrive. The functional fix is
+naming the skill; this is the ergonomics half.
+
+`agents/codex-rescue.md` is the one route a command cannot cover, because the host can select
+the agent directly. Nothing declarable on the agent binds that host — `description` is routing
+metadata and `skills:` injects into the agent's own context, not its caller's — so the lever is
+the only thing that does reach the host: the text the agent returns. It now returns one line
+naming the contract, with Codex's own bytes unedited below it. Its `description` is also quoted
+now: an unquoted value containing `: ` makes the whole frontmatter unparseable, and Claude Code
+drops such an agent silently.
+
+`tests/codex/commands.test.mjs` pins it against explicit lists rather than grepping bodies for
+prose: the reference and the grant on every relaying command, and the classification of the
+status surfaces asserted against the runtime itself — `handleWait` renders
+`renderJobStatusReport` and must not render `renderStoredJobResult`, so a future change that
+makes `/codex:wait` relay the result goes red instead of quietly escaping the set. The agent's
+frontmatter is guarded for an unquoted `: ` in a value, which silently drops the whole agent —
+a defect this change set introduced once and had caught. Every assertion was verified to go red
+when the thing it guards is removed.
+
 ## 1.6.0
 
 **A failed Codex turn no longer reads as a finished answer.** The `--json` payload and

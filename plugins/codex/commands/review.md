@@ -2,7 +2,7 @@
 description: Run a Codex code review against local git state
 argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch]'
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
+allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion, Skill
 ---
 
 Run a Codex review through the shared built-in reviewer.
@@ -45,6 +45,7 @@ Foreground flow:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" review "$ARGUMENTS"
 ```
 - Return the command stdout verbatim, exactly as-is.
+- Before any of that output reaches the user, load the `codex-result-handling` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
 - Do not paraphrase, summarize, or add commentary before or after it.
 - Do not fix any issues mentioned in the review output.
 

@@ -2,13 +2,15 @@
 description: Attach to a running Codex background job and stream its live log until it finishes
 argument-hint: '[job-id] [--poll-interval-ms <ms>]'
 disable-model-invocation: true
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Skill
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" attach "$ARGUMENTS"`
 
 This streams the job's log as it is produced and returns once the job reaches a
 terminal status (completed / failed / cancelled).
+
+Before any of that output reaches the user, load the `codex-result-handling` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
 
 - If the user passed a job ID, attach to that job (it may belong to another
   workspace — the id is resolved across workspaces when not found locally).

@@ -20,7 +20,11 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 (add the plugin to the vendored-runtime target list — CI drift-checks it), and `README.md`.
 
 ## Commands
-- `npm test` — the full chain; `package.json` says what it is made of. Run on **Node 24**:
+- `npm run verify` — **the whole CI chain in one command** (`check-version`, `sync-shared` +
+  the vendored-drift diff, `npm test`, `build:codex`). Run this before a push; `npm test` alone
+  is not the chain, and re-deriving the steps by hand is how a `build:codex` type error reaches
+  CI green-locally. Needs the codex CLI on PATH (for `build:codex`'s prebuild).
+- `npm test` — the test chain only; `package.json` says what it is made of. Run on **Node 24**:
   codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says `>=22.3`, but CI
   pins 24 for this reason — see `.github/workflows/ci.yml`).
 - One plugin's suite: `node --test tests/<plugin>/*.test.mjs` (antigravity also needs
@@ -60,8 +64,9 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `main` is push-ready: commit a feature/behavior change straight to `main` only after the
   **full CI chain** is green **and** an independent diff review (`/codex:handoff`, another model,
   or a human). CI (`ci.yml`) is more than `npm test` — it also runs a `sync-shared` drift check
-  and `npm run build:codex` (a `tsc` typecheck `npm test` skips), so run those two as well before
-  pushing (a codex type error reddens CI while `npm test` stays green). To automate that,
+  and `npm run build:codex` (a `tsc` typecheck `npm test` skips). **`npm run verify` is all of it**;
+  reach for that rather than reassembling the steps (a codex type error reddens CI while `npm test`
+  stays green). As a second net,
   `.claude/hooks/pre-push-ci-gate.sh` blocks a push that would fail either check — opt in per
   machine via a `PreToolUse` hook in `.claude/settings.local.json` (not repo-wide: build:codex
   needs the codex CLI on PATH). Trivial doc/comment edits are exempt; still branch for risky or
@@ -100,7 +105,8 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   at the live text: `diff ~/.claude/plugins/cache/agent-fleet/<plugin>/<version>/agents/<a>.md
   plugins/<plugin>/agents/<a>.md`. (The agent list in a running session shows the installed
   description — that is the authoritative tell.)
-- `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
+- `tests/codex/runtime.test.mjs`, `tests/shared/worker.test.mjs` and
+  `tests/antigravity/job-runtime.test.mjs` (`missing event finalized`) are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.
 - `shared/lib/` is the source of truth. `cc`, `antigravity`, and `grok` run the full shared

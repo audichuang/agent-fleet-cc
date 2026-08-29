@@ -21,6 +21,38 @@ doesn't load your working tree directly; it loads a **versioned cache copy**, an
 the path from "I edited a file" to "Claude Code runs my edit" has three non-obvious
 gotchas that waste an afternoon if you don't know them. This skill is that path.
 
+## Start here — the harness blocks the paths this skill talks about
+
+Every path below under `~/.claude/plugins/` sits **outside the session's allowed
+working directory**, and every `claude plugin ...` command needs its own approval.
+So `cat ~/.claude/plugins/installed_plugins.json`, `ls ~/.claude/plugins/cache/...`
+and `claude plugin list` do not fail loudly — they come back as
+"was blocked. For security..." or "requires approval", and it is easy to burn most
+of a session re-phrasing them. Read those paths as **explanation of the machinery**,
+not as commands to run.
+
+Two things actually work, so reach for them first:
+
+```bash
+npm run use-local -- <plugin> [version]   # does the whole job: refresh, repoint, back up
+```
+
+`use-local` runs from inside the repo, so nothing blocks it. It is the whole
+happy path — refresh the marketplace, materialize the cache, repoint the pin.
+Bump the version first (see the gotchas), run it, restart Claude Code.
+
+When you genuinely need to *look* at the live install (say, to confirm which
+version is pinned), ask the user to run it themselves — in Claude Code, a command
+typed with a leading `! ` runs in the session and its output lands in the
+conversation:
+
+```
+! claude plugin list
+```
+
+Everything below explains why this shape exists and covers the cases `use-local`
+does not.
+
 ## The mental model (why the obvious thing doesn't work)
 
 Three layers sit between your edit and what Claude Code runs:
@@ -59,8 +91,10 @@ new versioned cache → repoint the active pin → restart Claude Code.
 
 ## Workflow A — git source (the default install path)
 
-Use when the marketplace points at the GitHub fork (the default). Verify with
-`claude plugin marketplace list` or read `~/.claude/plugins/known_marketplaces.json`.
+Use when the marketplace points at the GitHub fork (the default). To confirm which
+source is registered, ask the user to run `! claude plugin marketplace list` —
+reading `~/.claude/plugins/known_marketplaces.json` yourself is blocked (see the
+top section).
 
 ```bash
 # 0) bump the plugin version (e.g. codex 1.0.18 -> 1.0.19) in BOTH:

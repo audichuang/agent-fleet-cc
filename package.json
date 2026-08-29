@@ -8,6 +8,7 @@
     "node": ">=22.3"
   },
   "scripts": {
+    "verify": "npm run check-version && npm run sync-shared && git diff --exit-code -- plugins/cc/scripts/lib/shared plugins/codex/scripts/lib/shared plugins/antigravity/scripts/lib/shared plugins/grok/scripts/lib/shared && npm test && npm run build:codex",
     "test": "npm run test:structure && npm run test:shared && npm run test:cc && npm run test:antigravity && npm run test:codex && npm run test:grok && npm run test:imagine && npm run test:fleet && npm run test:e2e",
     "test:structure": "node --test tests/*.test.mjs",
     "test:shared": "node --test \"tests/shared/*.test.mjs\" \"tests/shared/conformance/*.test.mjs\"",

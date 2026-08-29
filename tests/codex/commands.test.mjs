@@ -312,3 +312,120 @@ test("setup command can offer Codex install and still points users to codex logi
   assert.match(setup, /codex-companion\.mjs" setup --json \$ARGUMENTS/);
   // README assertions removed with the standalone repo's root README (left behind).
 });
+
+// Every surface that hands Codex's own output to the user must route through the
+// `codex-result-handling` skill — it carries the stop-rule that review findings are
+// never auto-fixed. The list is spelled out rather than inferred because the
+// alternative (grepping bodies for "verbatim") guesses at prose and would pass on a
+// file that dropped the pointer.
+//
+// `logs` and `attach` belong here even though they look like plumbing: the persisted
+// log they stream ends with the job's `Final output`, so a review's findings reach the
+// user through them too. `wait` and `status --wait` do NOT belong: they render
+// `renderJobStatusReport` (job details and hints), while only `result` renders the
+// stored output via `renderStoredJobResult`.
+const RESULT_RELAYING_COMMANDS = [
+  "adversarial-review",
+  "attach",
+  "execute-plan",
+  "handoff",
+  "logs",
+  "rescue",
+  "result",
+  "review",
+  "task",
+];
+
+// Naming the skill is what makes it load; the `Skill` grant is what keeps that from
+// costing a permission prompt at the one moment the stop-rule has to arrive. Assert
+// both — `allowed-tools` pre-approves, it does not gate availability, so the grant is
+// an ergonomics fix and the reference is the functional one.
+test("every command that relays Codex output routes through codex-result-handling", () => {
+  for (const name of RESULT_RELAYING_COMMANDS) {
+    const body = read(`commands/${name}.md`);
+    assert.match(
+      body,
+      /codex-result-handling/,
+      `commands/${name}.md relays Codex output but never names the codex-result-handling skill`
+    );
+    const allowed = /^allowed-tools: (.+)$/m.exec(body);
+    assert.ok(allowed, `commands/${name}.md has no allowed-tools line`);
+    assert.ok(
+      allowed[1].split(",").map((t) => t.trim()).includes("Skill"),
+      `commands/${name}.md names codex-result-handling but has no Skill pre-approval, so loading it will prompt`
+    );
+  }
+});
+
+// Round 2 asked for this; round 3 caught that it only covered `wait`. Slice each
+// handler out of the companion and assert what it actually renders — `renderJobStatusReport`
+// for the status surfaces, `renderStoredJobResult` for `result`. A change that makes a
+// status surface relay the stored output goes red here instead of quietly escaping the
+// relay set. The slicer must tolerate `async function`, or it runs past the handler it
+// means to isolate and asserts on a neighbour.
+function companionHandler(name) {
+  const companion = fs.readFileSync(
+    path.join(PLUGIN_ROOT, "scripts", "codex-companion.mjs"),
+    "utf8"
+  );
+  const signature = new RegExp(`^(?:async )?function ${name}\\(`, "m");
+  const opening = signature.exec(companion);
+  assert.ok(opening, `${name} not found in codex-companion.mjs`);
+  const rest = companion.slice(opening.index + opening[0].length);
+  const next = /^(?:async )?function \w+\(/m.exec(rest);
+  return rest.slice(0, next ? next.index : undefined);
+}
+
+test("status surfaces render the status report, not the stored result", () => {
+  for (const name of ["handleWait", "handleStatus"]) {
+    const body = companionHandler(name);
+    assert.match(body, /renderJobStatusReport|renderStatusPayload/, `${name} no longer renders a status report`);
+    assert.doesNotMatch(
+      body,
+      /renderStoredJobResult/,
+      `${name} now renders the stored result — that command relays Codex output and must join RESULT_RELAYING_COMMANDS`
+    );
+  }
+
+  assert.match(
+    companionHandler("handleResult"),
+    /renderStoredJobResult/,
+    "handleResult no longer renders the stored result"
+  );
+
+  for (const name of ["wait", "status"]) {
+    assert.ok(
+      !RESULT_RELAYING_COMMANDS.includes(name),
+      `commands/${name}.md renders a status report, not the stored result`
+    );
+  }
+});
+
+// The rescue subagent presents nothing itself; the host does, and nothing declarable on
+// the agent binds the host. Its one lever is the text it returns, so assert that the
+// body still requires the contract line — checked in the body alone, because a match
+// anywhere in the file could be satisfied by a `skills:` entry instead (round 3).
+// The description is asserted to be a double-quoted scalar rather than checked against a
+// hand-rolled YAML rule: an unquoted value can be broken by a `: `, a ` #`, or a leading
+// `*`, and a guard that has to enumerate those fails in both directions. One safe
+// representation has no grammar to get wrong.
+test("codex-rescue keeps a quoted description and tells the host how to present its output", () => {
+  const agent = read("agents/codex-rescue.md");
+  const parts = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(agent);
+  assert.ok(parts, "agents/codex-rescue.md has no frontmatter");
+  const [, frontmatter, body] = parts;
+
+  const description = /^description: (.+)$/m.exec(frontmatter);
+  assert.ok(description, "agents/codex-rescue.md has no description");
+  assert.match(
+    description[1],
+    /^".*"$/,
+    'the description must be a double-quoted scalar: an unquoted value containing ": " makes the whole frontmatter unparseable and Claude Code drops the agent silently'
+  );
+
+  assert.match(
+    body,
+    /codex-result-handling/,
+    "the agent body must tell the host to present its output under the contract — the returned text is the only lever it has when the host invokes it directly"
+  );
+});

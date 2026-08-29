@@ -2,7 +2,7 @@
 description: Show the stored final output for a finished Codex job in this repository
 argument-hint: '[job-id]'
 disable-model-invocation: true
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Skill
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" result "$ARGUMENTS"`
