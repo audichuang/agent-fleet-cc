@@ -29,9 +29,16 @@ spec. Reach for the fork on a *continuation*, not a ticket.
 ## Why the subagent costs ~20K
 
 A subagent's `skills:` frontmatter **preloads the full skill text** at spawn — not just the
-description. `codex-rescue` preloads `codex-cli-runtime` (~930 tok) plus `gpt-5-6-prompting`
-(~2,900 tok) plus its own body (~1,000 tok), on top of the agent system prompt, every time.
-One measured trivial forward: `subagent_tokens: 20732`, 1 tool use.
+description. One measured trivial forward: `subagent_tokens: 20732`, 1 tool use.
+
+That measurement is from 1.6.1, when `codex-rescue` preloaded two skills — `codex-cli-runtime`
+(~930 tok) and `gpt-5-6-prompting` (~2,900 tok) — plus its own body (~1,000 tok). 1.6.2 collapsed
+the plugin to a single `codex` skill: the runtime contract moved into the agent body (it was
+~90% duplicated there already) and the prompting guidance became this directory, reachable by
+`Read` instead of preloaded. So the preload is now one short skill body plus the agent's, and the
+figure above is an upper bound until someone re-measures a trivial forward against an installed
+1.6.2. The agent system prompt and tool definitions dominate either way — don't expect the total
+to fall anywhere near proportionally.
 
 What it buys is **not** context isolation. That was already there: the file reads, the reasoning,
 and the tool loop all happen inside Codex's own 1.05M context (65K input on that same run), and

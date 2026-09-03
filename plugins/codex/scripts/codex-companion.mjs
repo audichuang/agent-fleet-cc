@@ -92,7 +92,7 @@ const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "hi
 // Default to the explicit `gpt-5.6-sol` slug (frontier tier). Use the explicit
 // slug, not the `gpt-5.6` family alias — the alias is not resolvable on
 // ChatGPT-account Codex (400). Pass --model gpt-5.6-terra to trade capability for
-// cost. See the gpt-5-6-prompting skill for model-selection guidance.
+// cost. See skills/codex/references/prompting.md for model-selection guidance.
 function resolveDefaultModel() {
   const fromEnv = process.env.CODEX_DEFAULT_MODEL?.trim();
   return fromEnv || "gpt-5.6-sol";

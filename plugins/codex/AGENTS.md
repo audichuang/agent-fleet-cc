@@ -38,6 +38,9 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `attach` 都 user-run(`disable-model-invocation`)—— 別假設 `/codex:task` 能自呼叫。
 - **動到 app-server 相關型別 → 跑 `npm run build:codex`**(`tsc`,對 generated types +
   `lib/app-server-protocol.d.ts`);為何 `npm test` 不涵蓋、CI 卻會紅,見 root Conventions。
+- **只有一顆 skill(`codex`)**,1.6.2 起。body 是 9 個 command 的熱路徑(result-handling 契約),
+  細節一律放 `skills/codex/references/`,並在 SKILL.md 的表格裡掛一行 —— `tests/codex/commands.test.mjs`
+  同時釘住「只有一顆」與「表格 ↔ references/ 完全對齊」。要加第二顆先問為什麼。
 - **NOT dual-host**(無 `.codex-plugin/`)—— 不像 cc / agy;bump 只動 plugin.json ↔ marketplace。
 
 ## 踩雷
@@ -71,8 +74,12 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `doesNotMatch(/^context:\s*fork\b/m)`。名字很像但機制不同的另兩個(`/subtask`、`/fork`)見下面
   delivery-paths。
 - **`codex-rescue` 一次 spawn ~20K tokens**(實測 `subagent_tokens: 20732`,一次 trivial 轉發)。
-  成因:`skills:` frontmatter 會**預載技能全文**,不只 description —— 兩顆 skill + agent body ≈ 4.8K
-  固定成本,每次 spawn 都付。它買到的是 proactive discovery 與 `tools: Bash` 圍欄,**不是** context
+  成因:`skills:` frontmatter 會**預載技能全文**,不只 description。那個數字是 1.6.1 量的,當時預載兩顆
+  skill(`codex-cli-runtime` + `gpt-5-6-prompting`)+ agent body ≈ 4.8K 固定成本。**1.6.2 收成一顆
+  `codex` skill**:runtime 契約併回 agent body(本來就 ~90% 重複),prompting 降級成 references/ 靠
+  `cat` 取用,所以固定成本只剩一份短 skill body + agent body。**20K 那個數字還沒對 1.6.2 重測**,
+  當上界看;agent system prompt 與工具定義才是大頭,別預期等比例下降。
+  這筆錢買到的是 proactive discovery 與 `tools: Bash` 圍欄,**不是** context
   隔離(隔離本來就由 Codex 自己的 context 提供,主線兩條路收到的位元組一樣,因為 agent 被明文禁止摘要)。
   一批 ticket 走主線直接 `task` 就好,別 N × 20K。要調的話 frontmatter 還有 `effort` / `maxTurns`
   沒用 —— 但 `maxTurns` 會夾死 `--prompt-file` 那條(寫檔 + task + 收尾 = 3 turns 起),別設 2。
@@ -84,7 +91,7 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 
 ## 細節指向
 - 交付路徑選型(直接 `task` · `--resume-last` · subagent · conversation fork)含實測成本與 fork 命名
-  陷阱:`skills/gpt-5-6-prompting/references/delivery-paths.md`。
+  陷阱:`skills/codex/references/delivery-paths.md`。
 - protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。
-- 寫 GPT-5.6 prompt:`gpt-5-6-prompting` skill(本 plugin 內);worktree 驗證合約見
+- 寫 GPT-5.6 prompt:`skills/codex/references/prompting.md`;worktree 驗證合約見
   `lib/worktree-guard.mjs`、設計見 `docs/superpowers/plans/2026-06-21-worktree-cwd-guard.md`。

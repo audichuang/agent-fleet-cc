@@ -92,6 +92,6 @@ until [ -f "<signalFile>" ]; do sleep 5; done
 - This command is execution-focused. Codex will make changes to the codebase.
 - Always use `--write` — the entire point of this command is to implement code.
 - Return Codex output verbatim. Do not paraphrase or summarize.
-- Before any of that output reaches the user, load the `codex-result-handling` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
+- Before any of that output reaches the user, load the `codex:codex` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
 - Clean up the temp prompt file after Codex finishes (foreground) or note its path (background).
 - Do not fix, review, or modify Codex's output yourself.

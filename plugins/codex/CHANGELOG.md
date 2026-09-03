@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.6.2
+
+**Three skills became one.** `codex` was the only plugin in the marketplace shipping more than one
+skill (agy, cc, fleet and imagine ship one; grok ships none), and each one costs a permanently
+loaded description in every session's skill list. The plugin now ships a single `codex` skill.
+
+The shape is picked around the hot path. Nine commands load a skill for exactly one reason — the
+result-handling contract, whose stop-rule (never auto-fix a review's findings) is what 1.6.1
+existed to deliver. So the **SKILL.md body is that contract, unchanged**, and everything else is
+disclosed through `references/`, listed in a table so each file stays one hop from SKILL.md.
+Merging the prompting material into the body instead would have made those nine commands load
+~170 lines to reach 13, burying the rule the way 1.6.1 dug it out of.
+
+- **`codex-cli-runtime` is deleted, not moved.** Roughly 90% of it was already restated line by
+  line in `agents/codex-rescue.md` — its only consumer — and the two copies had begun to diverge.
+  Three rules lived only in the skill and are now in the agent body: the
+  `${CLAUDE_PLUGIN_ROOT}` path invariant (a hardcoded cache path dies with "Cannot find module"
+  the moment the plugin updates), the `--prompt-file` rule (`"$(cat file)"` as the positional
+  prompt collapses silently to an empty prompt and the run does nothing), and stripping
+  `--background` / `--wait` out of the forwarded task text. This is the shape antigravity 0.6.0
+  chose for the same reason, and it drops one preloaded skill from every `codex-rescue` spawn.
+- **A fourth routing rule was missing from both copies**, found while checking what only the
+  skill had said: `--write` is a flag the companion accepts, but neither the skill nor the agent
+  told the agent what to do with a user-typed one, and the agent is otherwise told to preserve
+  the task text as-is. It changes no behavior — write is already the agent's default — but left
+  in the prompt it reads to Codex as an instruction. Now named as a runtime control and pinned.
+- **`gpt-5-6-prompting` became `skills/codex/references/prompting.md`**, moved verbatim with its
+  four references beside it as siblings. It is no longer preloaded into `codex-rescue`; the agent
+  may `cat` that one file when it wants to tighten a prompt, which is optional and usually
+  skipped. `/codex:handoff` reads it directly.
+- **The 20K spawn figure has not been re-measured.** `references/delivery-paths.md` and the
+  plugin's `AGENTS.md` now say so explicitly and mark it an upper bound; the agent system prompt
+  and tool definitions dominate it, so the preload change will not move it proportionally.
+- One prose invariant was **wrong before this change and is now fixed**: the agent said "use
+  exactly one `Bash` call" two lines above telling it to write a `--prompt-file` first. The real
+  rule is one `task` run per handoff, and the test pinned the contradictory wording.
+
+`tests/codex/commands.test.mjs` gains the guard that makes the consolidation stick: skills are
+discovered by directory, so a fourth one is a `mkdir` with no import and no registration to trip,
+and the plugin has no manifest listing them. The test asserts the directory set is exactly
+`["codex"]`, that SKILL.md's reference table and `references/` match each other in both
+directions (a dangling link and an orphaned file both fail), and that the body stays under 80
+lines so the prompting material cannot leak back onto the hot path. The relaying guard is now
+anchored on the backticked `` `codex:codex` `` literal rather than a bare name — `/codex:codex/`
+alone would also match `codex:codex-rescue` and quietly pass on every command. Each new assertion
+was mutation-checked: removing the pointer, adding a second skill, dropping a reference link, and
+deleting each of the three migrated invariants all go red on the intended test.
+
+Known and deliberately left: the model/price table in `references/prompting.md` is exactly the
+enumerated engine catalog the root `AGENTS.md` warns rots invisibly — untouched here to keep this
+diff a move, and worth its own pass. Dated rows in `docs/codex-protocol-sync-audit.md` still name
+the old `gpt-5-6-prompting/SKILL.md` path; they are records of what was true on their date and
+were not rewritten.
+
 ## 1.6.1
 
 **The stop-rule that forbids auto-fixing Codex's findings was never reaching the model.** Nine

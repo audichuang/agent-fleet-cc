@@ -125,7 +125,7 @@ test("handoff builds a GPT-5.6 prompt and sends it to Codex by default, with --p
   assert.match(source, /argument-hint:/);
   assert.match(source, /allowed-tools:.*Skill/);
   assert.match(source, /allowed-tools:.*Bash\(node:\*\)/);
-  assert.match(source, /gpt-5-6-prompting/);
+  assert.match(source, /references\/prompting\.md/);
   // Default behavior: send the built prompt to Codex via the companion task runner.
   assert.match(source, /codex-companion\.mjs" task --prompt-file/);
   // --print (or --prompt-only) emits the prompt without running Codex.
@@ -140,7 +140,6 @@ test("handoff builds a GPT-5.6 prompt and sends it to Codex by default, with --p
 test("rescue command absorbs continue semantics", () => {
   const rescue = read("commands/rescue.md");
   const agent = read("agents/codex-rescue.md");
-  const runtimeSkill = read("skills/codex-cli-runtime/SKILL.md");
 
   assert.match(rescue, /The final user-visible response must be Codex's output verbatim/i);
   assert.match(rescue, /allowed-tools:\s*Bash\(node:\*\),\s*AskUserQuestion,\s*Agent/);
@@ -182,7 +181,10 @@ test("rescue command absorbs continue semantics", () => {
   assert.match(agent, /thin forwarding wrapper/i);
   assert.match(agent, /prefer foreground for a small, clearly bounded rescue request/i);
   assert.match(agent, /If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Codex running for a long time, prefer background execution/i);
-  assert.match(agent, /Use exactly one `Bash` call/i);
+  // Was /Use exactly one `Bash` call/ — prose the body already contradicted two lines
+  // later, where a multi-line prompt is told to go through a written `--prompt-file`.
+  // The real invariant is one `task` run per handoff, not one Bash call.
+  assert.match(agent, /one `task` run per rescue handoff/i);
   assert.match(agent, /Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own/i);
   assert.match(agent, /Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
   assert.match(agent, /Leave `--effort` unset unless the user explicitly requests a specific reasoning effort/i);
@@ -195,22 +197,24 @@ test("rescue command absorbs continue semantics", () => {
   // stdout; the subagent must surface it rather than swallow the failure.
   assert.match(agent, /On failure the companion exits non-zero and prints a structured.*envelope on stdout\. Return that stdout as-is/i);
   assert.match(agent, /Only if there is genuinely no stdout at all .* return nothing/i);
-  assert.match(agent, /gpt-5-6-prompting/);
-  assert.match(agent, /only to tighten the user's request into a better Codex prompt/i);
-  assert.match(agent, /Do not use that skill to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work/i);
-  assert.match(runtimeSkill, /only job is to invoke `task` once and return that stdout unchanged/i);
-  assert.match(runtimeSkill, /Do not call `setup`, `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
-  assert.match(runtimeSkill, /use the `gpt-5-6-prompting` skill to rewrite the user's request into a tighter Codex prompt/i);
-  assert.match(runtimeSkill, /That prompt drafting is the only Claude-side work allowed/i);
-  assert.match(runtimeSkill, /Leave `--effort` unset unless the user explicitly requests a specific effort/i);
-  assert.match(runtimeSkill, /Leave model unset by default/i);
-  assert.match(runtimeSkill, /Pass any explicit `--model` value through verbatim/i);
-  assert.doesNotMatch(runtimeSkill, /spark/i);
-  assert.match(runtimeSkill, /If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only/i);
-  assert.match(runtimeSkill, /Strip it before calling `task`/i);
-  assert.match(runtimeSkill, /`--effort`: accepted values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`/i);
-  assert.match(runtimeSkill, /Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own/i);
-  assert.match(runtimeSkill, /If the Bash call fails or Codex cannot be invoked, return nothing/i);
+  assert.match(agent, /references\/prompting\.md/);
+  assert.match(agent, /to tighten the user's request into a better Codex prompt/i);
+  assert.match(agent, /Do not use that reference to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work/i);
+  // 1.6.2 deleted `codex-cli-runtime`; ~90% of it was already duplicated here, and
+  // these are the invariants that were only in the skill. They govern a command line
+  // the agent builds by hand, so losing one fails at runtime, not at edit time.
+  assert.match(agent, /one `task` run per rescue handoff/i);
+  assert.match(agent, /Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
+  assert.match(agent, /Never hardcode a cache\/versioned path/i, "the ${CLAUDE_PLUGIN_ROOT} path invariant");
+  assert.match(agent, /pass `--prompt-file <path>`/i, "the empty-prompt trap");
+  assert.match(agent, /Leave `--effort` unset unless the user explicitly requests a specific/i);
+  assert.match(agent, /Leave model unset by default/i);
+  assert.match(agent, /Treat `--background` and `--wait` as Claude-side execution control only/i);
+  assert.match(agent, /Strip them before calling `task`/i);
+  // Every flag the companion accepts needs a rule, or the agent's "preserve the
+  // user's task text as-is" makes it prompt text Codex reads as an instruction.
+  assert.match(agent, /Treat a user-typed `--write` as a runtime control/i);
+  assert.match(agent, /do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own/i);
   // The standalone repo's root README stayed behind in codex-plugin-cc (it is
   // not part of the install payload); its doc-consistency assertions went with it.
 });
@@ -218,7 +222,7 @@ test("rescue command absorbs continue semantics", () => {
 test("result and cancel commands are exposed as deterministic runtime entrypoints", () => {
   const result = read("commands/result.md");
   const cancel = read("commands/cancel.md");
-  const resultHandling = read("skills/codex-result-handling/SKILL.md");
+  const resultHandling = read("skills/codex/SKILL.md");
 
   assert.match(result, /disable-model-invocation:\s*true/);
   assert.match(result, /codex-companion\.mjs" result "\$ARGUMENTS"/);
@@ -233,7 +237,7 @@ test("result and cancel commands are exposed as deterministic runtime entrypoint
 // half (the model/effort pairing, or the rescue agent's permission to take a ticket
 // at all) removes the capability with no code change and no other failure.
 test("gpt-5.6-luna is documented as the ticket lane, pinned to max effort", () => {
-  const promptingSkill = read("skills/gpt-5-6-prompting/SKILL.md");
+  const promptingSkill = read("skills/codex/references/prompting.md");
   const agent = read("agents/codex-rescue.md");
 
   assert.match(promptingSkill, /\|\s*\*\*gpt-5\.6-luna\*\*\s*\|/, "luna needs a row in the model table");
@@ -264,10 +268,10 @@ test("gpt-5.6-luna is documented as the ticket lane, pinned to max effort", () =
 // because every codex-rescue spawn preloads SKILL.md in full and the forwarder can
 // only ever execute one path. The pointer is what makes the reference reachable.
 test("delivery-path reference is reachable and carries the fork trap", () => {
-  const promptingSkill = read("skills/gpt-5-6-prompting/SKILL.md");
-  const deliveryPaths = read("skills/gpt-5-6-prompting/references/delivery-paths.md");
+  const promptingSkill = read("skills/codex/references/prompting.md");
+  const deliveryPaths = read("skills/codex/references/delivery-paths.md");
 
-  assert.match(promptingSkill, /references\/delivery-paths\.md/, "SKILL.md must point at the reference");
+  assert.match(promptingSkill, /\(delivery-paths\.md\)/, "prompting.md must point at its sibling reference");
   assert.match(deliveryPaths, /`--resume-last`/);
   assert.match(deliveryPaths, /subagent_tokens: 20732/, "the measured cost is the whole argument");
   // #234 is cheap to reintroduce from the name alone; the reference has to say why not.
@@ -281,13 +285,13 @@ test("delivery-path reference is reachable and carries the fork trap", () => {
 });
 
 test("internal docs use task terminology for rescue runs", () => {
-  const runtimeSkill = read("skills/codex-cli-runtime/SKILL.md");
-  const promptingSkill = read("skills/gpt-5-6-prompting/SKILL.md");
-  const promptRecipes = read("skills/gpt-5-6-prompting/references/codex-prompt-recipes.md");
+  const agent = read("agents/codex-rescue.md");
+  const promptingSkill = read("skills/codex/references/prompting.md");
+  const promptRecipes = read("skills/codex/references/codex-prompt-recipes.md");
 
-  assert.match(runtimeSkill, /codex-companion\.mjs" task "<raw arguments>"/);
-  assert.match(runtimeSkill, /Use `task` for every rescue request/i);
-  assert.match(runtimeSkill, /task --resume-last/i);
+  assert.match(agent, /codex-companion\.mjs" task \.\.\./);
+  assert.match(agent, /This subagent only forwards to `task`/i);
+  assert.match(agent, /--resume-last/i);
   assert.match(promptingSkill, /Use `task` when the task is diagnosis/i);
   assert.match(promptRecipes, /Codex task prompts/i);
   assert.match(promptRecipes, /Use these as starting templates for Codex task prompts/i);
@@ -340,19 +344,19 @@ const RESULT_RELAYING_COMMANDS = [
 // costing a permission prompt at the one moment the stop-rule has to arrive. Assert
 // both — `allowed-tools` pre-approves, it does not gate availability, so the grant is
 // an ergonomics fix and the reference is the functional one.
-test("every command that relays Codex output routes through codex-result-handling", () => {
+test("every command that relays Codex output routes through codex:codex", () => {
   for (const name of RESULT_RELAYING_COMMANDS) {
     const body = read(`commands/${name}.md`);
     assert.match(
       body,
-      /codex-result-handling/,
-      `commands/${name}.md relays Codex output but never names the codex-result-handling skill`
+      /`codex:codex` skill/,
+      `commands/${name}.md relays Codex output but never names the codex:codex skill`
     );
     const allowed = /^allowed-tools: (.+)$/m.exec(body);
     assert.ok(allowed, `commands/${name}.md has no allowed-tools line`);
     assert.ok(
       allowed[1].split(",").map((t) => t.trim()).includes("Skill"),
-      `commands/${name}.md names codex-result-handling but has no Skill pre-approval, so loading it will prompt`
+      `commands/${name}.md names codex:codex but has no Skill pre-approval, so loading it will prompt`
     );
   }
 });
@@ -425,7 +429,42 @@ test("codex-rescue keeps a quoted description and tells the host how to present 
 
   assert.match(
     body,
-    /codex-result-handling/,
+    /`codex:codex` skill/,
     "the agent body must tell the host to present its output under the contract — the returned text is the only lever it has when the host invokes it directly"
   );
+});
+
+// 1.6.2 collapsed three skills into one. The count is the whole point of that
+// change, and nothing else fails if a fourth reappears: skills are discovered by
+// directory, so adding one is a `mkdir` with no import, no registration, and no
+// other test to trip. The plugin also carries no manifest listing them, so this
+// assertion is the only place the intended shape is written down.
+//
+// Each entry costs a permanently-loaded description in every session's skill list,
+// which is why the budget is one. If a genuine second skill is ever needed, change
+// the number here deliberately rather than letting it drift.
+test("codex ships exactly one skill, whose references are all one hop from SKILL.md", () => {
+  const skillsDir = path.join(PLUGIN_ROOT, "skills");
+  const skills = fs
+    .readdirSync(skillsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  assert.deepEqual(skills, ["codex"], "codex is meant to expose exactly one skill");
+
+  // The body is the hot path: nine commands load it to reach the stop-rule, so the
+  // prompting material stays in references. A body that grew past ~80 lines would
+  // mean that material had leaked back in and buried the rule again.
+  const body = read("skills/codex/SKILL.md");
+  assert.ok(
+    body.split("\n").length < 80,
+    "skills/codex/SKILL.md is the nine-command hot path — keep detail in references/"
+  );
+
+  // Every reference must be linked from SKILL.md, or it is two hops away and gets
+  // skimmed at best. Checked both ways so neither a dangling link nor an orphaned
+  // file passes.
+  const linked = [...body.matchAll(/\]\(references\/([^)]+)\)/g)].map((m) => m[1]).sort();
+  const onDisk = fs.readdirSync(path.join(skillsDir, "codex", "references")).sort();
+  assert.deepEqual(linked, onDisk, "SKILL.md's reference table must match references/ exactly");
 });

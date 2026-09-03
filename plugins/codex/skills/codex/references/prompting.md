@@ -1,12 +1,6 @@
----
-name: gpt-5-6-prompting
-description: Internal guidance for composing GPT-5.6 / Codex prompts for coding, review, diagnosis, research, and handoff tasks inside the Codex Claude Code plugin
-user-invocable: false
----
-
 # GPT-5.6 Prompting
 
-Use this skill when composing a prompt for Codex / GPT-5.6 — both when `codex:codex-rescue` delegates a `task`, and when `/codex:handoff` produces a prompt for the user to paste into Codex.
+Use this reference when composing a prompt for Codex / GPT-5.6 — both when `codex:codex-rescue` delegates a `task`, and when `/codex:handoff` produces a prompt for the user to paste into Codex.
 
 GPT-5.6 works best with **outcome-first** prompts: define the target outcome, success criteria, constraints, and available context, then leave the model room to choose the path. Do not carry over process-heavy instruction stacks from older models — they add noise, narrow the search space, and produce mechanical answers.
 
@@ -70,7 +64,7 @@ Most delegations here cast Codex as an **independent, multi-angle reviewer** —
 - Use `task` when the task is diagnosis, planning, research, or implementation and you need to control the prompt directly.
 - Use `task --resume-last` for a follow-up on the same Codex thread — send only the delta instruction unless the direction changed materially.
 
-Choosing the **delivery path** (direct `task` · `--resume-last` · the `codex:codex-rescue` subagent · a conversation fork) is a separate decision from choosing the model, with its own measured costs and one naming trap: [references/delivery-paths.md](references/delivery-paths.md).
+Choosing the **delivery path** (direct `task` · `--resume-last` · the `codex:codex-rescue` subagent · a conversation fork) is a separate decision from choosing the model, with its own measured costs and one naming trap: [references/delivery-paths.md](delivery-paths.md).
 
 ## Suggested structure
 
@@ -97,6 +91,6 @@ Role: [1-2 sentences: the model's function, context, and job]
 
 > The user's-language rule here is a **deliberate product choice** — the handoff prompt is read by the human user. It is not the blanket "always respond in the user's language" the official guide warns against; that concerns the model's *answer* language, decided per task.
 
-Reusable blocks live in [references/prompt-blocks.md](references/prompt-blocks.md).
-Concrete end-to-end templates live in [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md).
-Common failure modes to avoid live in [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md).
+Reusable blocks live in [references/prompt-blocks.md](prompt-blocks.md).
+Concrete end-to-end templates live in [references/codex-prompt-recipes.md](codex-prompt-recipes.md).
+Common failure modes to avoid live in [references/codex-prompt-antipatterns.md](codex-prompt-antipatterns.md).

@@ -10,7 +10,7 @@ allowed-tools: Bash(node:*), Skill
 This streams the job's log as it is produced and returns once the job reaches a
 terminal status (completed / failed / cancelled).
 
-Before any of that output reaches the user, load the `codex-result-handling` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
+Before any of that output reaches the user, load the `codex:codex` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
 
 - If the user passed a job ID, attach to that job (it may belong to another
   workspace — the id is resolved across workspaces when not found locally).
