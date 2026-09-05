@@ -24,6 +24,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   the vendored-drift diff, `npm test`, `build:codex`). Run this before a push; `npm test` alone
   is not the chain, and re-deriving the steps by hand is how a `build:codex` type error reaches
   CI green-locally. Needs the codex CLI on PATH (for `build:codex`'s prebuild).
+- **Read `verify`'s exit code, never its tail.** `npm run verify | tail -n` reports *tail's*
+  exit code, so a chain that failed prints a plausible-looking tail and exits 0 — a red run
+  reads as green, and it has been reported as green here more than once. Run
+  `npm run verify > <log>; echo $?` and grep the log, or read `${PIPESTATUS[0]}`.
 - `npm test` — the test chain only; `package.json` says what it is made of. Run on **Node 24**:
   codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says `>=22.3`, but CI
   pins 24 for this reason — see `.github/workflows/ci.yml`).
@@ -41,6 +45,13 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   else it finds. Don't trust a written-down inventory here; that list is exactly what rots. Same
   for the CHANGELOG: only some plugins keep one, so `ls plugins/<name>/CHANGELOG.md` before you
   assume — that asymmetry is why a bump lands with no entry describing it.
+- **Any content change to a shipped plugin needs a bump — prose-only counts.** Same version
+  number with different content means every installed copy is stale and *nothing signals it*;
+  the install pins a version, so a re-fetch never happens. `fleet` sat four content commits
+  past its last bump and kept routing image generation to a verb `antigravity` had already
+  retired. **The exception is a file the runtime never loads:** a plugin-root `AGENTS.md` /
+  `CLAUDE.md` is repo-development context, not payload behaviour (`claude plugin validate`
+  warns about exactly this), so editing only those needs no bump.
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
