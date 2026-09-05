@@ -29,7 +29,7 @@ preferred AI host so you can:
 - Delegate a fix, investigation, or refactor without leaving your current host.
 - **Hand off** the session to agy with a one-key reflect → handoff → continue loop.
 - Run multiple delegations in parallel with background job tracking that
-  **survives a crashed worker** (a detached watchdog reaps dead/hung jobs).
+  **survives a crashed worker** (a dead PID is reconciled to `failed` on the next read).
 
 ## Where it runs
 
@@ -114,7 +114,7 @@ The suite is **hermetic**: it never spawns the real `agy` or touches your real
 `~/.claude`. Instead it points `CLAUDE_PLUGIN_DATA` at a temp dir and uses a
 fake `agy` (a stub script via `AGY_BIN`). It covers the pure logic (CAS,
 liveness classification, review-JSON parsing) plus
-real-subprocess integration of the worker, the watchdog reaping a dead-PID job,
+real-subprocess integration of the worker, reconciliation of a dead-PID job,
 and each command's self-invoke path. Runs in CI on Node 22.x/24.x.
 
 ## License

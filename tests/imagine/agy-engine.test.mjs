@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { generateWithAgy, agyPrompt, resolveAgyBin, sniffMime, parseArgs, main, ImageError } from "../../plugins/imagine/scripts/imagine.mjs";
 
-const dir = () => mkdtempSync(path.join(tmpdir(), "imagine-agy-"));
+// Deliberately NOT the "imagine-agy-" prefix the engine stages under — the cleanup test
+// counts those, and sharing the prefix would count the test's own scratch dirs.
+const dir = () => mkdtempSync(path.join(tmpdir(), "imagine-test-"));
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("JPEGBYTES")]);
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("PNGBYTES")]);
 
@@ -15,29 +17,41 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 // including whether it writes the file, which is the only thing that counts.
 function fakeAgy(handler) {
   const calls = [];
+  const signals = [];
   const spawnImpl = (bin, args, opts) => {
     calls.push({ bin, args, opts });
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
-    child.kill = () => child.emit("close", null);
+    let ignoreTerm = false;
+    child.kill = (sig) => {
+      signals.push(sig);
+      // A child that ignores SIGTERM only dies on SIGKILL — the escalation has to exist
+      // or this process waits forever on `close`.
+      if (!ignoreTerm || sig === "SIGKILL") child.emit("close", null);
+    };
     setImmediate(() => {
-      const { code = 0, stdout = "", stderr = "", error } = handler({ bin, args, opts }) ?? {};
+      const { code = 0, stdout = "", stderr = "", error, hang = false, ignoresTerm = false } = handler({ bin, args, opts }) ?? {};
+      ignoreTerm = ignoresTerm;
       if (error) return child.emit("error", error);
       if (stdout) child.stdout.emit("data", Buffer.from(stdout));
       if (stderr) child.stderr.emit("data", Buffer.from(stderr));
-      child.emit("close", code);
+      if (!hang) child.emit("close", code);
     });
     return child;
   };
   spawnImpl.calls = calls;
+  spawnImpl.signals = signals;
   return spawnImpl;
 }
+
+// The path agy is told to write to — staging, not the caller's --out.
+const stagedPath = (args) => args[1].match(/at exactly (\S+)\./)[1];
 
 const succeeds = (bytes = JPEG) =>
   fakeAgy(({ args }) => {
     // Mirror the real tool: the path we asked for in the prompt is where the file lands.
-    writeFileSync(args[1].match(/at exactly (\S+)\./)[1], bytes);
+    writeFileSync(stagedPath(args), bytes);
     return { stdout: JSON.stringify({ status: "SUCCESS", response: "done", conversation_id: "cid-1" }) };
   });
 
@@ -88,7 +102,7 @@ test("a missing agy binary says how to fix it rather than dying as ENOENT", asyn
 test("an empty file is not a render", async () => {
   const out = path.join(dir(), "image.jpg");
   const spawnImpl = fakeAgy(({ args }) => {
-    writeFileSync(args[1].match(/at exactly (\S+)\./)[1], "");
+    writeFileSync(stagedPath(args), "");
     return {};
   });
   await assert.rejects(() => generateWithAgy({ prompt: "a cat", out, spawnImpl }), (e) => e instanceof ImageError && /empty/.test(e.message));
@@ -122,10 +136,11 @@ test("the prompt rides in the argv array, never through a shell", async () => {
   assert.equal(args[0], "-p");
   assert.ok(args[1].includes(prompt), "the prompt must reach agy verbatim");
   assert.match(args[1], /AspectRatio "16:9"/);
-  assert.match(args[1], new RegExp(`at exactly ${out.replace(/[.]/g, "\\.")}\\.`), "the absolute path is what stops agy filing it under $HOME");
+  assert.match(args[1], /at exactly \/\S+\.jpg\./, "an absolute path is what stops agy filing it under $HOME");
+  assert.doesNotMatch(args[1], new RegExp(out.replace(/[.]/g, "\\.")), "agy renders into staging, never onto the caller's destination");
   assert.ok(args.includes("--output-format") && args.includes("json"));
   assert.ok(args.includes("--dangerously-skip-permissions"), "a headless run cannot answer a permission prompt");
-  assert.equal(opts.cwd, path.dirname(out), "a relative path from agy must land next to the output, not wherever the caller stood");
+  assert.equal(opts.cwd, path.dirname(stagedPath(args)), "a relative path from agy must land in staging, not in the caller's directory");
   assert.equal(opts.stdio[0], "ignore");
 });
 
@@ -178,4 +193,73 @@ test("sniffMime reads the file's own header, not its name", () => {
   const junk = path.join(d, "b.jpg");
   writeFileSync(junk, "not an image");
   assert.equal(sniffMime(junk), undefined, "an unknown header must not be guessed into a rename");
+});
+
+test("a corrected extension can never land on top of an existing file", async () => {
+  // The defect this pins: --out image.jpg + PNG bytes used to renameSync onto image.png,
+  // a path reserveOut never checked. On POSIX that silently destroys it.
+  const d = dir();
+  const out = path.join(d, "image.jpg");
+  const collision = path.join(d, "image.png");
+  writeFileSync(collision, "SOMEONE ELSE'S WORK");
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, spawnImpl: succeeds(PNG) }),
+    (e) => e instanceof ImageError && /already exists/.test(e.message) && /generated and billed/.test(e.message),
+  );
+  assert.equal(readFileSync(collision, "utf8"), "SOMEONE ELSE'S WORK", "the existing file must survive intact");
+});
+
+test("bytes that are not an image are a failed render, not a surprising one", async () => {
+  // agy writing an error page, HTML, or prose to the path is the failure this engine has
+  // to catch: reporting it as IMAGE_SAVED with exit 0 is the shape the plugin refuses.
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = succeeds(Buffer.from("<html>quota exceeded</html>"));
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, spawnImpl }),
+    (e) => e instanceof ImageError && /not a JPEG or a PNG/.test(e.message),
+  );
+  assert.equal(existsSync(out), false, "nothing may be published from unrecognised bytes");
+});
+
+test("a timeout still honours the file on disk — the render may have finished mid-narration", async () => {
+  // agy has been seen to render and then hang describing it. Rejecting on the timer would
+  // throw away an image the user already paid for.
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(({ args }) => {
+    writeFileSync(stagedPath(args), JPEG);
+    return { hang: true };
+  });
+  const r = await generateWithAgy({ prompt: "a cat", out, spawnImpl, timeoutMs: 20 });
+  assert.equal(r.bytes, JPEG.length);
+  assert.deepEqual(spawnImpl.signals, ["SIGTERM"], "the hung child is killed, not left running");
+});
+
+test("a timeout with no file says so without claiming nothing was spent", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(() => ({ hang: true }));
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, spawnImpl, timeoutMs: 20 }),
+    (e) =>
+      e instanceof ImageError &&
+      /did not finish within/.test(e.message) &&
+      /may still have cost quota/.test(e.message) &&
+      // The old message asserted "Nothing was saved", which it cannot know.
+      !/Nothing was saved/.test(e.message),
+  );
+});
+
+test("a child that ignores SIGTERM is escalated to SIGKILL", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(() => ({ hang: true, ignoresTerm: true }));
+  await assert.rejects(() => generateWithAgy({ prompt: "a cat", out, spawnImpl, timeoutMs: 20 }), (e) => e instanceof ImageError);
+  assert.deepEqual(spawnImpl.signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("staging is cleaned up whichever way the run ends", async () => {
+  const before = readdirSync(tmpdir()).filter((n) => n.startsWith("imagine-agy-")).length;
+  const out = path.join(dir(), "image.jpg");
+  await generateWithAgy({ prompt: "a cat", out, spawnImpl: succeeds() });
+  await assert.rejects(() => generateWithAgy({ prompt: "a cat", out: path.join(dir(), "x.jpg"), spawnImpl: fakeAgy(() => ({ code: 1 })) }));
+  const after = readdirSync(tmpdir()).filter((n) => n.startsWith("imagine-agy-")).length;
+  assert.equal(after, before, "no staging directory may outlive its run");
 });

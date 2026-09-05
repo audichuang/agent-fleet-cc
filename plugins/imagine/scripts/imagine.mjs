@@ -13,7 +13,7 @@
 // the render, on the user's Google login — no xAI credential, no key at all. It is
 // an agent, so its word means nothing here: the run is judged by `statSync(out)`
 // exactly like the HTTP path, and "SUCCESS" with no file is a failure.
-import { lstatSync, mkdtempSync, readFileSync, writeFileSync, renameSync, mkdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { constants, lstatSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, rmSync, mkdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -26,6 +26,8 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 // this backstop only covers a process that hangs without printing.
 const AGY_PRINT_TIMEOUT = "4m";
 const AGY_TIMEOUT_MS = 270_000;
+// SIGTERM, then SIGKILL: a child that ignores the first must not hold this process open.
+const SIGKILL_GRACE_MS = 5_000;
 
 // The API tells us what it actually sent. 2k comes back as PNG, 1k as JPEG —
 // measured, and the single most surprising thing about this endpoint.
@@ -218,14 +220,24 @@ function runAgy({ bin, args, cwd, timeoutMs, spawnImpl }) {
     const child = spawnImpl(bin, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let escalation;
+    // A timeout does NOT reject: agy has been seen to finish the render and then hang
+    // narrating it, and rejecting here would discard an image that is already on disk.
+    // Kill it, then let the caller judge by the file like every other path does.
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill("SIGTERM");
-      reject(new ImageError(`agy did not finish within ${Math.round(timeoutMs / 1000)}s. Nothing was saved; the render may still have consumed quota.`));
+      escalation = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
     }, timeoutMs);
+    const done = () => {
+      clearTimeout(timer);
+      clearTimeout(escalation);
+    };
     child.stdout?.on("data", (c) => (stdout += c.toString("utf8")));
     child.stderr?.on("data", (c) => (stderr += c.toString("utf8")));
     child.on("error", (e) => {
-      clearTimeout(timer);
+      done();
       reject(
         new ImageError(
           e?.code === "ENOENT"
@@ -235,8 +247,8 @@ function runAgy({ bin, args, cwd, timeoutMs, spawnImpl }) {
       );
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      done();
+      resolve({ code, stdout, stderr, timedOut });
     });
   });
 }
@@ -253,48 +265,86 @@ export async function generateWithAgy({
 }) {
   reserveOut(out);
   const abs = path.resolve(out);
-  const args = [
-    "-p",
-    agyPrompt({ prompt, aspect, out: abs }),
-    "--output-format",
-    "json",
-    "--print-timeout",
-    AGY_PRINT_TIMEOUT,
-    // agy needs to write the file where we asked, which is a tool permission it would
-    // otherwise stop and ask for in a headless run. Note what cwd below does NOT do: an
-    // agent whose permissions are skipped can still reach anywhere by absolute path, so
-    // cwd only decides where a RELATIVE path of agy's lands. It is not a fence.
-    "--dangerously-skip-permissions",
-  ];
-  const { code, stdout, stderr } = await runAgy({ bin: agyBin, args, cwd: path.dirname(abs), timeoutMs, spawnImpl });
-
-  // The receipt is the file, never the JSON — an agent reporting success it did not
-  // achieve is the exact failure mode this plugin refuses to inherit. The response text
-  // is only ever quoted back as the reason a missing file is missing.
-  let saved;
+  // agy renders into a private staging directory, never straight onto the destination.
+  // The real extension is only knowable once the bytes exist, and correcting `.jpg` to
+  // `.png` in place would rename over a `.png` that reserveOut never looked at — the xAI
+  // path's "never clobber" promise, quietly broken. Staging also means a second
+  // invocation cannot hand us its file as our receipt.
+  const stage = mkdtempSync(path.join(tmpdir(), "imagine-agy-"));
+  const staged = path.join(stage, "image.jpg");
   try {
-    saved = statSync(abs);
-  } catch {
-    const said = (() => {
-      try {
-        return JSON.parse(stdout)?.response ?? "";
-      } catch {
-        return stdout;
-      }
-    })();
-    const tail = (said || stderr || "").trim().replace(/\s+/g, " ").slice(0, 300);
-    throw new ImageError(
-      `agy exited ${code} but wrote no file at ${abs}. ` +
-        `Its generate_image tool saves into ~/.gemini/antigravity-cli/brain/<conversation-id>/ first, so a render may be there. ` +
-        (tail ? `agy said: ${tail}` : "agy said nothing."),
-    );
-  }
-  if (saved.size === 0) throw new ImageError(`agy wrote an empty file at ${abs}`);
+    const args = [
+      "-p",
+      agyPrompt({ prompt, aspect, out: staged }),
+      "--output-format",
+      "json",
+      "--print-timeout",
+      AGY_PRINT_TIMEOUT,
+      // agy needs to write the file where we asked, which is a tool permission it would
+      // otherwise stop and ask for in a headless run. Note what cwd below does NOT do: an
+      // agent whose permissions are skipped can still reach anywhere by absolute path, so
+      // cwd only decides where a RELATIVE path of agy's lands. It is not a fence.
+      "--dangerously-skip-permissions",
+    ];
+    const { code, stdout, stderr, timedOut } = await runAgy({ bin: agyBin, args, cwd: stage, timeoutMs, spawnImpl });
 
-  const mimeType = sniffMime(abs);
-  const target = outPathFor(abs, mimeType);
-  if (target !== abs) renameSync(abs, target);
-  return { out: target, bytes: saved.size, model: "agy/generate_image", mimeType, renamed: target !== abs };
+    // The receipt is the file, never the JSON — an agent reporting success it did not
+    // achieve is the exact failure mode this plugin refuses to inherit. The response text
+    // is only ever quoted back as the reason a missing file is missing.
+    let saved;
+    try {
+      saved = statSync(staged);
+    } catch {
+      const said = (() => {
+        try {
+          return JSON.parse(stdout)?.response ?? "";
+        } catch {
+          return stdout;
+        }
+      })();
+      const tail = (said || stderr || "").trim().replace(/\s+/g, " ").slice(0, 300);
+      if (timedOut) {
+        throw new ImageError(
+          `agy did not finish within ${Math.round(timeoutMs / 1000)}s and left no image. The render may still have cost quota. ` +
+            (tail ? `agy said: ${tail}` : "agy printed nothing before it was killed."),
+        );
+      }
+      throw new ImageError(
+        `agy exited ${code} but wrote no file. ` +
+          `Its generate_image tool saves into ~/.gemini/antigravity-cli/brain/<conversation-id>/ first, so a render may be there. ` +
+          (tail ? `agy said: ${tail}` : "agy said nothing."),
+      );
+    }
+    if (saved.size === 0) throw new ImageError("agy wrote an empty file");
+
+    // Unknown bytes are a failed render, not an image with a surprising type. Letting
+    // them through would put HTML or an error page behind an IMAGE_SAVED line and a zero
+    // exit — the shape this whole plugin exists to refuse.
+    const mimeType = sniffMime(staged);
+    if (!mimeType) {
+      throw new ImageError(
+        `agy wrote ${saved.size} bytes that are not a JPEG or a PNG. Treating that as a failed render rather than reporting junk as an image.`,
+      );
+    }
+
+    const target = outPathFor(abs, mimeType);
+    try {
+      // COPYFILE_EXCL publishes through an O_EXCL create: it cannot clobber, and it
+      // cannot be raced. This is where `--out image.jpg` + PNG bytes stops being able to
+      // land on top of someone's image.png.
+      copyFileSync(staged, target, constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error?.code === "EEXIST") {
+        throw new ImageError(
+          `${target} already exists — refusing to overwrite. The image was generated and billed; re-run with a different --out to keep it.`,
+        );
+      }
+      throw new ImageError(`the image was generated and billed, but could not be written to ${target}: ${error?.message ?? error}`);
+    }
+    return { out: target, bytes: saved.size, model: "agy/generate_image", mimeType, renamed: target !== abs };
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
 }
 
 const FLAGS = { "--out": "out", "--prompt-file": "promptFile", "--aspect": "aspect", "--model": "model", "--resolution": "resolution", "--quality": "quality", "--engine": "engine" };

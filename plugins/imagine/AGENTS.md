@@ -31,9 +31,16 @@ plugin 移除,不留重複入口。
 
 - **prompt 走 argv array,不經 shell。** `spawn(bin, [...])` 沒有 word splitting、沒有引號剝除、
   沒有 here-document 可關 —— 這是 `--prompt-file` 那條規則的同一個理由,不是例外。
-- **wrapper prompt 一定要給絕對路徑**,而且**副檔名照位元組修正**(和 xAI 那條同一個承諾)。
-  為什麼(agy 的落檔行為、`--dangerously-skip-permissions` 與 cwd 為何不是沙箱、tool 參數、
-  無 key 實測、重跑 recipe)全在 `docs/imagine-agy-image-audit.md` —— 學到新東西改那份,別在此重抄。
+- **agy 一律寫進 staging,不直接寫 `--out`。** 副檔名要看到位元組才知道,直接落地再改名等於
+  在 `reserveOut` 沒檢查過的路徑上覆寫;發布用 `COPYFILE_EXCL`(O_EXCL create,不可覆寫、
+  不可 race),保住 xAI 那條 `wx` 的同一個承諾。
+- **認不出的位元組 = 失敗的 render**,不是「型別意外的圖」。放行 HTML 或錯誤頁就等於在
+  `IMAGE_SAVED` 後面掛 exit 0 —— 這顆 plugin 存在就是為了不做這件事。
+- **timeout 不搶在磁碟檢查前面。** agy 會生完圖再卡在講話;timeout 只負責殺(SIGTERM →
+  SIGKILL),判定仍然看檔案。錯誤訊息不准說「什麼都沒存」,它不知道。
+- **wrapper prompt 一定要給絕對路徑**。為什麼(agy 的落檔行為、`--dangerously-skip-permissions`
+  與 cwd 為何不是沙箱、tool 參數、無 key 實測、重跑 recipe)全在
+  `docs/imagine-agy-image-audit.md` —— 學到新東西改那份,別在此重抄。
 - **`--model` / `--resolution` / `--quality` 在 agy 上直接 exit 2**,不能默默吃掉:被丟掉的
   `--model` 是一張使用者沒要求、卻照樣付錢的圖。
 

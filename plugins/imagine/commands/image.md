@@ -73,10 +73,14 @@ Bash({
 ```
 
 Same flags, same output line, same `--prompt-file` rule — the script hands the prompt to agy
-in an argv array, so nothing about it ever reaches a shell. `--aspect` is passed through to
-the tool's own `AspectRatio` parameter; the script asks agy for a JPEG at the exact path and
-then **checks that path itself**, so an agy that reports success without rendering fails here
-with agy's own words quoted back. Give it a longer timeout than the xAI path: it is a whole
+in an argv array, so nothing about it ever reaches a shell. `--aspect` is passed through to the
+tool's own `AspectRatio` parameter.
+
+agy renders into a private staging directory, never onto `--out`. The script then checks the
+bytes itself — size, then magic number — and only publishes to the destination if they are a
+real image, through a create that cannot overwrite. So an agy that reports success without
+rendering fails here with its own words quoted back, and a corrected extension can never land
+on top of a file you already had. Give it a longer timeout than the xAI path: it is a whole
 agent turn, ~30s in practice.
 
 `AGY_BIN` overrides the binary; otherwise it comes off PATH.
@@ -121,8 +125,15 @@ With `--engine agy` the model column reads `agy/generate_image` and the failures
   blind.
 - **"agy is not installed"** → the Antigravity CLI is not on PATH. Install it, set `AGY_BIN`, or
   drop `--engine agy`.
-- **a timeout** → the script's own backstop, after agy's `--print-timeout`. Nothing was saved and
-  the render may still have cost quota.
+- **"bytes that are not a JPEG or a PNG"** → agy wrote something else at the path (an error
+  page, prose). Treated as a failed render rather than reported as an image.
+- **a timeout** → the script's own backstop, after agy's `--print-timeout`. It kills the run
+  (SIGTERM, then SIGKILL) but **still checks the file first** — agy has been seen to finish the
+  render and then hang narrating it, so a timeout can still succeed. Only when there is no file
+  does it fail, and it says the render may still have cost quota rather than claiming nothing
+  was spent.
+- **"already exists — refusing to overwrite"** on the agy path → the image was generated; the
+  destination (possibly with a corrected extension) was taken. Re-run with a different `--out`.
 
 The agy path runs with `--dangerously-skip-permissions`, because a headless run has nobody to
 answer a permission prompt. The script sets `cwd` to the output directory so a relative path of

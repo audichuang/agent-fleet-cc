@@ -1,5 +1,28 @@
 # imagine — changelog
 
+## 0.2.1
+
+Closes an independent review of 0.2.0. Every item was a way the agy path could still report a
+failure as a success, or destroy something on the way to reporting one.
+
+- **agy now renders into a private staging directory, never onto `--out`.** The extension is
+  only knowable once the bytes exist, and correcting `.jpg` to `.png` in place renamed over a
+  `.png` that the pre-flight check never looked at — on POSIX, silently. Publishing now goes
+  through `COPYFILE_EXCL`: an `O_EXCL` create that cannot clobber and cannot be raced by a
+  second invocation. The xAI path's `wx` promise now holds on both engines.
+- **Bytes that are not a JPEG or a PNG are a failed render.** `sniffMime` returning nothing
+  used to mean "keep the caller's filename" — so an error page or prose written to the path came
+  back as `IMAGE_SAVED` with exit 0. That is the exact shape this plugin exists to refuse.
+- **A timeout no longer pre-empts the disk check.** agy has been seen to finish the render and
+  then hang narrating it; rejecting on the timer threw away an image the user had already paid
+  for. The timeout now kills the run (SIGTERM, then SIGKILL for a child that ignores it) and
+  still judges by the file. Its message no longer claims "Nothing was saved" — it cannot know
+  that.
+- Doc corrections from the same review: 0.2.0 said `--prompt-file` was the *only* transport
+  (positional and stdin still work — every shipped command and doc uses the file), and
+  `docs/imagine-agy-image-audit.md` listed four of agy's other tool names, which this repo's
+  own rule against enumerating an engine's runtime catalog forbids.
+
 ## 0.2.0
 
 **A second engine: `--engine agy`.** The same command now renders through Google Antigravity's
@@ -19,8 +42,9 @@ CLI as well as xAI — `node scripts/imagine.mjs --engine agy --prompt-file p.tx
   renders into. That is the guard that lets this plugin drive an agent without repeating the
   `/grok:image` failure it was built to escape — deleting the `statSync` turns four tests red.
 - **The prompt still never reaches a shell.** It rides in an argv array (`spawn`, no shell), so
-  quotes, a stray heredoc delimiter and `$(…)` are all inert. `--prompt-file` remains the only
-  transport into the script.
+  quotes, a stray heredoc delimiter and `$(…)` are all inert. Every shipped command and doc
+  uses `--prompt-file`; a positional prompt and bare stdin still work for a caller that already
+  holds one safely.
 - **`--dangerously-skip-permissions`, with `cwd` set to the output directory.** A headless run
   cannot answer a permission prompt. The cwd is there so a relative path of agy's lands where we
   expect; it is **not** a sandbox, and the docs say so rather than implying the flag is fenced.

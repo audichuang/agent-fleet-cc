@@ -99,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section (still OAuth-only as of 1.1.5).
 - **Full-verb real-engine re-verification on agy 1.1.5** (basis for the above): review,
   adversarial-review, rescue `--prompt-file`/`--continue`, `--apply` (writes land in job cwd),
-  no-`--apply` (job cwd untouched), image (Imagen file recovered), setup, plus the
+  no-`--apply` (job cwd untouched), image (generated file recovered), setup, plus the
   wait/cancel/timeout/missing exit-code contract (0/2/10/1) — all pass. Plugin AGENTS.md now
   notes upstream 1.1.5 claims headless honors `settings.json` policies, so the 1.1.2
   "global deny still writes" observation must be re-verified before being cited.
@@ -192,7 +192,7 @@ hermetic test suite.
 ### Added
 
 - **`/antigravity:image`** — generate images with agy's built-in `generate_image`
-  (Imagen); recovers the saved path from an `IMAGE_PATH:` marker (last-wins,
+  ; recovers the saved path from an `IMAGE_PATH:` marker (last-wins,
   with a scrape fallback) and optionally copies it to `--output`.
 - **`/antigravity:handoff`** — reflect → write a handoff document to the OS temp
   dir → hand it to agy to continue → bring the response back (`--print` to only

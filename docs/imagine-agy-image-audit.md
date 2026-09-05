@@ -24,9 +24,10 @@ machine on the date stated. Nothing here is documented by Google.
 
 ## Part 1 — Image generation is built in, and is not MCP
 
-`generate_image` is one of `agy`'s own tools, alongside `invoke_subagent`, `send_message`,
-`manage_subagents` and `define_subagent` — the 1.1.13 changelog entry fixes how all five *render
-in the tool group*, so the tool predates that release; it was not added in it.
+`generate_image` is one of `agy`'s own built-in tools. A 1.1.13 changelog entry fixes how it
+renders in the tool group, so it predates that release rather than arriving in it —
+`agy changelog | grep -in generate_image` is the check, and the CLI's own `--help` / changelog
+stay the authority on what else it ships.
 
 What it is **not**, checked on the same machine:
 

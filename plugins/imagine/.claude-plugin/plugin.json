@@ -1,5 +1,5 @@
 {
   "name": "imagine",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Generate images with xAI Grok Imagine or Google Antigravity (agy) — verified output path, prompt-craft guidance, no API key needed on the agy path"
 }

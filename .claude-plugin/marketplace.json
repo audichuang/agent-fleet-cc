@@ -20,7 +20,7 @@
     {
       "name": "antigravity",
       "source": "./plugins/antigravity",
-      "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, and hand off work — with a liveness watchdog and cross-process-safe job state.",
+      "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, and hand off work — with cross-process-safe job state and dead-PID reconciliation.",
       "version": "0.7.0",
       "author": {
         "name": "audichuang"
@@ -51,7 +51,7 @@
       "name": "imagine",
       "source": "./plugins/imagine",
       "description": "Generate images from Claude Code with xAI Grok Imagine or Google Antigravity (agy) — prompt-craft guidance and a verified path on disk, whichever engine renders it.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "audichuang"
       }
