@@ -31,7 +31,7 @@ All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Cl
 | `result` | Prints the final output of a completed job by id. |
 | `cancel` | Sends SIGTERM to a running worker by job id. |
 | `wait`   | Waits for a background job to reach a terminal state. Returns exit code 10 when the wait times out. |
-| `logs`   | Shows or follows the persisted job log. This is stdout/job-log only; agy `--print` does not expose live tool events. |
+| `logs`   | Shows or follows the persisted job log. Job-log only: the plugin invokes plain `agy --print`, whose text output carries no tool events. (agy does have `--output-format stream-json`, which does emit them — this plugin does not use it.) |
 
 ## Model
 
@@ -66,9 +66,10 @@ agy turn. Anything likely to run longer belongs in `--background`, which returns
 immediately and is not bounded by either.
 
 A foreground run that does die still leaves a job record: it is created before the worker
-starts. It can read `running` until something calls the dead-pid reconcile, which `status`,
-`logs` and `wait` each do on their next read — so `$antigravity status` is where a cut-off run
-resolves, and a killed call is not the same as a lost turn.
+starts. It can read `running` until something calls the dead-pid reconcile, which every read command
+does on its next read — `status`, `logs`, `wait`, `result` and `cancel`. So `$antigravity status`
+(or any of the other four) is where a cut-off run resolves, and a killed call is not the same as
+a lost turn.
 
 ## Auth requirements
 

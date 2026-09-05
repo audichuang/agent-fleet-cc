@@ -209,11 +209,32 @@ describe('foreground timeout guidance', () => {
     // honest-looking move is to report a failed review, which is wrong.
     for (const rel of ['agents/agy-rescue.md', 'SKILL.md']) {
       const body = read(rel);
-      assert.match(body, /reconcile/i, `${rel} must say what finalizes the record`);
+      // Scope to the sentence, not the file. Two earlier versions of this guard
+      // asserted `/antigravity:status/` and `` /`result`/ `` against the whole
+      // document and both were vacuous: the background-dispatch bullet already
+      // mentions the status command, and the "Do not call" list already contains
+      // `result`. Every token worth asserting here appears somewhere else in these
+      // files, so a document-wide match proves nothing.
+      // Chunk by bullet or paragraph, because the two files wrap differently: the
+      // agent keeps each rule on one long line, SKILL.md hard-wraps mid-sentence, so
+      // a per-LINE search finds the reconcile in one and misses its other half in the
+      // other. Splitting before `- ` and on blank lines gives the same unit in both.
+      const line = body
+        .split(/\n(?=- )|\n\n/)
+        .find((chunk) => /reconcileDeadPids|dead-pid reconcile/.test(chunk));
+      assert.ok(line, `${rel} must say what finalizes a cut-off run's record`);
       assert.match(
-        body,
+        line,
         /antigravity:status|\$antigravity status/,
-        `${rel} must name where a cut-off run resolves`,
+        `${rel}: the reconcile sentence must name where the run resolves`,
+      );
+      // The set has to be the real one. result and cancel reconcile too
+      // (result.mjs, cancel.mjs), so a three-command list walks the reader past two
+      // places that would have shown them the finalized record.
+      assert.match(
+        line,
+        /`result`/,
+        `${rel}: result reconciles too — a three-command list is wrong`,
       );
     }
   });

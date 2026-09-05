@@ -49,7 +49,8 @@ commands:
     description: "Show or follow the persisted log for an agy job."
 
 # Auth notes (surfaced via SKILL.md too):
-# - agy is OAuth-only (still true as of 1.1.5) — no API-key auth path. The very
+# - agy is OAuth-only — no API-key auth path (version last confirmed against is in
+#   docs/antigravity-cli-contract-audit.md). The very
 #   first `$antigravity` invocation in a new account will block on an OAuth
 #   URL printed to stdout. Run `$antigravity setup` once, follow the URL in
 #   a browser, then re-issue the original command.

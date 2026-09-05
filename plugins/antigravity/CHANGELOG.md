@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`AGY_PRINT_TIMEOUT_MS` / `AGY_JOB_TIMEOUT_MS`) that move it.
 - **A killed foreground call read as a lost turn.** `runForeground` creates the job record
   before it starts the worker, so a run cut off by either timeout — or by the host — left a
-  record behind. It can still read `running` until a dead-pid reconcile, which only
-  `status` / `logs` / `wait` trigger. Both surfaces now say so and point at
+  record behind. It can still read `running` until a dead-pid reconcile, which every read command triggers
+  (`status`, `logs`, `wait`, `result`, `cancel`). Both surfaces now say so and point at
   `/antigravity:status`, instead of leaving "report a failed review" as the obvious move.
 - **`/antigravity:adversarial-review` had no stop-rule.** `review.md` has carried "do not make
   any code changes based on the review findings; ask which to address first" since it was
@@ -50,13 +50,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The skill description dropped its "Survives the June 18, 2026 gemini-cli sunset" clause. The
   sunset is a past event; nobody is deciding around it, and the description is long.
 
+### Notes from the review round on these fixes
+- **The reconcile set was wrong in all three places it was written.** `status`, `logs` and
+  `wait` are not the only commands that trigger the dead-pid sweep — `result.mjs:71` and
+  `cancel.mjs:41` call it too. A three-command list walks the reader past two places that would
+  have shown them the finalized record. Corrected in the agent, `SKILL.md` and above.
+- **`agents/openai.yaml` still carried `(still true as of 1.1.5)`.** This plugin's own
+  `AGENTS.md` warns that verb behaviour has five prose owners and names that file as one of
+  them; the first pass fixed `SKILL.md` and missed it. Unpinned to match.
+- **`SKILL.md`'s `logs` row said agy `--print` cannot expose live tool events.** agy now has
+  `--output-format stream-json`, which does. The row is true of what the plugin actually runs —
+  plain `--print`, text output — so it now says that instead of making a claim about the engine.
+- **agy moved 1.1.19 → 1.1.27 during the session that wrote this entry.** That is the
+  self-update this plugin's `AGENTS.md` warns about, and it is the argument for everything
+  above: a version pinned in shipped prose is stale before the change describing it is even
+  committed.
+
 ### Notes
 - Guards added in `tests/antigravity/agent-contract.test.mjs`, each mutation-checked. The
   timeout guard pins the doc against `DEFAULT_PRINT_TIMEOUT_MS` itself, so moving the constant
-  without moving the prose goes red. The first version of that guard was vacuous — it matched
-  any occurrence of "five minutes", and the file explains the number a paragraph below the rule,
-  so switching the rule back to ten stayed green. It now anchors on the dispatch sentence and
-  tolerates markdown emphasis.
+  without moving the prose goes red.
+- **Three of these guards had to be written three times**, and the failure was the same each
+  time: a document-wide `assert.match` on a token that also appears elsewhere in the file. The
+  status command is named in the background-dispatch bullet; `` `result` `` is in the "Do not
+  call" list; "five minutes" appears in the explanation a paragraph below the rule it was meant
+  to protect. Each guard passed while the thing it guarded was deleted. They now chunk the
+  document by bullet or paragraph first and assert within the one chunk — which also has to
+  handle the two files wrapping differently, since the agent keeps a rule on one long line and
+  `SKILL.md` hard-wraps mid-sentence. **In these doc-contract tests, a whole-file match on a
+  common token is the default failure mode, not an edge case.**
 - The engine contract audit (`docs/antigravity-cli-contract-audit.md`) is still pinned to
   `agy 1.1.5`; the installed binary is 1.1.19. Re-running that recipe is its own pass and was
   deliberately not folded in here.
