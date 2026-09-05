@@ -1,6 +1,6 @@
 ---
 name: antigravity
-description: Use Google Antigravity CLI (agy) for code review, adversarial review, debugging, long-running task delegation, or large-context investigation. Hands off to agy's large-context window when the host wants a second opinion or a background pass instead of solving the task file-by-file. Survives the June 18, 2026 gemini-cli sunset by depending only on the agy binary.
+description: Use Google Antigravity CLI (agy) for code review, adversarial review, debugging, long-running task delegation, or large-context investigation. Hands off to agy's large-context window when the host wants a second opinion or a background pass instead of solving the task file-by-file.
 allowed-tools: Bash, Glob, Read
 ---
 
@@ -46,6 +46,25 @@ switch off the default, and one stalled call can wedge the session so later call
 hang too. If you must override the model, stay on a Gemini Flash variant — 3.6 Flash
 (`gemini-3.6-flash-medium` / `-high`) is verified fast and clean in `--print`, including via
 the plugin's background job path (real agy 1.1.5, 2026-07-22).
+
+## Timeouts — foreground dies at about five minutes
+
+A foreground verb (`review`, `adversarial-review`, `rescue`, `task --foreground`) is bounded by
+**agy's own print-mode timeout, which defaults to 5 minutes**, and the plugin passes it through
+(`DEFAULT_PRINT_TIMEOUT_MS` in `scripts/lib/adapter.mjs`). A Node-side backstop sits one minute
+later on purpose, so the engine always times out first and you get a clean error instead of a
+killed process. Override either with `AGY_PRINT_TIMEOUT_MS` / `AGY_JOB_TIMEOUT_MS`.
+
+Judge against five minutes, not against whatever ceiling the calling host has — under Claude
+Code the Bash tool's ten-minute limit is the looser of the two and will never be what stops an
+agy turn. Anything likely to run longer belongs in `--background`, which returns a job id
+immediately and is bounded by neither.
+
+A foreground run that does die still leaves a job record: it is created before the worker
+starts. It can read `running` until something calls the dead-pid reconcile, which every read
+command does on its next read — `status`, `logs`, `wait`, `result` and `cancel`. So
+`$antigravity status` (or any of the other four) is where a cut-off run resolves, and a killed
+call is not the same as a lost turn.
 
 ## Auth requirements
 

@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-09-05
+
+Scoped deliberately narrow: the SKILL.md model-catalog de-rot that an earlier cut of this work
+also attempted lives on `antigravity/catalog-rot-and-partial-output`, which does it better —
+it found that agy 1.1.10 fixed `--model` being *silently ignored in headless `-p` runs*, which
+means the 1.1.5 "a Pro tier stalls in `--print`" observation was never attributable to the
+model at all. Repeating that de-rot here would have duplicated it worse and conflicted on the
+same lines, so this release leaves the Model section untouched.
+
+### Fixed
+- **The foreground timeout guidance named the wrong bound, by a factor of two.**
+  `agents/agy-rescue.md` told the model to background anything "likely to keep agy running past
+  ten minutes", attributing the rule to the Bash tool's ceiling. agy's own print-mode timeout is
+  5m (`DEFAULT_PRINT_TIMEOUT_MS`, passed through by the plugin) with the Node backstop
+  deliberately one minute later so the engine always times out first — so a foreground turn dies
+  at roughly five minutes and the host's ceiling is never what stops it. A model judging by ten
+  leaves a seven-minute task in the foreground to be killed. The rule is an engine property, not
+  a host dispatch policy, and both the agent and `SKILL.md` now say so and name the env knobs
+  (`AGY_PRINT_TIMEOUT_MS` / `AGY_JOB_TIMEOUT_MS`).
+- **A killed foreground call read as a lost turn.** `runForeground` creates the job record
+  before it starts the worker, so a cut-off run is recoverable — but it can read `running` until
+  a dead-pid reconcile, which every read command triggers (`status`, `logs`, `wait`, `result`,
+  `cancel`). Both surfaces now say so, instead of leaving "report a failed review" as the
+  obvious move.
+- **`/antigravity:adversarial-review` had no stop-rule.** `review.md` has carried "do not make
+  any code changes based on the review findings; ask which to address first" since it was
+  written; the adversarial verb never did — and it is the surface used on code about to ship,
+  where auto-applying a finding is worst.
+- **The same file described `--sandbox` as a write guard** ("agy runs under `--sandbox` so the
+  review cannot mutate the tree"), which this plugin's `AGENTS.md` forbids in as many words: it
+  is an nsjail *terminal* container that blocks shell commands, not `write_file`, and the model
+  can opt out per call. `README.md` already said "read-only **by instruction**"; this file was
+  the one that drifted. A guard now sweeps every prose surface for the claim.
+
+### Notes
+- Guards in `tests/antigravity/agent-contract.test.mjs`, each mutation-checked. The timeout
+  guard pins the prose against `DEFAULT_PRINT_TIMEOUT_MS` itself, so moving the constant without
+  moving the docs goes red.
+- **Three of those guards had to be written three times**, same failure each time: a
+  document-wide `assert.match` on a token that also appears elsewhere in the file. The status
+  command is named in the background-dispatch bullet; `` `result` `` is in the "Do not call"
+  list; "five minutes" appears in the explanation a paragraph below the rule it guards. Each
+  passed while the guarded text was deleted. They now chunk the document by bullet or paragraph
+  and assert within the one chunk — which also has to survive the two files wrapping
+  differently, since the agent keeps a rule on one long line and `SKILL.md` hard-wraps. **In
+  these doc-contract tests a whole-file match on a common token is the default failure mode,
+  not an edge case.**
+- agy moved 1.1.19 → 1.1.27 during the session that wrote this entry — the background
+  self-update `AGENTS.md` warns about, and the argument for keeping versions out of shipped
+  prose: a pinned number is stale before the change describing it is committed.
+
 ## [0.7.0] — 2026-09-05
 
 ### Removed
