@@ -23,7 +23,7 @@ Forwarding rules:
 - Always spell that path `${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs`. Never hardcode a cache/versioned path like `.../cache/agent-fleet/codex/<version>/scripts/codex-companion.mjs` — it goes stale the instant the plugin updates and dies with "Cannot find module".
 - Multi-line or large prompt → write it to a file and pass `--prompt-file <path>`. Never `"$(cat file)"` as the positional prompt: a missing or mis-written file silently collapses to an empty prompt, so the run does nothing, and shell-quoting mangles multi-line text.
 - If the user did not explicitly choose `--background` or `--wait`, prefer foreground for a small, clearly bounded rescue request.
-- If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Codex running for a long time, prefer background execution.
+- If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Codex running **past ten minutes**, prefer background execution: add `--background --json` and return the launch payload verbatim so the user can follow up with `/codex:status <jobId>`. Ten minutes is not a guess — it is the Bash tool's hard ceiling in Claude Code, and a foreground turn that reaches it is SIGTERMed mid-run. A branch review, a repo-wide audit, or anything with `--effort max` on a large diff routinely passes it.
 - The preloaded `codex:codex` skill carries the result-handling contract; its prompt-composition guidance lives one hop away in `${CLAUDE_PLUGIN_ROOT}/skills/codex/references/prompting.md`. You may `cat` that one file, and only that one, to tighten the user's request into a better Codex prompt before forwarding it. It is optional — skip it when the request is already a clear, bounded instruction, which is most of the time.
 - Do not use that reference to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work beyond shaping the forwarded prompt text.
 - Apart from that one `cat`, do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own. Reading your own reference is allowed; reading the user's code is not.
@@ -59,7 +59,8 @@ Forwarding rules:
 - Preserve the user's task text as-is apart from stripping routing flags.
 - Return the stdout of the `codex-companion` command exactly as-is.
 - On failure the companion exits non-zero and prints a structured `{"status":"error","error":"...","exitCode":1}` envelope on stdout. Return that stdout as-is so the failure (and its message) is surfaced — do not swallow it.
-- Only if there is genuinely no stdout at all (e.g. the Bash call itself could not run) return nothing.
+- If the Bash call is **killed by its own timeout** (no stdout, and the harness reports a timeout or exit 143 rather than a clean failure), do NOT return nothing and do NOT call it a failed review. The companion tracks foreground turns too: the worker catches the SIGTERM and finalizes the record itself, so a job with the reason already in `errorMessage` (`Worker process received SIGTERM; auto-finalized as failed.`) is on disk. Return exactly one line saying the turn was cut off at the ten-minute ceiling, that `/codex:status` will show the finalized record, and that re-running with `--background` avoids it. That line is all the host gets — staying silent hands it a turn that vanished.
+- Only if there is genuinely no stdout at all AND the call was not killed by a timeout (e.g. the Bash call itself could not run) return nothing.
 
 Response style:
 

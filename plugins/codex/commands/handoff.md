@@ -62,6 +62,8 @@ Foreground (default):
 node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --prompt-file "$TMPFILE" [--write]
 ```
 - Return Codex's output verbatim. Do not paraphrase, summarize, or add commentary. Clean up the temp file after completion.
+- **The foreground call has a ten-minute ceiling** — the Bash tool's, not Codex's. A turn that reaches it is SIGTERMed mid-run and you get no stdout. Before sending, judge whether this prompt can finish inside it: a review of a whole branch, a repo-wide audit, or anything at `--effort max` over a large diff routinely cannot, and those should go to `/codex:task --background` (a durable tracked job) rather than here.
+- **If the call IS killed at that ceiling, do not report a failed or empty review.** The companion finalizes the record itself when the worker catches the SIGTERM, so the reason is already on disk (`Worker process received SIGTERM; auto-finalized as failed.`). Say the turn was cut off at the ten-minute ceiling, point at `/codex:status`, and offer to re-run it as `/codex:task --background`.
 
 Background (when `--background` is present):
 ```typescript

@@ -180,7 +180,9 @@ test("rescue command absorbs continue semantics", () => {
   assert.match(agent, /--fresh/);
   assert.match(agent, /thin forwarding wrapper/i);
   assert.match(agent, /prefer foreground for a small, clearly bounded rescue request/i);
-  assert.match(agent, /If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Codex running for a long time, prefer background execution/i);
+  // Was pinned to "for a long time" — the vague wording that gave a model no threshold
+  // and let a real branch review go foreground into the SIGTERM. Pin the number instead.
+  assert.match(agent, /If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Codex running \*\*past ten minutes\*\*, prefer background execution/i);
   // Was /Use exactly one `Bash` call/ — prose the body already contradicted two lines
   // later, where a multi-line prompt is told to go through a written `--prompt-file`.
   // The real invariant is one `task` run per handoff, not one Bash call.
@@ -429,6 +431,44 @@ test("status surfaces render the status report, not the stored result", () => {
 // hand-rolled YAML rule: an unquoted value can be broken by a `: `, a ` #`, or a leading
 // `*`, and a guard that has to enumerate those fails in both directions. One safe
 // representation has no grammar to get wrong.
+// Found by USING the plugin, not by reading it: a foreground `task` review was
+// SIGTERMed at exactly ten minutes and the calling model saw exit 143 with no stdout.
+// The control plane was fine — the worker caught the signal and finalized the record
+// with "Worker process received SIGTERM; auto-finalized as failed." — but nothing
+// model-facing said a record existed, and the agent's own rule ("return nothing" when
+// there is no stdout) made it silent on exactly that shape. Same class as 1.6.1, one
+// level up: correct state is not the same as state the caller can see.
+//
+// Two halves, and the second is the one that was missing everywhere, including in
+// antigravity's agent, which does name the ceiling:
+//   - PREVENTION: name the number. "a long time" gives a model no threshold to judge
+//     against, and this is a hard harness limit, not a Codex property.
+//   - RECOVERY: a killed call is not a failed review. The reason is already on disk.
+test("the long-run dispatch surfaces name the ten-minute ceiling and what to do after it", () => {
+  for (const file of ["agents/codex-rescue.md", "commands/handoff.md"]) {
+    const body = read(file);
+    assert.match(body, /ten[- ]minute|ten minutes/i, `${file} must name the actual ceiling, not "a long time"`);
+    assert.match(
+      body,
+      /SIGTERM/,
+      `${file} must say the record is finalized on the kill, or a killed call reads as a lost turn`
+    );
+    assert.match(
+      body,
+      /\/codex:status/,
+      `${file} must point at where the finalized record can be read`
+    );
+  }
+  // The agent's silence rule has to carve out the timeout case, or the recovery text
+  // above is unreachable — the rule fires first and returns nothing.
+  const agent = read("agents/codex-rescue.md");
+  assert.match(
+    agent,
+    /no stdout at all AND the call was not killed by a timeout/i,
+    "the return-nothing rule must exempt a timeout kill, or it silences the recovery"
+  );
+});
+
 test("codex-rescue keeps a quoted description and tells the host how to present its output", () => {
   const agent = read("agents/codex-rescue.md");
   const parts = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(agent);
