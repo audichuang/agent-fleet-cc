@@ -20,5 +20,5 @@ from a review is forbidden even when the fix looks obvious. `/codex:review` and
 `/codex:adversarial-review` carry this rule inline; this verb surfaces the same findings for a
 stored job and was missing it. The fuller presentation contract (evidence boundaries, failed-run
 handling, never substituting a Claude-side answer when Codex was not actually invoked) is the
-`codex-result-handling` skill — consult it via the `Skill` tool when relaying anything more than
+`codex:codex` skill — consult it via the `Skill` tool when relaying anything more than
 a status line.

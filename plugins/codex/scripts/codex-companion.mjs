@@ -92,7 +92,7 @@ const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "hi
 // Default to the explicit `gpt-5.6-sol` slug (frontier tier). Use the explicit
 // slug, not the `gpt-5.6` family alias — the alias is not resolvable on
 // ChatGPT-account Codex (400). Pass --model gpt-5.6-terra to trade capability for
-// cost. See the gpt-5-6-prompting skill for model-selection guidance.
+// cost. See skills/codex/references/prompting.md for model-selection guidance.
 function resolveDefaultModel() {
   const fromEnv = process.env.CODEX_DEFAULT_MODEL?.trim();
   return fromEnv || "gpt-5.6-sol";
@@ -563,9 +563,11 @@ async function executeReviewRun(request) {
         stdout: result.reviewText,
         stderr: result.stderr,
         // The render needs the reason too, or a failed review that still captured
-        // review text prints as a finished one. No hadAgentMessage gate here:
-        // reviewText comes only from an exitedReviewMode item, never from the error
-        // text, so it can never BE the reason (see renderNativeReviewResult).
+        // review text prints as a finished one. This site never needed the body
+        // comparison the other two do (1.6.0 spelled that as a `hadAgentMessage`
+        // gate, removed in 1.6.2): reviewText comes only from an exitedReviewMode
+        // item, never from the error text, so it can never BE the reason
+        // (see renderNativeReviewResult, which checks anyway).
         errorMessage
       },
       { reviewLabel: reviewName, targetLabel: target.label, reasoningSummary: result.reasoningSummary }
@@ -634,10 +636,12 @@ async function executeReviewRun(request) {
       reviewLabel: reviewName,
       targetLabel: context.target.label,
       reasoningSummary: result.reasoningSummary,
-      // Same gate as executeTaskRun: a turn that returned a VALID review JSON and then
-      // died parses cleanly and would otherwise render a clean verdict. Only pass the
-      // reason when there was a real agent message to distinguish it from.
-      ...(result.hadAgentMessage ? { errorMessage } : {})
+      // Unconditional, same as executeTaskRun: a turn that returned a VALID review JSON
+      // and then died parses cleanly and would otherwise render a clean verdict.
+      // `reviewFailureLines` does its own body comparison — a different, narrower check
+      // than `renderNativeReviewResult`'s `distinct`, which also weighs stderr — so
+      // gating here only prevented that comparison from ever running.
+      errorMessage
     }),
     summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.finalMessage, errorMessage ?? `${reviewName} finished.`),
     // Structured failure reason (same contract as executeTaskRun) so a failed
@@ -695,12 +699,13 @@ async function executeTaskRun(request) {
     {
       rawOutput,
       failureMessage,
-      // The render needs the structured reason too: a failed turn that still produced
-      // a PARTIAL answer would otherwise render as a plain successful answer. Only then:
-      // with no agent message, resolveFinalMessage (codex.mjs) already fell back to the
-      // turn error text, so rawOutput IS the reason and prefixing it prints it twice.
-      // The job record + --json payload keep errorMessage unconditionally (status/wait).
-      ...(result.hadAgentMessage ? { errorMessage } : {}),
+      // Pass the structured reason unconditionally. renderTaskResult decides how to
+      // state it: it compares the reason against the body and drops to a bare marker
+      // when they are the same text, which is the check this used to approximate with
+      // `result.hadAgentMessage`. That proxy withheld the reason on exactly the two
+      // shapes where nothing else carried it — see renderTaskResult, which also carries
+      // the containment ceiling this comparison inherits.
+      errorMessage,
       reasoningSummary: result.reasoningSummary
     },
     {

@@ -1,12 +1,7 @@
----
-name: gpt-5-6-prompting
-description: Internal guidance for composing GPT-5.6 / Codex prompts for coding, review, diagnosis, research, and handoff tasks inside the Codex Claude Code plugin
-user-invocable: false
----
-
 # GPT-5.6 Prompting
 
-Use this skill when composing a prompt for Codex / GPT-5.6 — both when `codex:codex-rescue` delegates a `task`, and when `/codex:handoff` produces a prompt for the user to paste into Codex.
+Use this reference when composing a prompt for Codex / GPT-5.6 — both when `codex:codex-rescue` delegates a `task`, and when `/codex:handoff` builds one — which by default it sends to Codex and returns the answer;
+`--print` is the path that hands the prompt back for the user to paste.
 
 GPT-5.6 works best with **outcome-first** prompts: define the target outcome, success criteria, constraints, and available context, then leave the model room to choose the path. Do not carry over process-heavy instruction stacks from older models — they add noise, narrow the search space, and produce mechanical answers.
 
@@ -14,19 +9,28 @@ GPT-5.6 works best with **outcome-first** prompts: define the target outcome, su
 
 Route by **how much thinking is left** — these are three different jobs, not three sizes of one job.
 
-| Model | Job | In / Out ($/1M) | Route here when |
-| --- | --- | --- | --- |
-| **gpt-5.6-sol** | **thinker** (default) | $5.00 / $30.00 | The work still needs figuring out: planning, hard diagnosis, long autonomous runs, high-stakes review — or the blast radius is large even when the change is small. |
-| **gpt-5.6-terra** | **executor** | $2.00 / $12.00 | The plan is settled, but carrying it out is still substantial. |
-| **gpt-5.6-luna** | **ticket-runner** | $0.20 / $1.20 | The work fits on a **ticket**: one bounded change, spelled out, nothing left to decide. |
+| Model | Job | Route here when |
+| --- | --- | --- |
+| **gpt-5.6-sol** | **thinker** (default) | The work still needs figuring out: planning, hard diagnosis, long autonomous runs, high-stakes review — or the blast radius is large even when the change is small. |
+| **gpt-5.6-terra** | **executor** | The plan is settled, but carrying it out is still substantial. |
+| **gpt-5.6-luna** | **ticket-runner** | The work fits on a **ticket**: one bounded change, spelled out, nothing left to decide. |
 
-**Luna always runs at `--effort max`.** Its capability is an effort curve, not a fixed number — ≈27 on the Artificial Analysis index with reasoning off, ≈51 at `max`, which is near-`sol` on bounded agentic work. The cheap tokens are the saving; the thinking still has to be bought.
+Cost tracks that order — `sol` is the expensive tier and `luna` the cheap one, by a wide margin
+— but **route by which job it is, not by price**. This file quotes no numbers on purpose: a
+written-down price table reads authoritative and rots invisibly the first time OpenAI reprints
+its pricing, and nothing in the repo would go red. For current prices, check OpenAI's pricing
+page; for which slugs and reasoning levels an account can actually reach, the authority is the
+catalog itself (`/codex:setup` probes `model/list`; the offline read is in
+`docs/codex-protocol-sync-audit.md`), which carries slugs, visibility and per-model effort
+levels but **no prices**.
+
+**Luna always runs at `--effort max`.** Its capability is an effort curve, not a fixed number: with reasoning off it is far below the other two, and at `max` it approaches `sol` on bounded agentic work. The cheap tokens are the saving; the thinking still has to be bought.
 
 **One ticket per run.** A queue of tickets is N Luna runs, not one prompt carrying all N — separate runs stay inside what Luna is good at, and each can go `--background` in parallel. Bundling them lands on the weak spots below instead.
 
-**Needle-hunting in a huge context and GUI/computer-use go to `sol`:** Luna measures ~41% on MRCR v2 at 512K–1M (`sol` ~74%) and ~46% on OSWorld 2.0.
+**Needle-hunting in a huge context and GUI/computer-use go to `sol`:** those are Luna's two measured weak spots, and the gap is large enough to change the routing decision rather than merely shade it.
 
-All three share a 1.05M-token context window, 128K max output, and text+image input. Prices are the 2026-07-30 cut (Luna −80%, Terra −20%, Sol unchanged); Codex's own catalog maps `gpt-5.4-mini` → `gpt-5.6-luna`. Always pass an explicit slug, and say which you chose and why when it isn't the default.
+All three take text+image input and share the same large context window. Always pass an explicit slug, and say which you chose and why when it isn't the default.
 
 > Not every Codex version/account is gated into 5.6 yet. `/codex:setup` probes the account's `model/list` and warns (without blocking) when the configured default isn't available, pointing the user to `codex update` or a `CODEX_DEFAULT_MODEL` override.
 
@@ -50,7 +54,7 @@ Most delegations here cast Codex as an **independent, multi-angle reviewer** —
 - **Use `ALWAYS` / `NEVER` / `must` only for true invariants** — safety, required output fields, actions that must never happen. For judgment calls (when to search, ask, use a tool, keep iterating) write **decision rules** instead.
 - **Define autonomy and permissions once.** GPT-5.6 is proactive; state what a request authorizes in one compact policy (safe local actions without asking; confirm for external writes, destructive actions, or scope expansion). Do not repeat "ask first" / "do not mutate" throughout — repetition causes needless permission checks.
 - **Always include stop rules.** GPT-5.6 will loop; tell it when to stop. Example: "After each result, ask: can I answer the user's core request now with cited evidence? If yes, answer."
-- **Reasoning effort: default `xhigh`, floor `high`.** The companion defaults `--effort` to `xhigh` when unset. For the substantial coding / review / diagnosis work this plugin delegates, keep effort in the **`high` → `xhigh` → `max`** band — don't drop to `low` / `minimal` / `none`, they buy nothing for these tasks. **`max`** is the top tier the companion accepts (above `xhigh`); on `sol` / `terra` reserve it for the hardest quality-first tasks and compare it against `xhigh` rather than reaching for it by reflex — `luna` is the standing exception (see Model selection). (Codex's catalog also advertises an `ultra` tier on `sol` / `terra` — the companion deliberately does not accept it, because it triggers proactive multi-agent delegation that this single-agent runner can't observe. Don't pass it. `luna` doesn't offer it at all.)
+- **Reasoning effort: default `xhigh`, floor `high`.** The companion defaults `--effort` to `xhigh` when unset. For the substantial coding / review / diagnosis work this plugin delegates, keep effort in the **`high` → `xhigh` → `max`** band — don't drop to the low end of the scale, it buys nothing for these tasks. The set the companion accepts is `VALID_REASONING_EFFORTS` in `scripts/codex-companion.mjs`; which of them a given model actually offers is per-model, so ask the catalog rather than assuming. **`max`** is the top tier the companion accepts (above `xhigh`); on `sol` / `terra` reserve it for the hardest quality-first tasks and compare it against `xhigh` rather than reaching for it by reflex — `luna` is the standing exception (see Model selection). (Codex's catalog also advertises an `ultra` tier on `sol` / `terra` — the companion deliberately does not accept it, because it triggers proactive multi-agent delegation that this single-agent runner can't observe. Don't pass it. `luna` doesn't offer it at all.)
 - **Give it a way to check its work** when validation is possible — targeted unit tests for changed behavior, type/lint checks, build checks, or a minimal smoke test. If validation can't run, say why and give the next best check.
 - **Tool routing: parallelise independent reads, keep dependent ones sequential, and don't stop at the first empty result.** Expose only task-relevant tools, and say what each is for when the route depends on context. If a search / read returns empty, partial, or suspiciously narrow results, try one or two meaningful fallbacks before concluding nothing exists.
 - **Ground factual claims.** Define what needs support, what counts as enough evidence, and what to do when evidence is missing (absence of evidence is not a factual "no"). Add a retrieval budget for search-capable tasks.
@@ -70,7 +74,7 @@ Most delegations here cast Codex as an **independent, multi-angle reviewer** —
 - Use `task` when the task is diagnosis, planning, research, or implementation and you need to control the prompt directly.
 - Use `task --resume-last` for a follow-up on the same Codex thread — send only the delta instruction unless the direction changed materially.
 
-Choosing the **delivery path** (direct `task` · `--resume-last` · the `codex:codex-rescue` subagent · a conversation fork) is a separate decision from choosing the model, with its own measured costs and one naming trap: [references/delivery-paths.md](references/delivery-paths.md).
+Choosing the **delivery path** (direct `task` · `--resume-last` · the `codex:codex-rescue` subagent · a conversation fork) is a separate decision from choosing the model, with its own measured costs and one naming trap: [references/delivery-paths.md](delivery-paths.md).
 
 ## Suggested structure
 
@@ -97,6 +101,6 @@ Role: [1-2 sentences: the model's function, context, and job]
 
 > The user's-language rule here is a **deliberate product choice** — the handoff prompt is read by the human user. It is not the blanket "always respond in the user's language" the official guide warns against; that concerns the model's *answer* language, decided per task.
 
-Reusable blocks live in [references/prompt-blocks.md](references/prompt-blocks.md).
-Concrete end-to-end templates live in [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md).
-Common failure modes to avoid live in [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md).
+Reusable blocks live in [references/prompt-blocks.md](prompt-blocks.md).
+Concrete end-to-end templates live in [references/codex-prompt-recipes.md](codex-prompt-recipes.md).
+Common failure modes to avoid live in [references/codex-prompt-antipatterns.md](codex-prompt-antipatterns.md).

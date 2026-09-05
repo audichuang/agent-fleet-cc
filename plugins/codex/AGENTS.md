@@ -38,6 +38,9 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `attach` 都 user-run(`disable-model-invocation`)—— 別假設 `/codex:task` 能自呼叫。
 - **動到 app-server 相關型別 → 跑 `npm run build:codex`**(`tsc`,對 generated types +
   `lib/app-server-protocol.d.ts`);為何 `npm test` 不涵蓋、CI 卻會紅,見 root Conventions。
+- **只有一顆 skill(`codex`)**,1.6.2 起。body 是 9 個 command 的熱路徑(result-handling 契約),
+  細節一律放 `skills/codex/references/`,並在 SKILL.md 的表格裡掛一行 —— `tests/codex/commands.test.mjs`
+  同時釘住「只有一顆」與「表格 ↔ references/ 完全對齊」。要加第二顆先問為什麼。
 - **NOT dual-host**(無 `.codex-plugin/`)—— 不像 cc / agy;bump 只動 plugin.json ↔ marketplace。
 
 ## 踩雷
@@ -47,22 +50,42 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 - broker 是持久共用的(一次一個 turn、idle 5s 自關),不是每次 spawn;改 broker / turn-ack / idle /
   watchdog 時,event-ordering 測試偶爾 flaky(root gotcha),re-run 一次確認。
 - **`resolveSandboxMode` 忽略它自己的參數**,每個 thread 都是 `danger-full-access` +
-  `approvalPolicy: "never"`(`lib/codex.mjs`,經 buildThreadParams / buildResumeParams;被
-  `tests/codex/sandbox-mode.test.mjs` 釘住)。這是**刻意的**:這個 fork 的目標主機起不了 Codex 的
+  `approvalPolicy: "never"`(`lib/codex.mjs`,經 buildThreadParams / buildResumeParams)。
+  **釘住的只有純函式 `resolveSandboxMode` 本身**(`tests/codex/sandbox-mode.test.mjs`)——
+  真正把值送上 wire 的 `buildThreadParams` / `buildResumeParams` 沒有 export,fake fixture 的
+  `thread/start` / `thread/resume` **原本也完全不看這兩個欄位**(還回一個跟送出去相反的寫死值)。
+  1.6.2 讓 fixture 把收到的 params 記成 `wireStart` / `wireResume`,`tests/codex/sandbox-wire.test.mjs`
+  就對那份反查;動這條路徑時看那支。
+  **值本身**是**刻意的**:這個 fork 的目標主機起不了 Codex 的
   bwrap,連唯讀 turn 都會 abort。後果是 **`--write` 只是 job metadata,不給任何隔離** —— 少給它
   什麼都沒關住。四個 prose surface 曾經同時把這件事寫錯(暗示省略 `--write` 就等於唯讀),所以改
   任何講 sandbox / 唯讀的文案前先看這條。真要強制:`CODEX_SANDBOX_MODE=read-only`,且只在 bwrap
   起得來的主機上。
 - **預設模型 `gpt-5.6-sol` 對 ChatGPT 帳號會間歇被 400**(「requires a newer version of Codex」,同模型
-  多數時候可用)。turn 失敗**是 RETURN 不是 throw**,失敗原因有兩種形狀(獨立 `error` notification 與
-  terminal `turn/completed` 的 `turn.error`)—— 兩者都要灌進結構化 `errorMessage`(`failureReasonFor`),
-  否則 `--json`/status 只剩裸「failed」。**但結構化狀態對了 ≠ 使用者看得到**:`--json`、`wait`、
-  `status` 一直都帶著失敗,而 slash command 實際列印的那兩條 render 路徑(`renderTaskResult`、
-  `renderStoredJobResult`)曾經只回裸輸出 —— 於是一個「吐了半個答案才死」的 turn 被當成完成的答案
-  交出去(`commands/task.md` 叫 Claude 原封不動轉述那份 stdout)。修法靠 `runAppServerTurn` 回傳的
-  **`hadAgentMessage`**:為真才把原因加在部分答案前面;為假時 `finalMessage` **本身就是**那個錯誤,
-  再加前綴會變成「Codex turn failed: Codex turn failed: …」。動 render 或動這個旗標時,兩種形狀都要
-  各驗一次。model-unavailable 會**自動單次重試降 `gpt-5.6-terra`**
+  多數時候可用)。turn 失敗**是 RETURN 不是 throw**,失敗原因有**三種**形狀:獨立 `error`
+  notification、terminal `turn/completed` 的 `turn.error`、以及 terminal turn **既非 completed
+  也不帶 error**(`buildResultStatus` 把任何非 `"completed"` 都算失敗;第三種 1.6.2 才補上,
+  fixture 的 `interrupted-no-error`)。三者都要灌進結構化 `errorMessage`(`failureReasonFor`,
+  它在任何失敗上都回非空字串),否則 `--json`/status 只剩裸「failed」。
+  **但結構化狀態對了 ≠ 使用者看得到**:`--json`、`wait`、`status` 一直都帶著失敗,而 slash command
+  實際列印的那幾條 render 路徑(`renderTaskResult`、`renderStoredJobResult`、`renderReviewResult`)
+  曾經只回裸輸出 —— 於是一個「吐了半個答案才死」的 turn 被當成完成的答案交出去
+  (`commands/task.md` 叫 Claude 原封不動轉述那份 stdout)。
+  **判別式是「body 是不是已經就是那個原因」,不是「有沒有 agent message」。**
+  1.6.0 用 `runAppServerTurn` 的 `hadAgentMessage` 當代理,1.6.2 拆掉了:那個旗標兩個方向都錯 ——
+  沒有 agent message 但 `turn.error.message` 是真的(裸 `401 Unauthorized`)時它扣住原因、印出來
+  完全沒有失敗標記;沒有 agent message 又沒有輸出時它讓 render 掉進 `failureMessage`(broker
+  transport 上恆為 `""`),死掉的 turn 印成「Codex did not return a final message.」。
+  現在 `errorMessage` 無條件傳給 render,由 render 自己比對 body,相同就退成裸標記
+  (`reviewFailureLines` / `renderTaskResult` / `renderStoredJobResult` 三處同一套)。
+  **`hadAgentMessage` 已從 `codex.mjs` 刪除**(1.6.2;拿掉最後一個讀者之後,一個看起來還活著的
+  欄位就是陷阱本身)—— 別再拿它當判準,也別因為看到舊文件提到它就重新加回去。
+  **這個比較有天花板,是刻意接受的**:`describeTurnError` 會給原因接上 ` [codexErrorInfo]` 或
+  ` — additionalDetails`,body 沒有,所以 `includes` 必然 miss、兩者近似重複(不是 1.6.0 那種
+  字面雙前綴)。理由見 `render.mjs` 的 `ponytail:` 註解:沒有資訊遺失,而放寬比對會有吞掉真正
+  不同原因的風險。`tests/codex/turn-error-surfacing.test.mjs` 的 `decorated-turn-error` 把這個
+  天花板釘成一條會咬的斷言,改比對邏輯它就會變。動 render 時**三種形狀都要各驗一次**。
+  model-unavailable 會**自動單次重試降 `gpt-5.6-terra`**
   (`isModelUnavailableFailure` + `runWithModelFallback`,可見:progress line + payload `modelFallback`);
   偵測刻意保守,別把 auth/rate-limit 也吃進 fallback。
 - **`context: fork` 別碰**(issue #234)。forked general-purpose subagent **沒有 `Agent` tool**,
@@ -71,8 +94,12 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `doesNotMatch(/^context:\s*fork\b/m)`。名字很像但機制不同的另兩個(`/subtask`、`/fork`)見下面
   delivery-paths。
 - **`codex-rescue` 一次 spawn ~20K tokens**(實測 `subagent_tokens: 20732`,一次 trivial 轉發)。
-  成因:`skills:` frontmatter 會**預載技能全文**,不只 description —— 兩顆 skill + agent body ≈ 4.8K
-  固定成本,每次 spawn 都付。它買到的是 proactive discovery 與 `tools: Bash` 圍欄,**不是** context
+  成因:`skills:` frontmatter 會**預載技能全文**,不只 description。那個數字是 1.6.1 量的,當時預載兩顆
+  skill(`codex-cli-runtime` + `gpt-5-6-prompting`)+ agent body ≈ 4.8K 固定成本。**1.6.2 收成一顆
+  `codex` skill**:runtime 契約併回 agent body(本來就 ~90% 重複),prompting 降級成 references/ 靠
+  `cat` 取用,所以固定成本只剩一份短 skill body + agent body。**20K 那個數字還沒對 1.6.2 重測**,
+  當上界看;agent system prompt 與工具定義才是大頭,別預期等比例下降。
+  這筆錢買到的是 proactive discovery 與 `tools: Bash` 圍欄,**不是** context
   隔離(隔離本來就由 Codex 自己的 context 提供,主線兩條路收到的位元組一樣,因為 agent 被明文禁止摘要)。
   一批 ticket 走主線直接 `task` 就好,別 N × 20K。要調的話 frontmatter 還有 `effort` / `maxTurns`
   沒用 —— 但 `maxTurns` 會夾死 `--prompt-file` 那條(寫檔 + task + 收尾 = 3 turns 起),別設 2。
@@ -84,7 +111,7 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 
 ## 細節指向
 - 交付路徑選型(直接 `task` · `--resume-last` · subagent · conversation fork)含實測成本與 fork 命名
-  陷阱:`skills/gpt-5-6-prompting/references/delivery-paths.md`。
+  陷阱:`skills/codex/references/delivery-paths.md`。
 - protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。
-- 寫 GPT-5.6 prompt:`gpt-5-6-prompting` skill(本 plugin 內);worktree 驗證合約見
+- 寫 GPT-5.6 prompt:`skills/codex/references/prompting.md`;worktree 驗證合約見
   `lib/worktree-guard.mjs`、設計見 `docs/superpowers/plans/2026-06-21-worktree-cwd-guard.md`。

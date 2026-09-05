@@ -10,10 +10,10 @@ Raw slash-command arguments:
 `$ARGUMENTS`
 
 First, load the prompt methodology:
-- Use the `gpt-5-6-prompting` skill (via the `Skill` tool) and follow it when composing the prompt: outcome-first, success criteria, decision rules instead of blanket `ALWAYS`/`NEVER`, explicit stop rules, absolute file paths, and the suggested structure (`Role` / `Goal` / `Success criteria` / `Constraints` / `Output` / `Stop rules`).
+- Load the `codex:codex` skill (via the `Skill` tool) and read its `references/prompting.md` when composing the prompt; follow it: outcome-first, success criteria, decision rules instead of blanket `ALWAYS`/`NEVER`, explicit stop rules, absolute file paths, and the suggested structure (`Role` / `Goal` / `Success criteria` / `Constraints` / `Output` / `Stop rules`).
 
 Then, before Codex's answer reaches the user:
-- Load the `codex-result-handling` skill (via the `Skill` tool) and follow it when presenting the response. Load it at the moment the output comes back, not at the end — by then the tempting next move (quietly fixing what Codex flagged) has usually already happened. It carries the stop-rule that review findings are never auto-fixed, and the rule that a failed run is reported rather than replaced with an answer of your own.
+- Load the `codex:codex` skill (via the `Skill` tool) and follow it when presenting the response. Load it at the moment the output comes back, not at the end — by then the tempting next move (quietly fixing what Codex flagged) has usually already happened. It carries the stop-rule that review findings are never auto-fixed, and the rule that a failed run is reported rather than replaced with an answer of your own.
 
 ## Step 1 — build the prompt
 
@@ -29,12 +29,12 @@ When there is no task text, build a prompt that asks Codex to **review the work 
    - `git --no-pager diff --stat --cached` for staged work
    - `git --no-pager log --oneline -10` and `git --no-pager diff <base>...HEAD` if the work is committed on a branch
    Combine that with what you did in this conversation (the intent, the decisions, the trade-offs).
-2. Compose a **code-review** prompt using the `gpt-5-6-prompting` methodology and the code-review recipe: a senior-engineer Role, a Goal of finding bugs / contract violations / maintainability / security issues, Success criteria (file:line + severity, fix snippets, "no issues found in X" when clean), Constraints (don't pad, mark "Need to verify"), and Stop rules.
+2. Compose a **code-review** prompt using the `references/prompting.md` methodology and the code-review recipe: a senior-engineer Role, a Goal of finding bugs / contract violations / maintainability / security issues, Success criteria (file:line + severity, fix snippets, "no issues found in X" when clean), Constraints (don't pad, mark "Need to verify"), and Stop rules.
 3. List the changed files as **absolute paths** under a "Files to read" section, and tell Codex to read them itself (do NOT ask anyone to paste code). Add a one-paragraph "Context" describing what this change set was trying to achieve and any decisions worth challenging.
 
 ### Mode B — with a task: build a prompt for that task
 
-Treat the remaining text as the task. Identify the task type (code review, document/design analysis, research/grounded answer, rewrite, or agentic/tool-heavy) and build the matching prompt from the `gpt-5-6-prompting` recipes, tailoring the sections to that type. Pull in relevant absolute file paths from the conversation or repo.
+Treat the remaining text as the task. Identify the task type (code review, document/design analysis, research/grounded answer, rewrite, or agentic/tool-heavy) and build the matching prompt from `references/codex-prompt-recipes.md`, tailoring the sections to that type. Pull in relevant absolute file paths from the conversation or repo.
 
 ## Step 2 — send it (default) or print it
 
@@ -62,6 +62,8 @@ Foreground (default):
 node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --prompt-file "$TMPFILE" [--write]
 ```
 - Return Codex's output verbatim. Do not paraphrase, summarize, or add commentary. Clean up the temp file after completion.
+- **The foreground call has a ten-minute ceiling** — the Bash tool's, not Codex's. A turn that reaches it is SIGTERMed mid-run and you get no stdout. Before sending, judge whether this prompt can finish inside it: a review of a whole branch, a repo-wide audit, or anything at `--effort max` over a large diff routinely cannot, and those should go to `/codex:task --background` (a durable tracked job) rather than here.
+- **If the call IS killed at that ceiling, do not report a failed or empty review.** The companion finalizes the record itself when the worker catches the SIGTERM, so the reason is already on disk (`Worker process received SIGTERM; auto-finalized as failed.`). Say the turn was cut off at the ten-minute ceiling, point at `/codex:status`, and offer to re-run it as `/codex:task --background`.
 
 Background (when `--background` is present):
 ```typescript
@@ -77,5 +79,5 @@ Bash({
 ## Operating rules
 
 - Default is to **run Codex and return the response** — the one-key "reflect → ask Codex → bring it back" loop. Only `--print`/`--prompt-only` skips the run.
-- Do not fix or act on Codex's response yourself; just return it. The user decides what to do next. This is the `codex-result-handling` stop-rule; load that skill when the response arrives rather than relying on this line.
+- Do not fix or act on Codex's response yourself; just return it. The user decides what to do next. This is the `codex:codex` skill's stop-rule; load it when the response arrives rather than relying on this line.
 - Clean up the temp prompt file after Codex finishes (foreground) or note its path (background).

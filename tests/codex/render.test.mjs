@@ -195,3 +195,114 @@ test("renderStoredJobResult does not prefix a status header onto a completed job
 
   assert.equal(output, "All done.\n");
 });
+
+// 1.6.2 made renderReviewResult's two FAILURE branches state the failure. Nothing
+// pinned them: deleting either `...reviewFailureLines(...)` line left the whole codex
+// suite green, because the e2e test that looks like it covers this only counts how many
+// times the reason appears — a count that is equally satisfied when no marker is printed
+// at all. These are the direct guards.
+//
+// The branches matter because a review that died still prints a body: the parse-error
+// branch echoes the raw final message, and a reader handed that verbatim (every review
+// command relays this output) has no way to tell a dead turn from a Codex that simply
+// returned malformed JSON.
+test("renderReviewResult marks a failure on the parse-error branch", () => {
+  const output = renderReviewResult(
+    { parsed: null, parseError: "Unexpected token o in JSON at position 1", rawOutput: "not json at all" },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: "429 rate limit [usageLimitExceeded]" }
+  );
+
+  assert.match(output, /Codex review failed/);
+  assert.match(output, /429 rate limit/, "the reason is distinct from the body, so state it");
+  assert.match(output, /not json at all/, "the raw body is still shown below");
+});
+
+test("renderReviewResult marks a failure on the invalid-shape branch", () => {
+  const output = renderReviewResult(
+    { parsed: { verdict: "ship it" }, rawOutput: '{"verdict":"ship it"}' },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: "stream disconnected" }
+  );
+
+  assert.match(output, /Codex review failed/);
+  assert.match(output, /stream disconnected/);
+});
+
+// The other half of the same rule: when the body already IS the reason, say it once.
+// Without this, a fix for the two tests above could just prefix unconditionally and
+// reintroduce 1.6.0's doubling on the shape that motivated the gate in the first place.
+test("renderReviewResult does not restate a reason the body already carries", () => {
+  const reason = "Codex turn failed: 401 Unauthorized";
+  const output = renderReviewResult(
+    { parsed: null, parseError: "not JSON", rawOutput: reason },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: reason }
+  );
+
+  assert.match(output, /Codex review failed\./, "a bare marker, not a header restating the body");
+  assert.equal(
+    (output.match(/401 Unauthorized/g) ?? []).length,
+    1,
+    "the reason is the body here; a header repeating it says the same sentence twice"
+  );
+});
+
+// A successful review must render byte-identically to before 1.6.2 — errorMessage is
+// null at status 0, and the caller now passes it unconditionally, so this is the guard
+// that the unconditional pass changed nothing on the success path.
+test("renderReviewResult adds no failure marker when there is no reason", () => {
+  const output = renderReviewResult(
+    { parsed: null, parseError: "not JSON", rawOutput: "some text" },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: null }
+  );
+
+  assert.doesNotMatch(output, /Codex review failed/);
+});
+
+// Codex's independent review found this one, and it is the branch the earlier round had
+// waved through as "nothing to compare against". True of the RAW output — this branch
+// never echoes it — but not of the rendered body: `summary` and every finding body are
+// model-written text, so a review whose summary quotes the failure it observed gets the
+// reason printed twice, once as the header and once as its own summary.
+//
+// The fix compares against the assembled body, not `parsedResult.rawOutput`. Those are
+// different fixes and only one is right here: rawOutput is not what this branch prints,
+// and using it would let a verdict that merely quotes the error suppress a header the
+// reader needs.
+test("renderReviewResult does not restate a reason its own summary already carries", () => {
+  const reason = "401 Unauthorized";
+  const output = renderReviewResult(
+    {
+      parsed: {
+        verdict: "fail",
+        summary: `The turn ended with 401 Unauthorized before review completed.`,
+        findings: [],
+        next_steps: []
+      }
+    },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: reason }
+  );
+
+  assert.match(output, /Codex review failed/, "the failure must still be marked");
+  assert.equal(
+    (output.match(/401 Unauthorized/g) ?? []).length,
+    1,
+    "the summary already carries the reason; a header restating it says it twice"
+  );
+});
+
+// The other direction, so the fix above cannot be "always suppress the header": when the
+// body does NOT carry the reason, the reader has no other way to learn the review came
+// from a dead turn, so the full header must survive.
+test("renderReviewResult still states a reason its body does not carry", () => {
+  const output = renderReviewResult(
+    {
+      parsed: { verdict: "pass", summary: "No material issues found.", findings: [], next_steps: [] }
+    },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: "stream disconnected" }
+  );
+
+  assert.match(output, /Codex review failed: stream disconnected/);
+  assert.ok(
+    output.indexOf("Codex review failed") < output.indexOf("No material issues found."),
+    "the failure must sit above the verdict, or a verbatim paste reads as a clean review"
+  );
+});

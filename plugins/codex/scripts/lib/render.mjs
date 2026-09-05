@@ -241,13 +241,23 @@ export function renderSetupReport(report) {
 }
 
 // A FAILED review must not render as a finished one — same rule, and the same
-// distinct-reason gate, as renderTaskResult. The caller passes meta.errorMessage ONLY
-// when the turn produced a real agent message: with none, `finalMessage` IS the error
-// text (codex.mjs resolveFinalMessage), which the "Raw final message:" block below
-// already prints, so a header would say the same sentence twice.
-function reviewFailureLines(meta) {
+// State the failure once, the rule renderNativeReviewResult applies: with no agent
+// message `finalMessage` IS the error text (codex.mjs resolveFinalMessage), and the
+// "Raw final message:" block below prints it, so a header restating it says the same
+// sentence twice. `body` is whatever that branch is about to print.
+//
+// This used to be enforced by the CALLER withholding meta.errorMessage whenever
+// `result.hadAgentMessage` was false. That proxy answered a different question — "was
+// there an agent message?" rather than "is the body already the reason?" — and on the
+// shapes where it guessed wrong nothing else carried the failure at all.
+function reviewFailureLines(meta, body = "") {
   const reason = String(meta?.errorMessage ?? "").trim();
-  return reason ? [`Codex review failed: ${reason}`, ""] : [];
+  if (!reason) {
+    return [];
+  }
+  return String(body ?? "").includes(reason)
+    ? ["Codex review failed.", ""]
+    : [`Codex review failed: ${reason}`, ""];
 }
 
 export function renderReviewResult(parsedResult, meta) {
@@ -255,7 +265,7 @@ export function renderReviewResult(parsedResult, meta) {
     const lines = [
       `# Codex ${meta.reviewLabel}`,
       "",
-      ...reviewFailureLines(meta),
+      ...reviewFailureLines(meta, parsedResult.rawOutput),
       "Codex did not return valid structured JSON.",
       "",
       `- Parse error: ${parsedResult.parseError}`
@@ -275,7 +285,7 @@ export function renderReviewResult(parsedResult, meta) {
     const lines = [
       `# Codex ${meta.reviewLabel}`,
       "",
-      ...reviewFailureLines(meta),
+      ...reviewFailureLines(meta, parsedResult.rawOutput),
       `Target: ${meta.targetLabel}`,
       "Codex returned JSON with an unexpected review shape.",
       "",
@@ -293,10 +303,15 @@ export function renderReviewResult(parsedResult, meta) {
 
   const data = normalizeReviewResultData(parsedResult.parsed);
   const findings = [...data.findings].sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
-  const lines = [
-    `# Codex ${meta.reviewLabel}`,
-    "",
-    ...reviewFailureLines(meta),
+
+  // Assemble the body BEFORE the failure line, so the line can be compared against
+  // everything that will actually be printed. This branch has no raw echo, which is why
+  // the comparison was originally skipped here — but the reason can land in `summary` or
+  // a finding body just as easily, and then the header restates it. Comparing against
+  // `parsedResult.rawOutput` instead would be wrong twice over: it is not what this
+  // branch prints, and a verdict that merely quotes the error would suppress a header
+  // the reader needs.
+  const body = [
     `Target: ${meta.targetLabel}`,
     `Verdict: ${data.verdict}`,
     "",
@@ -305,25 +320,32 @@ export function renderReviewResult(parsedResult, meta) {
   ];
 
   if (findings.length === 0) {
-    lines.push("No material findings.");
+    body.push("No material findings.");
   } else {
-    lines.push("Findings:");
+    body.push("Findings:");
     for (const finding of findings) {
       const lineSuffix = formatLineRange(finding);
-      lines.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
-      lines.push(`  ${finding.body}`);
+      body.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
+      body.push(`  ${finding.body}`);
       if (finding.recommendation) {
-        lines.push(`  Recommendation: ${finding.recommendation}`);
+        body.push(`  Recommendation: ${finding.recommendation}`);
       }
     }
   }
 
   if (data.next_steps.length > 0) {
-    lines.push("", "Next steps:");
+    body.push("", "Next steps:");
     for (const step of data.next_steps) {
-      lines.push(`- ${step}`);
+      body.push(`- ${step}`);
     }
   }
+
+  const lines = [
+    `# Codex ${meta.reviewLabel}`,
+    "",
+    ...reviewFailureLines(meta, body.join("\n")),
+    ...body
+  ];
 
   appendReasoningSection(lines, meta.reasoningSummary);
 
@@ -376,13 +398,41 @@ export function renderNativeReviewResult(result, meta) {
 
 export function renderTaskResult(parsedResult, meta) {
   const rawOutput = typeof parsedResult?.rawOutput === "string" ? parsedResult.rawOutput : "";
+  // `errorMessage` comes from `failureReasonFor`, which returns null on success and a
+  // definite string on every failure. So its presence IS the failure signal and the
+  // caller does not have to decide whether to withhold it. It used to be gated on
+  // `result.hadAgentMessage` — a proxy for "is the body itself the reason?" that was
+  // wrong in both directions: with no agent message and a real `turn.error.message`
+  // ("401 Unauthorized"), the reason was withheld and the bare error printed as if it
+  // were an answer; with no agent message AND no output, this fell through to
+  // `failureMessage`, which is empty on the broker transport, and a dead turn rendered
+  // as "Codex did not return a final message."
+  const failureReason = String(parsedResult?.errorMessage ?? "").trim();
+
   if (rawOutput) {
     const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
-    // A failed turn that still produced an agent message must NOT render as a plain
-    // answer: `commands/task.md` tells Claude to return this stdout verbatim, so the
-    // failure reason has to sit ABOVE the partial output or the failure vanishes.
-    const failureReason = String(parsedResult?.errorMessage ?? "").trim();
-    return failureReason ? `Codex turn failed: ${failureReason}\n\n${output}` : output;
+    if (!failureReason) {
+      return output;
+    }
+    // State the failure once. With no agent message `resolveFinalMessage` fell back to
+    // the turn error text, so the body is USUALLY the reason and repeating it above
+    // prints the same sentence twice. `commands/task.md` tells Claude to relay this
+    // stdout verbatim, so the marker has to be here either way — what varies is whether
+    // the reason is worth restating.
+    // ponytail: same ceiling as renderStoredJobResult below — `describeTurnError`
+    // decorates the reason with a `[codexErrorInfo]` tag or an ` — additionalDetails`
+    // tail that the bare body lacks, so `includes` misses and the two near-duplicate.
+    // Accepted for the same reason it is there: nothing is lost, and a fuzzier compare
+    // trades a readable near-repeat for the risk of swallowing a real distinct reason.
+    // Before main this shape printed NO marker at all, so near-duplication is the
+    // strictly better failure mode.
+    return output.includes(failureReason)
+      ? `Codex turn failed.\n\n${output}`
+      : `Codex turn failed: ${failureReason}\n\n${output}`;
+  }
+
+  if (failureReason) {
+    return `Codex turn failed: ${failureReason}\n`;
   }
 
   const message = String(parsedResult?.failureMessage ?? "").trim() || "Codex did not return a final message.";

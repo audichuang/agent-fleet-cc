@@ -38,9 +38,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task-resume-candidate -
 
 Operating rules:
 
-- The subagent is a thin forwarder only. It should use one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task ...` and return that command's stdout as-is.
+- The subagent is a thin forwarder only. It makes **one `task` invocation** — `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task ...` — and returns that command's stdout as-is. "One invocation", not "one Bash call": a multi-line prompt has to be written to a file first and passed with `--prompt-file`, so preparing that file is a second call the agent is expected to make. Read literally, the old wording sent it to a `--prompt-file` that was never written, and the companion throws on the missing path.
 - Return the Codex companion stdout verbatim to the user.
-- Before any of that output reaches the user, load the `codex-result-handling` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
+- Before any of that output reaches the user, load the `codex:codex` skill (via the `Skill` tool) and present it per that contract. Load it when the output arrives, not after you have read it — by then the tempting next move, quietly fixing what Codex flagged, has usually already happened.
 - Do not paraphrase, summarize, rewrite, or add commentary before or after it.
 - Do not ask the subagent to inspect files, monitor progress, poll `/codex:status`, fetch `/codex:result`, call `/codex:cancel`, summarize output, or do follow-up work of its own.
 - Leave `--effort` unset unless the user explicitly asks for a specific reasoning effort.
