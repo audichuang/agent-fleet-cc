@@ -328,6 +328,58 @@ test("e2e: a failed turn with NO agent message states the reason exactly once", 
   assert.doesNotMatch(result.stdout, /Codex turn failed: Codex turn failed/);
 });
 
+// The pair above both run on TURN_COMPLETED_ERROR, whose text carries the plugin's own
+// "Codex turn failed: " prefix baked into the FIXTURE. That makes them blind to the
+// question they look like they answer: swap in a realistic bare reason and they still
+// pass, because the marker they match was never produced by the render. The two below
+// drive shapes with no marker of their own, so the render is the only source.
+//
+// Both assert on STDOUT specifically. The --json payload and /codex:result have carried
+// the failure correctly since 1.6.0; the hole was only ever in the two renders the slash
+// commands actually print, and `commands/task.md` relays that stdout verbatim.
+test("e2e: a bare turn.error message still renders as a failure", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "bare-turn-error");
+  initGitRepo(repo);
+  commitInitial(repo);
+
+  const result = run("node", [SCRIPT, "task", "do the thing"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stdout,
+    /Codex turn failed/,
+    "a real TurnError.message is bare, so without a render-side marker stdout reads as an answer"
+  );
+  assert.match(result.stdout, /401 Unauthorized/);
+  // Still exactly once: the body IS the reason here, so a header restating it doubles it.
+  assert.equal((result.stdout.match(/401 Unauthorized/g) ?? []).length, 1);
+  assert.doesNotMatch(result.stdout, /Codex turn failed: Codex turn failed/);
+});
+
+test("e2e: a failed turn with no output and no error text names the failure on stdout", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "interrupted-no-error");
+  initGitRepo(repo);
+  commitInitial(repo);
+
+  const result = run("node", [SCRIPT, "task", "do the thing"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  // The defect: with no rawOutput the render fell through to `failureMessage`, which is
+  // "" on the broker transport, and printed this instead — a dead turn reading as a
+  // model that simply had nothing to say. failureReasonFor always has a reason here.
+  assert.doesNotMatch(
+    result.stdout,
+    /Codex did not return a final message/,
+    "an interrupted turn is a failure, not a quiet success"
+  );
+  assert.match(result.stdout, /Codex turn failed/);
+  assert.match(result.stdout, /reported no error detail/, "failureReasonFor's fallback must reach stdout");
+});
+
 // The OTHER failure shape (a standalone `error` notification with no turn/completed —
 // the "terminal-error" fixture) never reached the header at all: resolveFinalMessage
 // has no finalTurn to read, so rawOutput is empty and renderTaskResult takes its

@@ -48,11 +48,88 @@ alone would also match `codex:codex-rescue` and quietly pass on every command. E
 was mutation-checked: removing the pointer, adding a second skill, dropping a reference link, and
 deleting each of the three migrated invariants all go red on the intended test.
 
-Known and deliberately left: the model/price table in `references/prompting.md` is exactly the
-enumerated engine catalog the root `AGENTS.md` warns rots invisibly — untouched here to keep this
-diff a move, and worth its own pass. Dated rows in `docs/codex-protocol-sync-audit.md` still name
-the old `gpt-5-6-prompting/SKILL.md` path; they are records of what was true on their date and
-were not rewritten.
+### The audit pass that followed the move
+
+A four-lens audit of the plugin (each lens adversarially challenged) ran against this branch. It
+found the price table the paragraph above had deferred, plus five ways a run can end without the
+user learning about it. The prose and the two confirmed render defects are fixed here; the
+remaining findings are recorded, not acted on.
+
+**The model catalog is gone from `references/prompting.md`.** Prices, benchmark indices, context
+and output sizes, the price-cut date, and the effort enum were exactly what the root `AGENTS.md`
+forbids putting in shipped prose. The guard that replaced them is the tell: the old test pinned
+one live price *and one stale price as a `doesNotMatch`* — a fossil proving the table had already
+rotted once while the suite stayed green. Routing is now by role (thinker / executor /
+ticket-runner) with the authority named for anything numeric. The cost: the "25× cheaper" order
+of magnitude is no longer written down, and `models_cache.json` has no price field to recover it
+from. A table that lies is worse than a table that is absent.
+
+**`commands/execute-plan.md` armed a wait that dies before the job does.** It told the model to
+run an `until` loop under `Monitor` and said nothing about `timeout_ms` — a required parameter
+defaulting to five minutes, capped at one hour, killed on expiry. This command routes to the
+background precisely when the plan will outlast that, so the default meant the monitor died,
+`/codex:result` was never called, and no notification was sent **for a job that succeeded**.
+Silence read as "still running". It now names `run_in_background` (no ceiling, one notification,
+the shape the Monitor docs themselves point to) and `persistent: true` as the Monitor escape
+hatch. The "always terminates" promise about the liveness watchdog is also gone: a watchdog that
+fails to spawn is swallowed into a job-log `Warning:` line and no launch-payload field reports
+it, so the model was arming its wait on a backstop it could not confirm existed.
+
+**A dead turn could render as "Codex did not return a final message."** `renderTaskResult` gated
+the structured failure reason on `result.hadAgentMessage` — a proxy for "is the body already the
+reason?" that was wrong in both directions. With no agent message and a real `turn.error.message`
+("401 Unauthorized"), the reason was withheld and the bare error printed with no failure marker
+at all; with no agent message *and* no output, it fell through to `failureMessage`, which is
+empty string on the broker transport, and printed the "no final message" line for a turn that had
+died. `failureReasonFor` had a definite reason in both cases, stored on the job record and in the
+`--json` payload — only the printed copy dropped it, and `commands/task.md` relays that stdout
+verbatim.
+
+The fix passes the reason unconditionally and lets the render compare it against the body,
+dropping to a bare `Codex turn failed.` when they are the same text. That is the check
+`hadAgentMessage` was approximating, and `renderNativeReviewResult` already did it correctly one
+function away. `renderReviewResult` needed the same treatment for the same reason: its
+`reviewFailureLines` had no body to compare against, so the caller's gate was its only protection
+— removing that gate without giving it the comparison reintroduced the doubled reason from 1.6.0,
+caught by the existing test before it left the branch.
+
+Two fixture behaviours were added because the existing ones could not see any of this:
+`bare-turn-error` (a realistic `TurnError.message` with no marker of its own — the old
+`TURN_COMPLETED_ERROR` bakes `Codex turn failed: ` into the *fixture*, so every assertion driven
+by it passed on a marker the render never produced) and `interrupted-no-error` (a terminal turn
+that is neither completed nor carrying an error — a third failure shape absent from the plugin's
+`AGENTS.md` list). Both new tests assert on **stdout**, not the `--json` payload: the payload has
+been correct since 1.6.0, and the hole was only ever in what the slash commands print.
+
+**`tests/codex/sandbox-wire.test.mjs` is new, and covers the invariant that could break every
+real run while the suite stayed green.** `sandbox-mode.test.mjs` only ever called
+`resolveSandboxMode`, a pure function; `buildThreadParams` / `buildResumeParams` are not exported
+and the fake fixture discarded `sandbox` and `approvalPolicy` entirely, answering with a
+hardcoded `readOnly` reply that contradicts what it was sent. So "respect the caller"
+(`options.sandbox ?? "danger-full-access"`) passed everything and would have aborted every turn
+on a host that cannot start bwrap. The fixture now records both fields as received and the test
+asserts on those. Four mutations were checked, including that exact cleanup; each reddens this
+file and nothing else. `plugins/codex/AGENTS.md` was reworded — it read as though the builders
+were already pinned.
+
+Recorded, not fixed: three more silent-failure windows (`/codex:attach` and `/codex:logs` do not
+reconcile mid-tail and print no terminal line on poll exhaustion; the watchdog gap above in its
+compound-failure form), `hadAgentMessage` still having no direct test, and
+`docs/codex-protocol-sync-audit.md` sitting four minors behind the installed CLI. Also unresolved
+and worth more than any of them: whether the plugin's bare `spawn("codex", ["app-server"])` now
+attaches to the app-server control daemon running on this machine — if it does, the "direct
+transport" fallback is a shared daemon too, and the broker's whole lifetime argument needs
+rewriting.
+
+Considered and rejected: moving off the app-server protocol to `codex exec --json`. The
+protocol side is the best-defended part of this design — `prebuild:codex` generates types from
+the installed binary and `build:codex` typechecks against them, which is a real drift detector
+that CI runs. `exec` has no schema export, so the swap trades a machine-checked contract for an
+unversioned JSONL shape and regexes, reversing 1.4.1. The instability that prompted the question
+is real but lives one layer down, in the shared broker daemon's lifetime, not in the wire format.
+
+Dated rows in `docs/codex-protocol-sync-audit.md` still name the old `gpt-5-6-prompting/SKILL.md`
+path; they are records of what was true on their date and were not rewritten.
 
 ## 1.6.1
 

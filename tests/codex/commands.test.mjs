@@ -243,10 +243,25 @@ test("gpt-5.6-luna is documented as the ticket lane, pinned to max effort", () =
   assert.match(promptingSkill, /\|\s*\*\*gpt-5\.6-luna\*\*\s*\|/, "luna needs a row in the model table");
   assert.match(promptingSkill, /Luna always runs at `--effort max`/);
   assert.match(promptingSkill, /One ticket per run/);
-  // Pre-cut prices would misprice every routing decision made from this table.
-  assert.match(promptingSkill, /\$0\.20 \/ \$1\.20/, "luna's post-2026-07-30 price");
-  assert.match(promptingSkill, /\$2\.00 \/ \$12\.00/, "terra's post-2026-07-30 price");
-  assert.doesNotMatch(promptingSkill, /\$2\.50 \/ \$15\.00/, "stale pre-cut terra price");
+  // 1.6.2 removed the price column. It was the exact thing root AGENTS.md forbids —
+  // an enumerated engine catalog in shipped prose — and the guard it replaces proved
+  // the point: it pinned one live price and one *stale* price as a doesNotMatch,
+  // a fossil of the table having already rotted once. A reprint by OpenAI moved no
+  // test, so the table could lie while the suite stayed green.
+  //
+  // Assert the absence, not a new set of numbers: any `$N / $N` pair here is the
+  // rot returning. The routing capability the old assertions were really protecting
+  // (luna's row, the max-effort pairing, one-ticket-per-run) is still pinned above.
+  assert.doesNotMatch(
+    promptingSkill,
+    /\$\d[\d.]*\s*\/\s*\$\d/,
+    "prices belong in OpenAI's pricing page, not in shipped prose — route by role instead"
+  );
+  assert.match(
+    promptingSkill,
+    /route by which job it is, not by price/i,
+    "dropping the numbers only works if the file says what to route on instead"
+  );
 
   assert.match(agent, /Ticket lane/);
   assert.match(agent, /--model gpt-5\.6-luna --effort max/);

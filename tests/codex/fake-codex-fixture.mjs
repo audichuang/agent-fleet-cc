@@ -25,6 +25,12 @@ const readline = require("node:readline");
 	// A failure that arrives ONLY via a terminal turn/completed carrying turn.error,
 	// with NO preceding standalone error notification — the second failure shape.
 	const TURN_COMPLETED_ERROR = "Codex turn failed: 401 Unauthorized (upstream auth rejected).";
+	// The real app-server puts a BARE reason in TurnError.message — "401 Unauthorized",
+	// "Usage limit reached". TURN_COMPLETED_ERROR above carries the plugin's own
+	// "Codex turn failed: " prefix baked in, so any test driven by it sees a failure
+	// marker the render never produced. This one carries no marker: if the render stops
+	// adding one, the assertion has nothing else to fall back on.
+	const BARE_TURN_ERROR = "401 Unauthorized";
 	const interruptibleTurns = new Map();
 
 	function loadState() {
@@ -332,6 +338,10 @@ rl.on("line", (line) => {
         }
         const thread = nextThread(state, message.params.cwd, message.params.ephemeral);
         thread.model = message.params.model ?? null; // remember the requested model so review/start can gate on it
+        // Record the isolation fields exactly as they arrived. The result below reports a
+        // readOnly sandbox regardless of what was sent, so a test that trusts the reply
+        // learns nothing about what the plugin actually put on the wire.
+        thread.wireStart = { sandbox: message.params.sandbox ?? null, approvalPolicy: message.params.approvalPolicy ?? null };
         saveState(state);
         send({ id: message.id, result: { thread: buildThread(thread), model: message.params.model || "gpt-5.4", modelProvider: "openai", serviceTier: null, cwd: thread.cwd, approvalPolicy: "never", sandbox: { type: "readOnly", access: { type: "fullAccess" }, networkAccess: false }, reasoningEffort: null } });
         send({ method: "thread/started", params: { thread: { id: thread.id } } });
@@ -366,6 +376,7 @@ rl.on("line", (line) => {
         }
         const thread = ensureThread(state, message.params.threadId);
         thread.updatedAt = now();
+        thread.wireResume = { sandbox: message.params.sandbox ?? null, approvalPolicy: message.params.approvalPolicy ?? null };
         saveState(state);
         send({ id: message.id, result: { thread: buildThread(thread), model: message.params.model || "gpt-5.4", modelProvider: "openai", serviceTier: null, cwd: thread.cwd, approvalPolicy: "never", sandbox: { type: "readOnly", access: { type: "fullAccess" }, networkAccess: false }, reasoningEffort: null } });
         break;
@@ -466,6 +477,23 @@ rl.on("line", (line) => {
         if (BEHAVIOR === "turn-completed-error") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
           send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", { message: TURN_COMPLETED_ERROR }) } });
+          break;
+        }
+        // Same shape, realistic message: a bare reason with no "Codex turn failed: "
+        // prefix of its own. The render is the only thing that can mark this a failure.
+        if (BEHAVIOR === "bare-turn-error") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", { message: BARE_TURN_ERROR }) } });
+          break;
+        }
+        // The third failure shape, absent from the plugin's AGENTS.md list: a terminal
+        // turn that is neither "completed" nor carrying an error at all. buildResultStatus
+        // counts any non-"completed" status as a failure, so this IS a failed turn — with
+        // no agent message and no error text anywhere. Everything the user could be told
+        // has to come from failureReasonFor's own fallback.
+        if (BEHAVIOR === "interrupted-no-error") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "interrupted") } });
           break;
         }
         // Model fallback: sol (or any non-terra) is rejected as unavailable; the

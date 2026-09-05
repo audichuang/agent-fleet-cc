@@ -634,10 +634,11 @@ async function executeReviewRun(request) {
       reviewLabel: reviewName,
       targetLabel: context.target.label,
       reasoningSummary: result.reasoningSummary,
-      // Same gate as executeTaskRun: a turn that returned a VALID review JSON and then
-      // died parses cleanly and would otherwise render a clean verdict. Only pass the
-      // reason when there was a real agent message to distinguish it from.
-      ...(result.hadAgentMessage ? { errorMessage } : {})
+      // Unconditional, same as executeTaskRun: a turn that returned a VALID review JSON
+      // and then died parses cleanly and would otherwise render a clean verdict.
+      // renderReviewResult already does the distinctness check itself (`distinct`), so
+      // gating here only prevented that check from ever running.
+      errorMessage
     }),
     summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.finalMessage, errorMessage ?? `${reviewName} finished.`),
     // Structured failure reason (same contract as executeTaskRun) so a failed
@@ -695,12 +696,12 @@ async function executeTaskRun(request) {
     {
       rawOutput,
       failureMessage,
-      // The render needs the structured reason too: a failed turn that still produced
-      // a PARTIAL answer would otherwise render as a plain successful answer. Only then:
-      // with no agent message, resolveFinalMessage (codex.mjs) already fell back to the
-      // turn error text, so rawOutput IS the reason and prefixing it prints it twice.
-      // The job record + --json payload keep errorMessage unconditionally (status/wait).
-      ...(result.hadAgentMessage ? { errorMessage } : {}),
+      // Pass the structured reason unconditionally. renderTaskResult decides how to
+      // state it: it compares the reason against the body and drops to a bare marker
+      // when they are the same text, which is the check this used to approximate with
+      // `result.hadAgentMessage`. That proxy withheld the reason on exactly the two
+      // shapes where nothing else carried it — see renderTaskResult.
+      errorMessage,
       reasoningSummary: result.reasoningSummary
     },
     {

@@ -1,6 +1,6 @@
 # Delivery paths — how to hand work to Codex
 
-Model selection (in `SKILL.md`) decides *which* Codex runs the work. This file decides *how the
+Model selection (in [prompting.md](prompting.md)) decides *which* Codex runs the work. This file decides *how the
 work gets there*. The two are independent: a **ticket** on `luna` can arrive by any path below.
 
 The cost that matters is the one paid on the Claude side. Codex's own token spend is roughly
@@ -34,14 +34,15 @@ description. One measured trivial forward: `subagent_tokens: 20732`, 1 tool use.
 That measurement is from 1.6.1, when `codex-rescue` preloaded two skills — `codex-cli-runtime`
 (~930 tok) and `gpt-5-6-prompting` (~2,900 tok) — plus its own body (~1,000 tok). 1.6.2 collapsed
 the plugin to a single `codex` skill: the runtime contract moved into the agent body (it was
-~90% duplicated there already) and the prompting guidance became this directory, reachable by
-`Read` instead of preloaded. So the preload is now one short skill body plus the agent's, and the
+~90% duplicated there already) and the prompting guidance became this directory, which
+`codex-rescue` reaches with a `cat` (it is `tools: Bash`, so it has no `Read`) instead of
+having it preloaded. So the preload is now one short skill body plus the agent's, and the
 figure above is an upper bound until someone re-measures a trivial forward against an installed
 1.6.2. The agent system prompt and tool definitions dominate either way — don't expect the total
 to fall anywhere near proportionally.
 
 What it buys is **not** context isolation. That was already there: the file reads, the reasoning,
-and the tool loop all happen inside Codex's own 1.05M context (65K input on that same run), and
+and the tool loop all happen inside Codex's own context (65K input on that same measured run), and
 the main thread only ever sees the final projection either way — the agent is contractually
 forbidden to summarize. What the ~20K buys is proactive discovery and the tool guardrail. Pay it
 for those, not for isolation.
@@ -49,8 +50,8 @@ for those, not for isolation.
 ## `--resume-last` has a Luna-shaped limit
 
 Chaining tickets on one thread grows that thread, and long-context recall is exactly Luna's weak
-spot (~41% on MRCR v2 at 512K–1M). A few related tickets on one thread is the sweet spot; a long
-chain walks into the weakness that `SKILL.md`'s **one ticket per run** rule exists to avoid.
+spot. A few related tickets on one thread is the sweet spot; a long
+chain walks into the weakness that [prompting.md](prompting.md)'s **one ticket per run** rule exists to avoid.
 Unrelated tickets get fresh threads.
 
 ## Four different things are called "fork"

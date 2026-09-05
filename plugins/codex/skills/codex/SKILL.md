@@ -6,12 +6,6 @@ user-invocable: false
 
 # Codex
 
-One skill for the whole plugin. The body is the **result-handling contract** —
-what has to be true every time Codex's own output reaches the user, which is the
-path nine commands take. Prompt-composition material is disclosed through the
-references table below, so the hot path stays short enough that the stop-rule
-does not get buried in it.
-
 ## Result handling
 
 When the helper returns Codex output:
@@ -22,16 +16,13 @@ When the helper returns Codex output:
 - Preserve output sections when the prompt asked for them, such as observed facts, inferences, open questions, touched files, or next steps.
 - If there are no findings, say that explicitly and keep the residual-risk note brief.
 - If Codex made edits, say so explicitly and list the touched files when the helper provides them.
-- For `codex:codex-rescue`, do not turn a failed or incomplete Codex run into a Claude-side implementation attempt. Report the failure and stop.
-- For `codex:codex-rescue`, if Codex was never successfully invoked, do not generate a substitute answer at all.
+- Do not turn a failed or incomplete Codex run into a Claude-side implementation attempt. Report the failure and stop.
+- If Codex was never successfully invoked, do not generate a substitute answer at all.
 - CRITICAL: After presenting review findings, STOP. Do not make any code changes. Do not fix any issues. You MUST explicitly ask the user which issues, if any, they want fixed before touching a single file. Auto-applying fixes from a review is strictly forbidden, even if the fix is obvious.
 - If the helper reports malformed output or a failed Codex run, include the most actionable stderr lines and stop there instead of guessing.
 - If the helper reports that setup or authentication is required, direct the user to `/codex:setup` and do not improvise alternate auth flows.
 
 ## References
-
-Read one when the job calls for it — each is one hop from here, none needs the
-others first.
 
 | Reference | Read it when |
 | --- | --- |

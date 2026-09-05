@@ -50,8 +50,12 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 - broker 是持久共用的(一次一個 turn、idle 5s 自關),不是每次 spawn;改 broker / turn-ack / idle /
   watchdog 時,event-ordering 測試偶爾 flaky(root gotcha),re-run 一次確認。
 - **`resolveSandboxMode` 忽略它自己的參數**,每個 thread 都是 `danger-full-access` +
-  `approvalPolicy: "never"`(`lib/codex.mjs`,經 buildThreadParams / buildResumeParams;被
-  `tests/codex/sandbox-mode.test.mjs` 釘住)。這是**刻意的**:這個 fork 的目標主機起不了 Codex 的
+  `approvalPolicy: "never"`(`lib/codex.mjs`,經 buildThreadParams / buildResumeParams)。
+  **釘住的只有純函式 `resolveSandboxMode` 本身**(`tests/codex/sandbox-mode.test.mjs`)——
+  真正把值送上 wire 的 `buildThreadParams` / `buildResumeParams` 沒有 export,fake fixture 的
+  `thread/start` / `thread/resume` 也完全不看這兩個欄位,所以「builder 送出去的是什麼」是靠
+  `tests/codex/sandbox-wire.test.mjs` 從 fixture 收到的 params 反查的;動這條路徑時看那支。
+  全都是**刻意的**:這個 fork 的目標主機起不了 Codex 的
   bwrap,連唯讀 turn 都會 abort。後果是 **`--write` 只是 job metadata,不給任何隔離** —— 少給它
   什麼都沒關住。四個 prose surface 曾經同時把這件事寫錯(暗示省略 `--write` 就等於唯讀),所以改
   任何講 sandbox / 唯讀的文案前先看這條。真要強制:`CODEX_SANDBOX_MODE=read-only`,且只在 bwrap

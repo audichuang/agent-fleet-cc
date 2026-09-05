@@ -80,12 +80,15 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --background --jso
 ```
 - The launch prints a JSON payload that includes a `jobId` and a `signalFile` path. Parse both from that output. (Without `--json` the launch prints plain text and there is no `signalFile` to read.)
 - Tell the user: "Codex is implementing your plan in the background. Use `/codex:status <jobId>` to check progress, `/codex:result <jobId>` to see the output when done."
-- To surface the result automatically instead of making the user poll, start a `Monitor` that watches for the terminal signal file. The until-loop below is the Monitor's wait condition — run it via `Monitor`, not in the foreground (foreground `sleep` is blocked by the harness):
+- To surface the result automatically instead of making the user poll, wait on the terminal signal file. Run the loop in the background — foreground `sleep` is blocked by the harness:
 ```bash
 # Replace <signalFile> with the path from the launch payload.
 until [ -f "<signalFile>" ]; do sleep 5; done
 ```
-- When the signal file appears, run `/codex:result <jobId>` and send a `PushNotification` summarizing completion or failure. A detached liveness watchdog writes the same signal if the turn hangs or its worker dies, so this wait always terminates rather than blocking forever.
+- **Prefer `Bash` with `run_in_background` for this.** You want exactly one notification, and the loop exits by itself once the signal lands, which is the shape `run_in_background` is for — and it has no deadline, so an implementation run that takes two hours still reports.
+- **If you use `Monitor` instead, you must pass `persistent: true`.** `timeout_ms` and `persistent` are both required parameters; `timeout_ms` defaults to **five minutes** and caps at one hour, and on timeout the monitor is *killed*. This command routes to the background precisely when the plan is big — that is, when the run will outlast five minutes — so accepting the default means the monitor dies, `/codex:result` is never called, and no notification is ever sent **for a job that succeeded**. Silence here does not mean "still running".
+- When the signal file appears, run `/codex:result <jobId>` and send a `PushNotification` summarizing completion or failure.
+- A detached liveness watchdog writes the same signal if the turn hangs or its worker dies, so the wait normally ends even on an abnormal death. Do not treat that as a guarantee: if the watchdog itself failed to start, the launch says so only as a `Warning:` line in the job log, and nothing in the launch payload reports it. That is why the user was told the `/codex:status <jobId>` fallback above — it is the path that does not depend on this wait.
 
 ## Operating rules
 

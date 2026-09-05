@@ -241,13 +241,23 @@ export function renderSetupReport(report) {
 }
 
 // A FAILED review must not render as a finished one — same rule, and the same
-// distinct-reason gate, as renderTaskResult. The caller passes meta.errorMessage ONLY
-// when the turn produced a real agent message: with none, `finalMessage` IS the error
-// text (codex.mjs resolveFinalMessage), which the "Raw final message:" block below
-// already prints, so a header would say the same sentence twice.
-function reviewFailureLines(meta) {
+// State the failure once, the same rule renderNativeReviewResult applies: with no agent
+// message `finalMessage` IS the error text (codex.mjs resolveFinalMessage), and the
+// "Raw final message:" block below prints it, so a header restating it says the same
+// sentence twice. `body` is whatever that branch is about to print.
+//
+// This used to be enforced by the CALLER withholding meta.errorMessage whenever
+// `result.hadAgentMessage` was false. That proxy answered a different question — "was
+// there an agent message?" rather than "is the body already the reason?" — and on the
+// shapes where it guessed wrong nothing else carried the failure at all.
+function reviewFailureLines(meta, body = "") {
   const reason = String(meta?.errorMessage ?? "").trim();
-  return reason ? [`Codex review failed: ${reason}`, ""] : [];
+  if (!reason) {
+    return [];
+  }
+  return String(body ?? "").includes(reason)
+    ? ["Codex review failed.", ""]
+    : [`Codex review failed: ${reason}`, ""];
 }
 
 export function renderReviewResult(parsedResult, meta) {
@@ -255,7 +265,7 @@ export function renderReviewResult(parsedResult, meta) {
     const lines = [
       `# Codex ${meta.reviewLabel}`,
       "",
-      ...reviewFailureLines(meta),
+      ...reviewFailureLines(meta, parsedResult.rawOutput),
       "Codex did not return valid structured JSON.",
       "",
       `- Parse error: ${parsedResult.parseError}`
@@ -275,7 +285,7 @@ export function renderReviewResult(parsedResult, meta) {
     const lines = [
       `# Codex ${meta.reviewLabel}`,
       "",
-      ...reviewFailureLines(meta),
+      ...reviewFailureLines(meta, parsedResult.rawOutput),
       `Target: ${meta.targetLabel}`,
       "Codex returned JSON with an unexpected review shape.",
       "",
@@ -376,13 +386,34 @@ export function renderNativeReviewResult(result, meta) {
 
 export function renderTaskResult(parsedResult, meta) {
   const rawOutput = typeof parsedResult?.rawOutput === "string" ? parsedResult.rawOutput : "";
+  // `errorMessage` comes from `failureReasonFor`, which returns null on success and a
+  // definite string on every failure. So its presence IS the failure signal and the
+  // caller does not have to decide whether to withhold it. It used to be gated on
+  // `result.hadAgentMessage` — a proxy for "is the body itself the reason?" that was
+  // wrong in both directions: with no agent message and a real `turn.error.message`
+  // ("401 Unauthorized"), the reason was withheld and the bare error printed as if it
+  // were an answer; with no agent message AND no output, this fell through to
+  // `failureMessage`, which is empty on the broker transport, and a dead turn rendered
+  // as "Codex did not return a final message."
+  const failureReason = String(parsedResult?.errorMessage ?? "").trim();
+
   if (rawOutput) {
     const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
-    // A failed turn that still produced an agent message must NOT render as a plain
-    // answer: `commands/task.md` tells Claude to return this stdout verbatim, so the
-    // failure reason has to sit ABOVE the partial output or the failure vanishes.
-    const failureReason = String(parsedResult?.errorMessage ?? "").trim();
-    return failureReason ? `Codex turn failed: ${failureReason}\n\n${output}` : output;
+    if (!failureReason) {
+      return output;
+    }
+    // Same rule as renderReviewResult above: state the failure once. With no agent
+    // message `resolveFinalMessage` already fell back to the turn error text, so the
+    // body IS the reason and repeating it above prints the same sentence twice.
+    // `commands/task.md` tells Claude to relay this stdout verbatim, so the marker has
+    // to be here either way — what varies is whether the reason is worth restating.
+    return output.includes(failureReason)
+      ? `Codex turn failed.\n\n${output}`
+      : `Codex turn failed: ${failureReason}\n\n${output}`;
+  }
+
+  if (failureReason) {
+    return `Codex turn failed: ${failureReason}\n`;
   }
 
   const message = String(parsedResult?.failureMessage ?? "").trim() || "Codex did not return a final message.";
