@@ -12,7 +12,9 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 
 ## 結構角色(判斷,不是清單)
 - **discovery**:一顆 **proactive `codex:codex-rescue` subagent**(`agents/codex-rescue.md` — 卡住 /
-  要第二意見時主動用)+ fleet `delegating-to-fleet` 路由到 model-invocable 的 `handoff`(review)/
+  要第二意見時主動用)。它的 description 常駐在 host 的系統提示裡,是 codex 唯一、也是**目前
+  marketplace 裡最強**的自動發現路徑 —— fleet 的 `delegating-to-fleet` 路由索引已隨 fleet plugin
+  移除(見 `docs/adr/0001` 的 superseded 註記)。model-invocable 的 verb 仍是 `handoff`(review)/
   `rescue`(調查·修)/ `execute-plan`(帶寫實作)。
 - `scripts/codex-companion.mjs` — CLI 入口;經 `lib/codex.mjs` 的 `runAppServerTurn` /
   `runAppServerReview` 驅動 Codex app-server(**不是** runWorker)。

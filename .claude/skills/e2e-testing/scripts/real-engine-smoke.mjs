@@ -9,9 +9,11 @@
 //   - launch a real background job, cancel it, `wait` -> exit 2 (cancelled)   [all]
 //   - `wait --timeout-ms 0` on a still-active job returns FAST (no 240s block) [codex]
 //
-// It checks readiness via fleet-doctor first and skips engines that aren't
-// ready. It isolates each run in a temp workspace and prunes the job records it
-// creates. Exit 0 if every ready engine honors the contract, else exit 1.
+// It probes each engine's binary first and skips the ones that aren't there
+// (only ENOENT means missing — a binary that runs and exits non-zero still
+// counts as present, since auth is not checked here). It isolates each run in a
+// temp workspace and prunes the job records it creates. Exit 0 if every ready
+// engine honors the contract, else exit 1.
 //
 // Zero-dependency ESM. Read ../SKILL.md "Gotchas" for why each odd bit exists
 // (multi-line JSON parsing, no-pid seeding, watchdog/self-match cleanup traps).
@@ -44,14 +46,39 @@ function parseJson(text) {
   }
 }
 
-function dataRoots(report) {
+// Mirrors cc's resolveDataRoot (plugins/cc/scripts/lib/adapter.mjs) — kept in
+// step by hand; cc is the only engine here whose data root is not the default.
+function ccDataRoot() {
+  return process.env.CC_PLUGIN_DATA
+    || process.env.CLAUDE_PLUGIN_DATA
+    || path.join(os.homedir(), ".claude", "plugins", "data", "cc");
+}
+
+function dataRoots() {
   const roots = new Set();
-  const def = process.env.CLAUDE_PLUGIN_DATA
-    || path.join(os.homedir(), ".claude/plugins/data/codex-agent-fleet");
-  roots.add(def);
-  const dr = report.engines?.cc?.dataRoot;
-  if (dr) roots.add(dr);
+  roots.add(process.env.CLAUDE_PLUGIN_DATA
+    || path.join(os.homedir(), ".claude/plugins/data/codex-agent-fleet"));
+  roots.add(ccDataRoot());
   return [...roots];
+}
+
+// Readiness = the binary is on PATH. ENOENT is the only signal that it is
+// missing; a non-zero exit means it ran, which is enough to try a real job
+// against (auth failures surface as the job failing, which is the point).
+function binaryPresent(bin) {
+  const r = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15000 });
+  return r.error?.code !== "ENOENT";
+}
+
+// cc launches under a profile; any valid-looking one will do for a smoke.
+function firstCcProfile() {
+  try {
+    return fs.readdirSync(path.join(ccDataRoot(), "profiles"))
+      .filter((f) => f.endsWith(".json"))
+      .sort()[0]?.slice(0, -".json".length) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function pruneState(roots, wsBase) {
@@ -72,18 +99,21 @@ function pruneState(roots, wsBase) {
 const ENGINES = {
   codex: {
     script: path.join(REPO, "plugins/codex/scripts/codex-companion.mjs"),
+    binary: "codex",
     launch: (ws) => ["task", "smoke: reply with the single word ok", "--background", "--json"],
     cancel: (ws, id) => ["cancel", id, "--cwd", ws, "--json"],
     waitFor: (ws, id, ms) => ["wait", id, "--cwd", ws, "--timeout-ms", String(ms), "--json"],
   },
   antigravity: {
     script: path.join(REPO, "plugins/antigravity/bin/antigravity.mjs"),
+    binary: "agy",
     launch: (ws) => ["task", "smoke: reply with the single word ok", "--background", "--json"],
     cancel: (ws, id) => ["cancel", id, "--json"],
     waitFor: (ws, id, ms) => ["wait", id, "--timeout-ms", String(ms), "--json"],
   },
   cc: {
     script: path.join(REPO, "plugins/cc/scripts/cc-companion.mjs"),
+    binary: "claude",
     needsProfile: true,
     launch: (ws, profile) => ["task", "smoke: reply with the single word ok", "--profile", profile, "--background", "--json"],
     cancel: (ws, id) => ["cancel", id, "--json"],
@@ -92,14 +122,13 @@ const ENGINES = {
   },
 };
 
-function smokeEngine(name, cfg, report, roots) {
-  const status = report.engines?.[name]?.status;
-  if (status !== "ready") return { name, skipped: `not ready (status=${status ?? "unknown"})` };
+function smokeEngine(name, cfg, roots) {
+  if (!binaryPresent(cfg.binary)) return { name, skipped: `${cfg.binary} not on PATH` };
 
   let profile = null;
   if (cfg.needsProfile) {
-    profile = report.engines?.[name]?.firstValidProfile;
-    if (!profile) return { name, skipped: "ready but no valid profile to launch a real job" };
+    profile = firstCcProfile();
+    if (!profile) return { name, skipped: "binary present but no profile to launch a real job" };
   }
 
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), `real-${name}-`));
@@ -146,19 +175,13 @@ function smokeEngine(name, cfg, report, roots) {
 }
 
 function main() {
-  const doctor = run([path.join(REPO, "plugins/fleet/scripts/fleet-doctor.mjs"), "--json"], { timeout: 30000 });
-  const report = parseJson(doctor.stdout);
-  if (!report) {
-    console.error("fleet-doctor produced no JSON; cannot determine engine readiness.");
-    process.exit(1);
-  }
-  const roots = dataRoots(report);
+  const roots = dataRoots();
 
   console.log("# Real-engine E2E smoke (live codex / agy / claude)\n");
   let failed = 0;
   let ran = 0;
   for (const [name, cfg] of Object.entries(ENGINES)) {
-    const r = smokeEngine(name, cfg, report, roots);
+    const r = smokeEngine(name, cfg, roots);
     if (r.skipped) {
       console.log(`- ${name}: SKIP — ${r.skipped}`);
       continue;

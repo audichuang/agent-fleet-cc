@@ -1,6 +1,6 @@
 # agent-fleet — one marketplace for AI-agent delegation plugins
 
-Six Claude Code plugins, one marketplace:
+Five Claude Code plugins, one marketplace:
 
 | Plugin | Commands | What it delegates to |
 |---|---|---|
@@ -8,7 +8,6 @@ Six Claude Code plugins, one marketplace:
 | `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
 | `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
 | `grok` | `/grok:*` (task, status, wait, logs, result, cancel, setup) | xAI Grok Build (`grok`), headless — default model grok-4.5; auth via `grok login` or `XAI_API_KEY` |
-| `fleet` | `/fleet:*` (setup, doctor, status) | Guided onboarding plus read-only fleet diagnostics/status |
 | `imagine` | `/imagine:image` | The marketplace's only image entry point, on either of two engines: xAI Grok Imagine over `POST /v1/images/generations` (reuses the grok CLI's OAuth login read-only, or `XAI_API_KEY`), or `--engine agy` through Antigravity's built-in `generate_image` (the user's Google login, no API key). Not a delegation engine: the file on disk is the receipt |
 
 > **`cc` v0.3.0** runs on the shared job runtime (`shared/lib/`). Its companion
@@ -22,12 +21,7 @@ Six Claude Code plugins, one marketplace:
 ```bash
 /plugin marketplace add audichuang/agent-fleet-cc
 
-# Recommended starting point — install fleet and run the guided onboarding:
-/plugin install fleet@agent-fleet
-/fleet:setup
-
-# fleet only *guides* the deep fixes; install the engine plugins you chose so
-# their /<engine>:setup commands exist:
+# Install the engines you want, then run each one's own setup:
 /plugin install codex@agent-fleet
 /plugin install antigravity@agent-fleet
 /plugin install cc@agent-fleet
@@ -39,30 +33,6 @@ Six Claude Code plugins, one marketplace:
 Install only the ones you use. Per-plugin requirements (codex CLI login, agy OAuth,
 Anthropic-compatible endpoint profiles) are documented in each plugin's directory
 under `plugins/<name>/`.
-
-### Quick start: `fleet` (recommended first run)
-
-```text
-/fleet:setup        # pick the engines you want; checks readiness for each
-/fleet:doctor       # direct local readiness check; no auth or network verification
-/fleet:status       # read-only CLI board across installed engines; not a full TUI
-```
-
-`/fleet:setup` asks which engines you want (multi-select), runs one fast,
-network-free readiness check, then — one decision at a time — explains any gap and
-points you at that engine's own `/<engine>:setup` to fix it (install, `codex login`,
-agy OAuth, or a `cc` profile). It is **guide-only**: it never runs another
-command or logs you in for you. A `ready` engine means its binary/profile is
-present, **not** that auth is done — run `/<engine>:setup` once on first use to
-complete login, then re-run `/fleet:setup` to confirm.
-
-`/fleet:doctor` is the non-interactive version of the local prerequisite check.
-`/fleet:status` shells out to each installed engine's own read-only status command,
-normalizes the rows, and prints a compact table with follow-up actions. The slash
-wrappers intentionally run the all-engine view without raw slash arguments so user
-text is never injected into a shell command; the underlying `fleet-doctor.mjs` and
-`fleet-status.mjs` CLIs still support `--only` and `--json` for automation. This is
-not a full terminal UI and does not translate any engine transcript.
 
 ### Lifecycle commands
 
@@ -80,9 +50,6 @@ The P0/P1 lifecycle surface is intentionally command-line oriented:
 /cc:task "..." --background --profile <name>
 /cc:wait <job-id>
 /cc:logs <job-id> [--follow]
-
-/fleet:doctor
-/fleet:status
 ```
 
 Codex log streaming delegates to its native attach/live-log path. Antigravity logs
@@ -147,8 +114,8 @@ codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/
 ## Development
 
 ```bash
-npm test               # structure + shared + cc + antigravity + codex + grok + imagine + fleet + e2e
-npm run test:cc        # one suite at a time (also test:fleet, test:codex, test:grok, test:imagine, …)
+npm test               # structure + shared + cc + antigravity + codex + grok + imagine + e2e
+npm run test:cc        # one suite at a time (also test:codex, test:grok, test:imagine, …)
 npm run test:e2e       # black-box CLI end-to-end regression, the 5 plugins with a CLI to drive (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)

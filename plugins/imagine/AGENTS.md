@@ -4,7 +4,7 @@
 # imagine plugin — 生圖(xAI Grok Imagine / Google Antigravity)
 
 ## 定位
-**不是 engine plugin。** fleet 其他四顆(codex/antigravity/cc/grok)都是「把任務委派給另一個
+**不是 engine plugin。** marketplace 另外四顆(codex/antigravity/cc/grok)都是「把任務委派給另一個
 coding agent」;這顆是一個**能力**:生一張圖。所以它沒有 job 生命週期、沒有
 `launch/wait/logs/cancel`、**不用 shared runtime**(`scripts/lib/shared/` 不存在,
 `sync-shared.mjs` 也不該把它加進去)。

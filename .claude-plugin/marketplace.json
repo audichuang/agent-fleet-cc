@@ -4,8 +4,8 @@
     "name": "audichuang"
   },
   "metadata": {
-    "description": "One marketplace for AI-agent delegation plugins — Codex, Antigravity (agy), Grok, and Claude Code (cc) via profiles — plus the fleet router and image generation.",
-    "version": "0.2.0"
+    "description": "One marketplace for AI-agent delegation plugins — Codex, Antigravity (agy), Grok, and Claude Code (cc) via profiles — plus image generation.",
+    "version": "0.3.0"
   },
   "plugins": [
     {
@@ -40,12 +40,6 @@
       "author": {
         "name": "xAI"
       }
-    },
-    {
-      "name": "fleet",
-      "source": "./plugins/fleet",
-      "description": "Guided onboarding for the agent-fleet engines — pick the ones you want and fix only those.",
-      "version": "0.2.0"
     },
     {
       "name": "imagine",
