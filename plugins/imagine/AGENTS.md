@@ -36,8 +36,11 @@ plugin 移除,不留重複入口。
   不可 race),保住 xAI 那條 `wx` 的同一個承諾。
 - **認不出的位元組 = 失敗的 render**,不是「型別意外的圖」。放行 HTML 或錯誤頁就等於在
   `IMAGE_SAVED` 後面掛 exit 0 —— 這顆 plugin 存在就是為了不做這件事。
-- **timeout 不搶在磁碟檢查前面。** agy 會生完圖再卡在講話;timeout 只負責殺(SIGTERM →
-  SIGKILL),判定仍然看檔案。錯誤訊息不准說「什麼都沒存」,它不知道。
+- **timeout 不搶在磁碟檢查前面,而且要殺整棵 process tree。** agy 會生完圖再卡在講話,所以
+  timeout 只負責殺、判定仍然看檔案;錯誤訊息不准說「什麼都沒存」,它不知道。殺要用
+  `detached` + 負 pid 送整個 group —— 只殺 leader 的話 descendant 還握著 pipe,`close` 可以
+  永遠不來(實測 100ms timeout 拖到 1087ms)。SIGKILL 之後仍要有自己的 deadline,而且
+  **沒確認整棵樹死掉就不准刪 staging** —— 那裡可能有使用者已經付過錢的圖。
 - **wrapper prompt 一定要給絕對路徑**。為什麼(agy 的落檔行為、`--dangerously-skip-permissions`
   與 cwd 為何不是沙箱、tool 參數、無 key 實測、重跑 recipe)全在
   `docs/imagine-agy-image-audit.md` —— 學到新東西改那份,別在此重抄。

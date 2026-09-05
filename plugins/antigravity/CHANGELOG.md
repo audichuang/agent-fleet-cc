@@ -191,9 +191,9 @@ hermetic test suite.
 
 ### Added
 
-- **`/antigravity:image`** — generate images with agy's built-in `generate_image`
-  ; recovers the saved path from an `IMAGE_PATH:` marker (last-wins,
-  with a scrape fallback) and optionally copies it to `--output`.
+- **`/antigravity:image`** — generate images with agy's built-in `generate_image` tool;
+  recovers the saved path from an `IMAGE_PATH:` marker (last-wins, with a scrape fallback)
+  and optionally copies it to `--output`.
 - **`/antigravity:handoff`** — reflect → write a handoff document to the OS temp
   dir → hand it to agy to continue → bring the response back (`--print` to only
   write the doc). Includes a suggested-skills section and redaction guidance.

@@ -28,6 +28,9 @@ const AGY_PRINT_TIMEOUT = "4m";
 const AGY_TIMEOUT_MS = 270_000;
 // SIGTERM, then SIGKILL: a child that ignores the first must not hold this process open.
 const SIGKILL_GRACE_MS = 5_000;
+// SIGKILL still cannot force `close` when a descendant holds the pipes. This is how long
+// we wait for it before answering anyway — and saying the tree was not confirmed dead.
+const FINAL_DEADLINE_MS = 5_000;
 
 // The API tells us what it actually sent. 2k comes back as PNG, 1k as JPEG —
 // measured, and the single most surprising thing about this endpoint.
@@ -215,30 +218,69 @@ export function agyPrompt({ prompt, aspect, out }) {
   );
 }
 
-function runAgy({ bin, args, cwd, timeoutMs, spawnImpl }) {
+function runAgy({ bin, args, cwd, timeoutMs, spawnImpl, killImpl = process.kill, graceMs = SIGKILL_GRACE_MS, deadlineMs = FINAL_DEADLINE_MS }) {
   return new Promise((resolve, reject) => {
-    const child = spawnImpl(bin, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    // detached puts agy in its own process group so a timeout can signal the GROUP. agy
+    // spawns helpers; signalling only the leader leaves them holding the inherited pipes
+    // and `close` never arrives — measured, a 100ms timeout took 1087ms to settle behind
+    // a 1s descendant. Without detached, a negative pid would signal our own group.
+    const child = spawnImpl(bin, args, { cwd, stdio: ["ignore", "pipe", "pipe"], detached: true });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let settled = false;
     let escalation;
-    // A timeout does NOT reject: agy has been seen to finish the render and then hang
-    // narrating it, and rejecting here would discard an image that is already on disk.
-    // Kill it, then let the caller judge by the file like every other path does.
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      escalation = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
-    }, timeoutMs);
-    const done = () => {
+    let deadline;
+    const clearAll = () => {
       clearTimeout(timer);
       clearTimeout(escalation);
+      clearTimeout(deadline);
     };
+    // One settle, whatever arrives first. `close` after a deadline, or an `error` a
+    // synchronous kill emits, must not resolve a promise that already answered.
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      clearAll();
+      resolve(value);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      clearAll();
+      reject(error);
+    };
+    const signalTree = (sig) => {
+      try {
+        if (child.pid) killImpl(-child.pid, sig);
+        else child.kill(sig);
+      } catch {
+        // ESRCH: already gone. Nothing to do, and nothing worth reporting.
+      }
+    };
+    // A timeout does NOT reject: agy has been seen to finish the render and then hang
+    // narrating it, and rejecting here would discard an image that is already on disk.
+    // Kill the group, then let the caller judge by the file like every other path does.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // Arm the escalation BEFORE signalling: a kill that emits `close` synchronously
+      // would otherwise leave a timer nobody can clear, firing SIGKILL at a dead pid and
+      // holding the event loop open for the grace period (measured: 22ms promise, 5.06s
+      // process).
+      escalation = setTimeout(() => {
+        signalTree("SIGKILL");
+        // Even SIGKILL cannot guarantee `close` — a descendant outside the group, or one
+        // holding the pipes, can outlive it. Settle on our own clock and tell the caller
+        // the tree was never confirmed dead, so it does not delete a directory something
+        // may still be writing into.
+        deadline = setTimeout(() => settle({ code: null, stdout, stderr, timedOut, treeConfirmedDead: false }), deadlineMs);
+      }, graceMs);
+      signalTree("SIGTERM");
+    }, timeoutMs);
     child.stdout?.on("data", (c) => (stdout += c.toString("utf8")));
     child.stderr?.on("data", (c) => (stderr += c.toString("utf8")));
     child.on("error", (e) => {
-      done();
-      reject(
+      fail(
         new ImageError(
           e?.code === "ENOENT"
             ? `agy is not installed (looked for \`${bin}\`). Install the Antigravity CLI, or set AGY_BIN — or drop --engine agy to use xAI.`
@@ -246,10 +288,7 @@ function runAgy({ bin, args, cwd, timeoutMs, spawnImpl }) {
         ),
       );
     });
-    child.on("close", (code) => {
-      done();
-      resolve({ code, stdout, stderr, timedOut });
-    });
+    child.on("close", (code) => settle({ code, stdout, stderr, timedOut, treeConfirmedDead: true }));
   });
 }
 
@@ -261,7 +300,10 @@ export async function generateWithAgy({
   aspect = "1:1",
   agyBin = resolveAgyBin(),
   spawnImpl = spawn,
+  killImpl = process.kill,
   timeoutMs = AGY_TIMEOUT_MS,
+  graceMs = SIGKILL_GRACE_MS,
+  deadlineMs = FINAL_DEADLINE_MS,
 }) {
   reserveOut(out);
   const abs = path.resolve(out);
@@ -270,8 +312,18 @@ export async function generateWithAgy({
   // `.png` in place would rename over a `.png` that reserveOut never looked at — the xAI
   // path's "never clobber" promise, quietly broken. Staging also means a second
   // invocation cannot hand us its file as our receipt.
-  const stage = mkdtempSync(path.join(tmpdir(), "imagine-agy-"));
+  let stage;
+  try {
+    stage = mkdtempSync(path.join(tmpdir(), "imagine-agy-"));
+  } catch (error) {
+    throw new ImageError(
+      `could not create a staging directory under ${tmpdir()}: ${error?.message ?? error}. Set TMPDIR to a writable directory, or fix that path.`,
+    );
+  }
   const staged = path.join(stage, "image.jpg");
+  // Set when the bytes on disk are worth more than a tidy /tmp: a render we could not
+  // publish, or a tree we could not confirm dead and must not delete underneath.
+  let keepStage = null;
   try {
     const args = [
       "-p",
@@ -286,7 +338,8 @@ export async function generateWithAgy({
       // cwd only decides where a RELATIVE path of agy's lands. It is not a fence.
       "--dangerously-skip-permissions",
     ];
-    const { code, stdout, stderr, timedOut } = await runAgy({ bin: agyBin, args, cwd: stage, timeoutMs, spawnImpl });
+    const { code, stdout, stderr, timedOut, treeConfirmedDead } = await runAgy({ bin: agyBin, args, cwd: stage, timeoutMs, spawnImpl, killImpl, graceMs, deadlineMs });
+    if (!treeConfirmedDead) keepStage = "agy did not exit and may still be writing there";
 
     // The receipt is the file, never the JSON — an agent reporting success it did not
     // achieve is the exact failure mode this plugin refuses to inherit. The response text
@@ -306,6 +359,7 @@ export async function generateWithAgy({
       if (timedOut) {
         throw new ImageError(
           `agy did not finish within ${Math.round(timeoutMs / 1000)}s and left no image. The render may still have cost quota. ` +
+            (treeConfirmedDead ? "" : "agy did not exit even after SIGKILL — a helper process may still be running. ") +
             (tail ? `agy said: ${tail}` : "agy printed nothing before it was killed."),
         );
       }
@@ -334,16 +388,22 @@ export async function generateWithAgy({
       // land on top of someone's image.png.
       copyFileSync(staged, target, constants.COPYFILE_EXCL);
     } catch (error) {
+      // The render happened and was paid for. Deleting it in the finally below would
+      // charge the user twice for the same picture, and a re-run does not reproduce it.
+      keepStage = "the render is kept here because the destination was taken";
       if (error?.code === "EEXIST") {
         throw new ImageError(
-          `${target} already exists — refusing to overwrite. The image was generated and billed; re-run with a different --out to keep it.`,
+          `${target} already exists — refusing to overwrite. The image was generated and billed; it is at ${staged} — move it, or re-run with a different --out (a re-run costs quota and will not reproduce this image).`,
         );
       }
-      throw new ImageError(`the image was generated and billed, but could not be written to ${target}: ${error?.message ?? error}`);
+      throw new ImageError(`the image was generated and billed, but could not be written to ${target}: ${error?.message ?? error}. It is at ${staged}.`);
     }
     return { out: target, bytes: saved.size, model: "agy/generate_image", mimeType, renamed: target !== abs };
   } finally {
-    rmSync(stage, { recursive: true, force: true });
+    // Only ever delete a directory nothing is still writing to and nothing of value is
+    // left in. `force` so a half-created stage is not a second error on the way out.
+    if (keepStage) process.stderr.write(`imagine: keeping ${stage} — ${keepStage}\n`);
+    else rmSync(stage, { recursive: true, force: true });
   }
 }
 

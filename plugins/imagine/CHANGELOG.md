@@ -1,5 +1,31 @@
 # imagine — changelog
 
+## 0.2.2
+
+Closes the second review round. 0.2.1's fixes were right about *what* to check and wrong about
+*how the process ends* — every item here is a defect the previous round's fix introduced.
+
+- **The timeout now kills a process tree, and settles on its own clock.** agy spawns helpers.
+  Signalling only the leader leaves them holding the inherited pipes, so `close` may never
+  arrive and the promise never settles — measured, a 100ms timeout took 1087ms to settle behind
+  a single 1s descendant. The child is now `detached` (its own process group) and signalled by
+  negative pid, and after SIGKILL there is a final deadline: we answer even if `close` does not
+  come, and say the tree was not confirmed dead.
+- **Staging is kept when the tree was not confirmed dead.** Deleting it on the way out could
+  destroy a render a still-running agy was writing — one the user had already paid for.
+- **The escalation timer is armed before the signal, not after.** A kill that raises
+  synchronously used to settle the promise while leaving a timer nobody could clear, firing
+  SIGKILL at a dead pid and holding the process open for the whole grace period (measured: a
+  22ms promise inside a 5.06s process).
+- **A render that cannot be published is kept, and the error says where.** The destination being
+  taken used to delete the image and suggest a re-run — which costs quota and, with no `seed`,
+  cannot reproduce it.
+- **A staging directory that cannot be created fails as one line.** An unwritable `TMPDIR` used
+  to print a raw stack, against the one-line-failure contract every other path keeps.
+- Doc corrections: the audit doc, command doc, AGENTS rules and 0.2.1's own changelog still
+  described `statSync(out)` and a cwd in the output directory, which stopped being true when
+  staging landed. `plugins/antigravity/CHANGELOG.md` had a sentence broken by the Imagen removal.
+
 ## 0.2.1
 
 Closes an independent review of 0.2.0. Every item was a way the agy path could still report a
@@ -45,7 +71,7 @@ CLI as well as xAI — `node scripts/imagine.mjs --engine agy --prompt-file p.tx
   quotes, a stray heredoc delimiter and `$(…)` are all inert. Every shipped command and doc
   uses `--prompt-file`; a positional prompt and bare stdin still work for a caller that already
   holds one safely.
-- **`--dangerously-skip-permissions`, with `cwd` set to the output directory.** A headless run
+- **`--dangerously-skip-permissions`, with `cwd` set to a staging directory.** A headless run
   cannot answer a permission prompt. The cwd is there so a relative path of agy's lands where we
   expect; it is **not** a sandbox, and the docs say so rather than implying the flag is fenced.
 - **`--model`, `--resolution` and `--quality` are refused (exit 2) with `--engine agy`** rather

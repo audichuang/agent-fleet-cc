@@ -1,7 +1,7 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -15,24 +15,37 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 
 // A fake agy. `handler` gets the spawn call and decides what the process does —
 // including whether it writes the file, which is the only thing that counts.
+// Runs that keep their staging on purpose (an unconfirmed kill, an unpublishable render)
+// would otherwise pile up in /tmp across suite runs.
+const stagesMade = [];
+after(() => {
+  for (const d of stagesMade) rmSync(d, { recursive: true, force: true });
+});
+
 function fakeAgy(handler) {
   const calls = [];
   const signals = [];
+  let nextPid = 4200;
   const spawnImpl = (bin, args, opts) => {
     calls.push({ bin, args, opts });
+    stagesMade.push(path.dirname(stagedPath(args)));
     const child = new EventEmitter();
+    child.pid = ++nextPid;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
-    let ignoreTerm = false;
-    child.kill = (sig) => {
-      signals.push(sig);
-      // A child that ignores SIGTERM only dies on SIGKILL — the escalation has to exist
-      // or this process waits forever on `close`.
-      if (!ignoreTerm || sig === "SIGKILL") child.emit("close", null);
+    let mode = {};
+    child.kill = (sig) => signals.push({ pid: child.pid, sig, viaChild: true });
+    spawnImpl.killImpl = (pid, sig) => {
+      signals.push({ pid, sig });
+      if (mode.killEmitsErrorSync) return child.emit("error", Object.assign(new Error("kill raced"), { code: "EPERM" }));
+      // deaf: nothing kills it — the descendant-holds-the-pipes case, where `close`
+      // never arrives however hard we signal.
+      if (mode.deaf) return;
+      if (!mode.ignoresTerm || sig === "SIGKILL") child.emit("close", null);
     };
     setImmediate(() => {
-      const { code = 0, stdout = "", stderr = "", error, hang = false, ignoresTerm = false } = handler({ bin, args, opts }) ?? {};
-      ignoreTerm = ignoresTerm;
+      mode = handler({ bin, args, opts }) ?? {};
+      const { code = 0, stdout = "", stderr = "", error, hang = false } = mode;
       if (error) return child.emit("error", error);
       if (stdout) child.stdout.emit("data", Buffer.from(stdout));
       if (stderr) child.stderr.emit("data", Buffer.from(stderr));
@@ -42,8 +55,13 @@ function fakeAgy(handler) {
   };
   spawnImpl.calls = calls;
   spawnImpl.signals = signals;
+  spawnImpl.killImpl = () => {};
   return spawnImpl;
 }
+
+// Every timing test drives these instead of the 5s production clocks.
+const FAST = { timeoutMs: 20, graceMs: 20, deadlineMs: 20 };
+const withKill = (spawnImpl, extra = {}) => ({ spawnImpl, killImpl: (...a) => spawnImpl.killImpl(...a), ...extra });
 
 // The path agy is told to write to — staging, not the caller's --out.
 const stagedPath = (args) => args[1].match(/at exactly (\S+)\./)[1];
@@ -229,16 +247,21 @@ test("a timeout still honours the file on disk — the render may have finished 
     writeFileSync(stagedPath(args), JPEG);
     return { hang: true };
   });
-  const r = await generateWithAgy({ prompt: "a cat", out, spawnImpl, timeoutMs: 20 });
+  const r = await generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl, FAST) });
   assert.equal(r.bytes, JPEG.length);
-  assert.deepEqual(spawnImpl.signals, ["SIGTERM"], "the hung child is killed, not left running");
+  assert.deepEqual(
+    spawnImpl.signals.map((s) => s.sig),
+    ["SIGTERM"],
+    "the hung child is killed, not left running",
+  );
+  assert.ok(spawnImpl.signals[0].pid < 0, "the signal goes to the process GROUP, not just the leader");
 });
 
 test("a timeout with no file says so without claiming nothing was spent", async () => {
   const out = path.join(dir(), "image.jpg");
   const spawnImpl = fakeAgy(() => ({ hang: true }));
   await assert.rejects(
-    () => generateWithAgy({ prompt: "a cat", out, spawnImpl, timeoutMs: 20 }),
+    () => generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl, FAST) }),
     (e) =>
       e instanceof ImageError &&
       /did not finish within/.test(e.message) &&
@@ -251,8 +274,11 @@ test("a timeout with no file says so without claiming nothing was spent", async 
 test("a child that ignores SIGTERM is escalated to SIGKILL", async () => {
   const out = path.join(dir(), "image.jpg");
   const spawnImpl = fakeAgy(() => ({ hang: true, ignoresTerm: true }));
-  await assert.rejects(() => generateWithAgy({ prompt: "a cat", out, spawnImpl, timeoutMs: 20 }), (e) => e instanceof ImageError);
-  assert.deepEqual(spawnImpl.signals, ["SIGTERM", "SIGKILL"]);
+  await assert.rejects(() => generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl, FAST) }), (e) => e instanceof ImageError);
+  assert.deepEqual(
+    spawnImpl.signals.map((s) => s.sig),
+    ["SIGTERM", "SIGKILL"],
+  );
 });
 
 test("staging is cleaned up whichever way the run ends", async () => {
@@ -262,4 +288,89 @@ test("staging is cleaned up whichever way the run ends", async () => {
   await assert.rejects(() => generateWithAgy({ prompt: "a cat", out: path.join(dir(), "x.jpg"), spawnImpl: fakeAgy(() => ({ code: 1 })) }));
   const after = readdirSync(tmpdir()).filter((n) => n.startsWith("imagine-agy-")).length;
   assert.equal(after, before, "no staging directory may outlive its run");
+});
+
+test("agy runs in its own process group — otherwise a group signal would hit us", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = succeeds();
+  await generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl) });
+  assert.equal(spawnImpl.calls[0].opts.detached, true);
+});
+
+test("a tree that survives SIGKILL settles on our clock instead of hanging forever", async () => {
+  // The measured case: a descendant holding the inherited pipes means `close` never
+  // arrives, however hard the leader is signalled. Before this, the promise never settled.
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(() => ({ hang: true, deaf: true }));
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl, FAST) }),
+    (e) => e instanceof ImageError && /did not exit even after SIGKILL/.test(e.message),
+  );
+  assert.deepEqual(
+    spawnImpl.signals.map((s) => s.sig),
+    ["SIGTERM", "SIGKILL"],
+  );
+});
+
+test("staging is kept, not deleted, when the tree was never confirmed dead", async () => {
+  // Deleting a directory a live renderer is still writing into destroys a paid render.
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(({ args }) => {
+    writeFileSync(stagedPath(args), JPEG);
+    return { hang: true, deaf: true };
+  });
+  const r = await generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl, FAST) });
+  assert.equal(r.bytes, JPEG.length);
+  assert.equal(existsSync(path.dirname(stagedPath(spawnImpl.calls[0].args))), true, "the staging dir must survive an unconfirmed kill");
+});
+
+test("a kill that raises synchronously does not leave a timer firing at a dead pid", async () => {
+  // The escalation is armed BEFORE the signal. Armed after, a synchronous error would
+  // settle the promise while leaving an unclearable timer holding the event loop open
+  // for the whole grace period.
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(() => ({ hang: true, killEmitsErrorSync: true }));
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl, FAST) }),
+    (e) => e instanceof ImageError && /could not run agy/.test(e.message),
+  );
+  await new Promise((r) => setTimeout(r, 60));
+  assert.deepEqual(
+    spawnImpl.signals.map((s) => s.sig),
+    ["SIGTERM"],
+    "no SIGKILL may fire after the promise has already answered",
+  );
+});
+
+test("a render that cannot be published is kept, not deleted", async () => {
+  // A re-run costs quota and does not reproduce the image, so the bytes have to survive
+  // the error path that reports the collision.
+  const d = dir();
+  const out = path.join(d, "image.jpg");
+  writeFileSync(path.join(d, "image.png"), "TAKEN");
+  const spawnImpl = succeeds(PNG);
+  let staged;
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, ...withKill(spawnImpl) }),
+    (e) => {
+      staged = stagedPath(spawnImpl.calls[0].args);
+      return e instanceof ImageError && e.message.includes(staged) && /will not reproduce/.test(e.message);
+    },
+  );
+  assert.equal(existsSync(staged), true, "the billed render must outlive the error that reports it");
+});
+
+test("a staging directory that cannot be created fails as one line, not a stack", async (t) => {
+  const prev = process.env.TMPDIR;
+  t.after(() => {
+    if (prev === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = prev;
+  });
+  // Resolve the destination BEFORE breaking TMPDIR — dir() stages under it too.
+  const out = path.join(dir(), "image.jpg");
+  process.env.TMPDIR = path.join(dir(), "no", "such", "place");
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, spawnImpl: succeeds() }),
+    (e) => e instanceof ImageError && /could not create a staging directory/.test(e.message) && /TMPDIR/.test(e.message),
+  );
 });

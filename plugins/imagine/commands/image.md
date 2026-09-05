@@ -132,13 +132,16 @@ With `--engine agy` the model column reads `agy/generate_image` and the failures
   render and then hang narrating it, so a timeout can still succeed. Only when there is no file
   does it fail, and it says the render may still have cost quota rather than claiming nothing
   was spent.
-- **"already exists — refusing to overwrite"** on the agy path → the image was generated; the
-  destination (possibly with a corrected extension) was taken. Re-run with a different `--out`.
+- **"already exists — refusing to overwrite"** on the agy path → read which half of the line
+  applies. Caught before the spawn, nothing was generated or billed. Caught at publish time, the
+  render happened: the message names the staging path where the bytes were **kept**, because a
+  re-run costs quota and will not reproduce that image. Move it, or re-run with another `--out`.
 
 The agy path runs with `--dangerously-skip-permissions`, because a headless run has nobody to
-answer a permission prompt. The script sets `cwd` to the output directory so a relative path of
-agy's lands where we expect — that is **not** a sandbox, and skipped permissions are not fenced
-by it. Say so if a user asks what the flag costs them.
+answer a permission prompt. It runs `detached` with `cwd` in a private staging directory, so a
+timeout can signal the whole process group and a relative path of agy's lands away from your
+files — but that is **not** a sandbox: skipped permissions are not fenced by cwd. Say so if a
+user asks what the flag costs them.
 
 ## 4. Cost
 
