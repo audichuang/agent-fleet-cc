@@ -1,5 +1,4 @@
 > 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
-> 本檔只寫 antigravity 這顆引擎的**增量**。完整結構問 `codegraph explore` / `tree`,別在這窮舉。
 > agy CLI 合約(逐旗清單、輸出契約、唯讀/寫入姿態、未接的引擎表面、重跑 recipe)的**單一正本**是
 > `docs/antigravity-cli-contract-audit.md` —— 別在此重抄。
 

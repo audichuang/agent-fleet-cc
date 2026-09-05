@@ -1,7 +1,4 @@
 > 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
-> root 已載 codex 的幾個跨層事實:**不跑 shared runWorker**、
-> **build:codex 型別檢查是 npm test 之外的**、**runtime.test 偶爾 flaky**、`codex-protocol-sync-audit.md`。
-> 本檔只寫增量,不重抄。完整結構問 `codegraph explore` / `tree`。
 
 # codex plugin — the OpenAI Codex (GPT-5.6) engine
 

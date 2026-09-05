@@ -1,5 +1,4 @@
 > 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
-> 本檔只寫 imagine 這顆的**增量**。
 
 # imagine plugin — 生圖(xAI Grok Imagine / Google Antigravity)
 
