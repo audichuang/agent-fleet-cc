@@ -563,9 +563,11 @@ async function executeReviewRun(request) {
         stdout: result.reviewText,
         stderr: result.stderr,
         // The render needs the reason too, or a failed review that still captured
-        // review text prints as a finished one. No hadAgentMessage gate here:
-        // reviewText comes only from an exitedReviewMode item, never from the error
-        // text, so it can never BE the reason (see renderNativeReviewResult).
+        // review text prints as a finished one. This site never needed the body
+        // comparison the other two do (1.6.0 spelled that as a `hadAgentMessage`
+        // gate, removed in 1.6.2): reviewText comes only from an exitedReviewMode
+        // item, never from the error text, so it can never BE the reason
+        // (see renderNativeReviewResult, which checks anyway).
         errorMessage
       },
       { reviewLabel: reviewName, targetLabel: target.label, reasoningSummary: result.reasoningSummary }

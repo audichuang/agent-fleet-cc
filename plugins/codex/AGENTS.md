@@ -78,7 +78,8 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   transport 上恆為 `""`),死掉的 turn 印成「Codex did not return a final message.」。
   現在 `errorMessage` 無條件傳給 render,由 render 自己比對 body,相同就退成裸標記
   (`reviewFailureLines` / `renderTaskResult` / `renderStoredJobResult` 三處同一套)。
-  **`hadAgentMessage` 仍由 `codex.mjs` 產出但已無讀者** —— 別再拿它當判準。
+  **`hadAgentMessage` 已從 `codex.mjs` 刪除**(1.6.2;拿掉最後一個讀者之後,一個看起來還活著的
+  欄位就是陷阱本身)—— 別再拿它當判準,也別因為看到舊文件提到它就重新加回去。
   **這個比較有天花板,是刻意接受的**:`describeTurnError` 會給原因接上 ` [codexErrorInfo]` 或
   ` — additionalDetails`,body 沒有,所以 `includes` 必然 miss、兩者近似重複(不是 1.6.0 那種
   字面雙前綴)。理由見 `render.mjs` 的 `ponytail:` 註解:沒有資訊遺失,而放寬比對會有吞掉真正
