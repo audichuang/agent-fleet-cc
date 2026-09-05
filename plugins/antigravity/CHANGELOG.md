@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-09-05
+
+Scoped deliberately narrow: the SKILL.md model-catalog de-rot that an earlier cut of this work
+also attempted lives on `antigravity/catalog-rot-and-partial-output`, which does it better —
+it found that agy 1.1.10 fixed `--model` being *silently ignored in headless `-p` runs*, which
+means the 1.1.5 "a Pro tier stalls in `--print`" observation was never attributable to the
+model at all. Repeating that de-rot here would have duplicated it worse and conflicted on the
+same lines, so this release leaves the Model section untouched.
+
+### Fixed
+- **The foreground timeout guidance named the wrong bound, by a factor of two.**
+  `agents/agy-rescue.md` told the model to background anything "likely to keep agy running past
+  ten minutes", attributing the rule to the Bash tool's ceiling. agy's own print-mode timeout is
+  5m (`DEFAULT_PRINT_TIMEOUT_MS`, passed through by the plugin) with the Node backstop
+  deliberately one minute later so the engine always times out first — so a foreground turn dies
+  at roughly five minutes and the host's ceiling is never what stops it. A model judging by ten
+  leaves a seven-minute task in the foreground to be killed. The rule is an engine property, not
+  a host dispatch policy, and both the agent and `SKILL.md` now say so and name the env knobs
+  (`AGY_PRINT_TIMEOUT_MS` / `AGY_JOB_TIMEOUT_MS`).
+- **A killed foreground call read as a lost turn.** `runForeground` creates the job record
+  before it starts the worker, so a cut-off run is recoverable — but it can read `running` until
+  a dead-pid reconcile, which every read command triggers (`status`, `logs`, `wait`, `result`,
+  `cancel`). Both surfaces now say so, instead of leaving "report a failed review" as the
+  obvious move.
+- **`/antigravity:adversarial-review` had no stop-rule.** `review.md` has carried "do not make
+  any code changes based on the review findings; ask which to address first" since it was
+  written; the adversarial verb never did — and it is the surface used on code about to ship,
+  where auto-applying a finding is worst.
+- **The same file described `--sandbox` as a write guard** ("agy runs under `--sandbox` so the
+  review cannot mutate the tree"), which this plugin's `AGENTS.md` forbids in as many words: it
+  is an nsjail *terminal* container that blocks shell commands, not `write_file`, and the model
+  can opt out per call. `README.md` already said "read-only **by instruction**"; this file was
+  the one that drifted. A guard now sweeps every prose surface for the claim.
+
+### Notes from the independent agy review
+
+Reviewed by agy itself (1.1.27). It found four things, and was right about all of them.
+
+- **`cancel` was being sold as a read command.** Widening the reconcile list to match the code
+  put `cancel` beside `status`/`logs`/`wait`/`result` under "every read command", and then told
+  the model any of the five is where a cut-off run resolves. `cancel` mutates: a model following
+  that to *look* at an interrupted run would cancel it. This was introduced by the previous
+  round's fix — the list was genuinely incomplete, and completing it created a worse defect than
+  the one it closed. The verbs that only read are named as such now, and `cancel` is listed as
+  reconciling but explicitly marked state-changing.
+- **The `--sandbox` guard was wrong in both directions, shown empirically.** It banned a phrasing
+  (`` `--sandbox` `` followed within 80 non-period characters by "cannot mutate"/"read-only"/…).
+  That leaked whenever the claim came first (`Read-only: agy runs under \`--sandbox\` to inspect
+  code`), across a line break, or across a sentence boundary — and it *rejected* the correct
+  clarification, because "does not block writes" matched `blocks? writ`. The set of wrong
+  phrasings is unbounded; the right framing is not. Inverted: any surface that mentions
+  `--sandbox` at all must also carry the by-instruction-not-enforcement framing.
+- **The recovery guard asserted tokens, not the contract.** Text saying the opposite — "a killed
+  call is lost and leaves no record; reconcile with `$antigravity status` or `result`" — contains
+  every token it looked for. It now asserts the claim and the absence of its negation.
+- A stale `0.6.2` header and a self-contradicting comment inside the same test function.
+
+**Getting agy to review at all took three attempts, and the first two are a finding of their
+own.** A background rescue returned `status: completed`, `exitCode: 0`, `resultText: null`, an
+empty log, in under a second — twice. agy was fine (`agy --print` answered normally). Running the
+same prompt against the binary directly printed the reason the plugin had discarded: *"no output
+produced — a tool required the `command` permission that headless mode cannot prompt for, so it
+was auto-denied."* The prompt asked agy to run `git diff`. So agy said exactly what was wrong and
+the job recorded a clean success with nothing in it. That is not the failed-job case a sibling
+branch is fixing — it is a *completed* job, exit 0, message dropped. Recorded here, not fixed:
+out of scope for a docs release, and it belongs next to the partial-output work. The review that
+did run was made self-contained (diff and code pasted in, no tools needed).
+
+### Notes from the check round on this rebuild
+- **Lifting the doc and test files wholesale off the old branch reverted a main fix.** main
+  retired the `image` verb in 0.7.0; the pre-retire copies of `agents/agy-rescue.md` and
+  `tests/antigravity/agent-contract.test.mjs` still listed it in the agent's do-not-call set, so
+  copying them forward put a retired verb back into shipped prose **and** re-pinned it as the
+  expected string. The regression was in the test as much as the doc — the guard would have
+  defended the wrong spelling. Both restored to main's.
+- **The five-minute guard was vacuous on `SKILL.md`.** The agent half was anchored on its
+  dispatch sentence; the `SKILL.md` half was left as a shared whole-file `/five minutes/`, and
+  that file says it twice — in the heading that IS the rule, and in the explanation below it.
+  Switching the heading back to ten left the second occurrence matching and the suite green.
+  **This is the fourth time this exact hole appeared in this one test file.** A document-wide
+  match on a token the document repeats is the default failure mode here, not an edge case; the
+  guards now anchor per file, on the line that carries the rule.
+- **And a fifth, scoped smaller.** The completeness check for the reconcile verb list used
+  `` new RegExp('`?' + verb + '`?') `` — optional backticks, so `result` matched the prose
+  "do not report a failed or empty result" three sentences later, and dropping `` `result` ``
+  from the list kept the guard green. Backticks are required now. A pattern loose enough to hit
+  an incidental word is the same bug as a whole-file match, just wearing a smaller scope.
+- **A mutation that silently no-ops looks exactly like a vacuous guard.** Two of the checks above
+  first read as "guard does not bite" because the `sed` mutating them never matched — one had a
+  line break between the tokens it targeted. Every mutation in this round now asserts that the
+  replacement actually changed the file before running the test.
+
+### Notes
+- Guards in `tests/antigravity/agent-contract.test.mjs`, each mutation-checked. The timeout
+  guard pins the prose against `DEFAULT_PRINT_TIMEOUT_MS` itself, so moving the constant without
+  moving the docs goes red.
+- **Three of those guards had to be written three times**, same failure each time: a
+  document-wide `assert.match` on a token that also appears elsewhere in the file. The status
+  command is named in the background-dispatch bullet; `` `result` `` is in the "Do not call"
+  list; "five minutes" appears in the explanation a paragraph below the rule it guards. Each
+  passed while the guarded text was deleted. They now chunk the document by bullet or paragraph
+  and assert within the one chunk — which also has to survive the two files wrapping
+  differently, since the agent keeps a rule on one long line and `SKILL.md` hard-wraps. **In
+  these doc-contract tests a whole-file match on a common token is the default failure mode,
+  not an edge case.**
+- agy moved 1.1.19 → 1.1.27 during the session that wrote this entry — the background
+  self-update `AGENTS.md` warns about, and the argument for keeping versions out of shipped
+  prose: a pinned number is stale before the change describing it is committed.
+
 ## [0.7.0] — 2026-09-05
 
 ### Removed
