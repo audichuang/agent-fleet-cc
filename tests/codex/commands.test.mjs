@@ -186,7 +186,10 @@ test("rescue command absorbs continue semantics", () => {
   // The real invariant is one `task` run per handoff, not one Bash call.
   assert.match(agent, /one `task` run per rescue handoff/i);
   assert.match(agent, /Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own/i);
-  assert.match(agent, /Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
+  // `setup` was in the deleted skill's list and is the one that matters most here: it
+  // toggles the review gate and can offer to install the CLI. It was dropped in 9bf17a5
+  // and restored in the round that followed — so it is now four migrated rules, not three.
+  assert.match(agent, /Do not call `setup`, `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
   assert.match(agent, /Leave `--effort` unset unless the user explicitly requests a specific reasoning effort/i);
   assert.match(agent, /Leave model unset by default/i);
   assert.match(agent, /Pass any explicit `--model` value through verbatim/i);
@@ -200,15 +203,13 @@ test("rescue command absorbs continue semantics", () => {
   assert.match(agent, /references\/prompting\.md/);
   assert.match(agent, /to tighten the user's request into a better Codex prompt/i);
   assert.match(agent, /Do not use that reference to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work/i);
-  // 1.6.2 deleted `codex-cli-runtime`; ~90% of it was already duplicated here, and
-  // these are the invariants that were only in the skill. They govern a command line
-  // the agent builds by hand, so losing one fails at runtime, not at edit time.
-  assert.match(agent, /one `task` run per rescue handoff/i);
-  assert.match(agent, /Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`/i);
+  // 1.6.2 deleted `codex-cli-runtime`; ~90% of it was already duplicated here. These are
+  // the FOUR invariants that existed only in the skill — the ones above this comment are
+  // pinned already, so re-asserting them here only made the block look thorough. They
+  // govern a command line the agent builds by hand, so losing one fails at runtime, not
+  // at edit time.
   assert.match(agent, /Never hardcode a cache\/versioned path/i, "the ${CLAUDE_PLUGIN_ROOT} path invariant");
   assert.match(agent, /pass `--prompt-file <path>`/i, "the empty-prompt trap");
-  assert.match(agent, /Leave `--effort` unset unless the user explicitly requests a specific/i);
-  assert.match(agent, /Leave model unset by default/i);
   assert.match(agent, /Treat `--background` and `--wait` as Claude-side execution control only/i);
   assert.match(agent, /Strip them before calling `task`/i);
   // Every flag the companion accepts needs a rule, or the agent's "preserve the
@@ -333,7 +334,7 @@ test("setup command can offer Codex install and still points users to codex logi
 });
 
 // Every surface that hands Codex's own output to the user must route through the
-// `codex-result-handling` skill — it carries the stop-rule that review findings are
+// `codex:codex` skill — it carries the stop-rule that review findings are
 // never auto-fixed. The list is spelled out rather than inferred because the
 // alternative (grepping bodies for "verbatim") guesses at prose and would pass on a
 // file that dropped the pointer.

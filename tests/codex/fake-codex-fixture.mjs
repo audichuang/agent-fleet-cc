@@ -31,6 +31,15 @@ const readline = require("node:readline");
 	// marker the render never produced. This one carries no marker: if the render stops
 	// adding one, the assertion has nothing else to fall back on.
 	const BARE_TURN_ERROR = "401 Unauthorized";
+	// NOTE: this whole body lives in a template literal — no backticks in comments.
+	// Every turn/completed error in this fixture is UNDECORATED, while every standalone
+	// error notification carries codexErrorInfo. The real protocol has no such asymmetry:
+	// v2 TurnError declares codexErrorInfo as a required nullable key, and
+	// isModelUnavailableFailure reads it straight off turn.error. That asymmetry is
+	// load-bearing for the "reason stated once" assertions, because describeTurnError
+	// appends a bracketed code, making the decorated reason a strict superset of the bare
+	// body so the render containment check cannot match. This shape drives that on purpose.
+	const DECORATED_TURN_ERROR = { message: "401 Unauthorized", codexErrorInfo: "unauthorized" };
 	const interruptibleTurns = new Map();
 
 	function loadState() {
@@ -484,6 +493,14 @@ rl.on("line", (line) => {
         if (BEHAVIOR === "bare-turn-error") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
           send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", { message: BARE_TURN_ERROR }) } });
+          break;
+        }
+        // The same bare reason, decorated the way the real wire decorates it. The render
+        // cannot collapse this to one statement (see the ponytail: note in render.mjs),
+        // so this is the executable record of that accepted ceiling.
+        if (BEHAVIOR === "decorated-turn-error") {
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "failed", DECORATED_TURN_ERROR) } });
           break;
         }
         // The third failure shape, absent from the plugin's AGENTS.md list: a terminal

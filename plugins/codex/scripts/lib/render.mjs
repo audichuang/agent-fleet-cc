@@ -241,7 +241,7 @@ export function renderSetupReport(report) {
 }
 
 // A FAILED review must not render as a finished one — same rule, and the same
-// State the failure once, the same rule renderNativeReviewResult applies: with no agent
+// State the failure once, the rule renderNativeReviewResult applies: with no agent
 // message `finalMessage` IS the error text (codex.mjs resolveFinalMessage), and the
 // "Raw final message:" block below prints it, so a header restating it says the same
 // sentence twice. `body` is whatever that branch is about to print.
@@ -402,11 +402,18 @@ export function renderTaskResult(parsedResult, meta) {
     if (!failureReason) {
       return output;
     }
-    // Same rule as renderReviewResult above: state the failure once. With no agent
-    // message `resolveFinalMessage` already fell back to the turn error text, so the
-    // body IS the reason and repeating it above prints the same sentence twice.
-    // `commands/task.md` tells Claude to relay this stdout verbatim, so the marker has
-    // to be here either way — what varies is whether the reason is worth restating.
+    // State the failure once. With no agent message `resolveFinalMessage` fell back to
+    // the turn error text, so the body is USUALLY the reason and repeating it above
+    // prints the same sentence twice. `commands/task.md` tells Claude to relay this
+    // stdout verbatim, so the marker has to be here either way — what varies is whether
+    // the reason is worth restating.
+    // ponytail: same ceiling as renderStoredJobResult below — `describeTurnError`
+    // decorates the reason with a `[codexErrorInfo]` tag or an ` — additionalDetails`
+    // tail that the bare body lacks, so `includes` misses and the two near-duplicate.
+    // Accepted for the same reason it is there: nothing is lost, and a fuzzier compare
+    // trades a readable near-repeat for the risk of swallowing a real distinct reason.
+    // Before main this shape printed NO marker at all, so near-duplication is the
+    // strictly better failure mode.
     return output.includes(failureReason)
       ? `Codex turn failed.\n\n${output}`
       : `Codex turn failed: ${failureReason}\n\n${output}`;

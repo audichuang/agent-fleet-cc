@@ -28,9 +28,21 @@ test("execute-plan background flow documents the signal-file Monitor + PushNotif
 // Naming the tools without naming the deadline is what left the hole.
 test("execute-plan tells the model how to outlive Monitor's five-minute default", () => {
   const source = read("commands/execute-plan.md");
-  assert.match(source, /run_in_background/, "the no-deadline route must be named");
-  assert.match(source, /persistent:\s*`?true/, "the Monitor escape hatch must be named");
+  // NOT a bare /run_in_background/ — line 77 already contains that token, in a sentence
+  // telling the model NOT to set it on the launch call. A guard that matches text the
+  // file has always carried cannot fail, and this one silently could not: deleting the
+  // whole bullet it was written for left the suite green.
+  assert.match(
+    source,
+    /you must pass `persistent: true`/,
+    "the unbounded-wait requirement must be stated as a requirement, not implied"
+  );
   assert.match(source, /five minutes|300000|5 minutes/i, "the default that bites must be stated");
+  assert.match(
+    source,
+    /the monitor dies[\s\S]{0,200}for a job that succeeded/,
+    "the consequence is the point: the wait dies while the job is fine, so silence reads as progress"
+  );
 });
 
 // The old text promised the watchdog made this wait "always terminate". It does not:

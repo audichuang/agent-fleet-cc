@@ -279,13 +279,15 @@ test("e2e: `review --json` surfaces turn.error from a failed turn/completed (no 
   assert.match(payload.errorMessage ?? "", /401 Unauthorized/);
 });
 
-// The failure header is for a PARTIAL answer only. When the turn produced no agent
-// message, resolveFinalMessage already falls back to the turn error text, so rawOutput
-// IS the reason and prefixing it says the same thing twice — the exact case the header
-// was written for read WORSE than before. These run the real companion CLI, so they
-// also pin the plumbing in executeTaskRun (render gets errorMessage only when
-// result.hadAgentMessage); a unit test that injects errorMessage into renderTaskResult
-// cannot see that line at all.
+// The failure header is stated in full only when the reason ADDS something to the body.
+// When the turn produced no agent message, resolveFinalMessage falls back to the turn
+// error text, so rawOutput usually is the reason and a full header says it twice. These
+// run the real companion CLI, so they pin the whole path, not just the render.
+//
+// (1.6.0 wrote this conditional as `result.hadAgentMessage` in executeTaskRun; 1.6.2
+// replaced it with a comparison of the reason against the body, because the flag was a
+// proxy for that question and got it wrong in both directions. There is no longer a
+// flag to pin — the behaviour is entirely in renderTaskResult.)
 //
 // THE PAIR IS ONE TEST EACH FOR THE TWO HALVES — do not "simplify" either away:
 //   - "WITH a partial answer" pins that the header EXISTS (no-header code reds it). It
@@ -350,12 +352,47 @@ test("e2e: a bare turn.error message still renders as a failure", () => {
   assert.match(
     result.stdout,
     /Codex turn failed/,
-    "a real TurnError.message is bare, so without a render-side marker stdout reads as an answer"
+    "the message carries no marker of its own, so without a render-side one stdout reads as an answer"
   );
   assert.match(result.stdout, /401 Unauthorized/);
-  // Still exactly once: the body IS the reason here, so a header restating it doubles it.
+  // Exactly once — but only because this shape is UNDECORATED. See the decorated twin
+  // below for what happens when the wire adds a code, which is the common case.
   assert.equal((result.stdout.match(/401 Unauthorized/g) ?? []).length, 1);
   assert.doesNotMatch(result.stdout, /Codex turn failed: Codex turn failed/);
+});
+
+// The containment check in renderTaskResult asks "does the body contain the reason?",
+// but `describeTurnError` decorates the reason with a ` [codexErrorInfo]` tag the body
+// does not have, so on the shape the real wire mostly produces the check MISSES and the
+// message is stated twice — once decorated in the header, once bare in the body.
+//
+// That ceiling is deliberate and pre-dates this branch: `renderStoredJobResult` carries
+// the same `ponytail:` note and the same reasoning, that a fuzzier compare would risk
+// swallowing a genuinely distinct reason to save a readable near-repeat. This test is
+// here so the ceiling is a recorded decision rather than a surprise, and so that anyone
+// who does tighten the comparison sees exactly which output changes.
+test("e2e: a decorated turn.error near-duplicates, and that ceiling is deliberate", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "decorated-turn-error");
+  initGitRepo(repo);
+  commitInitial(repo);
+
+  const result = run("node", [SCRIPT, "task", "do the thing"], { cwd: repo, env: buildEnv(binDir) });
+
+  assert.notEqual(result.status, 0);
+  // What actually matters and must never regress: the failure is marked, the code
+  // survives to the user, and the literal doubled PREFIX from 1.6.0 stays gone.
+  assert.match(result.stdout, /^Codex turn failed: /);
+  assert.match(result.stdout, /\[unauthorized\]/, "the machine-readable code must reach the user");
+  assert.doesNotMatch(result.stdout, /Codex turn failed: Codex turn failed/);
+  // The accepted ceiling, asserted so a future tightening is a visible test change and
+  // not a silent one. If you make the comparison decoration-aware, this becomes 1.
+  assert.equal(
+    (result.stdout.match(/401 Unauthorized/g) ?? []).length,
+    2,
+    "decorated reason above, bare body below — see the ponytail: note in render.mjs"
+  );
 });
 
 test("e2e: a failed turn with no output and no error text names the failure on stdout", () => {
@@ -381,11 +418,16 @@ test("e2e: a failed turn with no output and no error text names the failure on s
 });
 
 // The OTHER failure shape (a standalone `error` notification with no turn/completed —
-// the "terminal-error" fixture) never reached the header at all: resolveFinalMessage
-// has no finalTurn to read, so rawOutput is empty and renderTaskResult takes its
-// failureMessage fallback, which prints result.error.message with no header. Nothing
-// can double there, so there is nothing to pin — the doubling needs turn.error, which
-// is what the test above drives.
+// the "terminal-error" fixture) used to reach no header at all: resolveFinalMessage has
+// no finalTurn to read, so rawOutput is empty and renderTaskResult fell through to its
+// failureMessage fallback, printing result.error.message unmarked. 1.6.2 gave the
+// empty-output branch the reason too, so it IS marked now — see "a failed turn with no
+// output and no error text", which drives the extreme version of this shape (no error
+// text anywhere) and is the one that reds if that branch regresses.
+//
+// Nothing can DOUBLE there, though: with rawOutput empty there is no body to repeat
+// against, so this shape cannot pin the conditional. The doubling needs turn.error,
+// which is what the pair above drives.
 
 // Same failure-hiding defect, one function over: BOTH review renders printed a
 // non-empty body without consulting the failed status. The sequence is upstream-real,

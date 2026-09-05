@@ -636,8 +636,9 @@ async function executeReviewRun(request) {
       reasoningSummary: result.reasoningSummary,
       // Unconditional, same as executeTaskRun: a turn that returned a VALID review JSON
       // and then died parses cleanly and would otherwise render a clean verdict.
-      // renderReviewResult already does the distinctness check itself (`distinct`), so
-      // gating here only prevented that check from ever running.
+      // `reviewFailureLines` does its own body comparison — a different, narrower check
+      // than `renderNativeReviewResult`'s `distinct`, which also weighs stderr — so
+      // gating here only prevented that comparison from ever running.
       errorMessage
     }),
     summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.finalMessage, errorMessage ?? `${reviewName} finished.`),
@@ -700,7 +701,8 @@ async function executeTaskRun(request) {
       // state it: it compares the reason against the body and drops to a bare marker
       // when they are the same text, which is the check this used to approximate with
       // `result.hadAgentMessage`. That proxy withheld the reason on exactly the two
-      // shapes where nothing else carried it — see renderTaskResult.
+      // shapes where nothing else carried it — see renderTaskResult, which also carries
+      // the containment ceiling this comparison inherits.
       errorMessage,
       reasoningSummary: result.reasoningSummary
     },
