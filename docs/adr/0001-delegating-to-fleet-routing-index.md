@@ -1,5 +1,18 @@
 # Route to fleet engines through one `delegating-to-fleet` index skill
 
+> **SUPERSEDED (2026-09-06).** The `fleet` plugin — and with it the
+> `delegating-to-fleet` routing index this ADR decided on — has been removed from
+> the marketplace. In practice the maintainer names the engine directly ("請 codex
+> 完成", "這你請 agy 完成"), so the routing decision was already made before the
+> index could contribute; and codex/antigravity self-recommend through
+> always-resident subagent descriptions, which is the path those prompts actually
+> took. **The gap this ADR opened with is back, and wider:** grok and cc have no
+> subagent and no `SKILL.md`, so a commander now reaches them only when the user
+> names them. Reopening this means giving those two their own discovery surface,
+> not rebuilding a central index. The ADR is kept because the reasoning below is
+> still the best statement of the trade-off.
+
+
 **Context.** The four engines advertise "when to use me" (their *discovery
 surface*) in four different shapes: agy via a plugin-root `SKILL.md`, cc via a
 `cc-handoff` skill (Codex-host and user-explicit only — it does not auto-fire for

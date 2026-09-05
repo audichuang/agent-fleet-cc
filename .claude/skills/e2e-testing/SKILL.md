@@ -2,7 +2,7 @@
 name: e2e-testing
 description: >-
   Complete end-to-end testing for the agent-fleet-cc plugin marketplace (codex /
-  antigravity / cc / grok / fleet). Use this whenever you need to verify engine
+  antigravity / cc / grok). Use this whenever you need to verify engine
   behavior end-to-end, run or write E2E tests, run the real-engine smoke check,
   confirm a control-plane fix actually works against the live CLIs, prove a test
   is a true regression, or answer "did you actually run it end-to-end?". Triggers
@@ -40,28 +40,25 @@ not answer with the first and imply it was real.
 ## Layer 1 — Hermetic E2E suite
 
 ```bash
-npm run test:e2e     # the 5 black-box e2e files (cc + codex + antigravity + fleet + grok)
+npm run test:e2e     # the 4 black-box e2e files (cc + codex + antigravity + grok)
 npm test             # full chain; test:e2e is the last && leg, so it gates the build
 ```
 
-`test:e2e` runs `tests/{cc,codex,antigravity,fleet,grok}/e2e-cli.test.mjs`.
+`test:e2e` runs `tests/{cc,codex,antigravity,grok}/e2e-cli.test.mjs`.
 Each spawns the real plugin CLI (`cc-companion.mjs`, `codex-companion.mjs`,
-`antigravity/bin/antigravity.mjs`, `fleet-status.mjs`/`fleet-doctor.mjs`,
+`antigravity/bin/antigravity.mjs`,
 `grok-companion.mjs`) as a subprocess against an isolated workspace with
 fake/seeded state. `tests/cc/e2e-cli.test.mjs` is
 the canonical template — read it before writing a new one.
 
 ## Layer 2 — Real-engine smoke (manual gate)
 
-**Step 1 — check readiness first (no auth, no model calls):**
-
-```bash
-node plugins/fleet/scripts/fleet-doctor.mjs --json
-```
-
-It reports each engine's binary + version + `status: ready|not-ready` (it does
-NOT verify auth). Only smoke the engines it shows ready. `/fleet:doctor` is the
-slash equivalent.
+**Step 1 — know what it will skip.** The smoke script probes each engine's
+binary itself (`codex`, `agy`, `claude`) and skips the ones that are not on
+PATH, so you do not gate it by hand. Only ENOENT counts as missing — a binary
+that runs and exits non-zero is treated as present, because **auth is never
+checked**: an unauthed engine surfaces as its job failing, which is the point of
+a real-engine run.
 
 **Step 2 — run the bundled smoke script:**
 

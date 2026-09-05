@@ -8,9 +8,10 @@
 研究 / 廣掃。便宜(grok-4.5),適合平行 offload。
 
 ## 結構角色(判斷,不是清單)
-- **無 `SKILL.md` / `README`** —— grok 沒有自我推薦 surface;commander 靠 fleet 的
-  `delegating-to-fleet` 路由 + model-invocable `/grok:task` / `/grok:live` 才找得到它
-  (見 `docs/adr/0001`)。**生圖不在這顆**:`/grok:image` 已於 0.8.0 移除,搬去 `imagine` plugin
+- **無 `SKILL.md` / `README`、無 subagent —— 現在完全沒有自動發現路徑。** fleet 的
+  `delegating-to-fleet` 路由索引是 grok 唯一的被動發現來源,已隨 fleet plugin 移除
+  (見 `docs/adr/0001` 的 superseded 註記)。commander 只有在**使用者明講**時才會走到
+  `/grok:task` / `/grok:live`。要恢復,得給 grok 一顆 proactive subagent 或一份 `SKILL.md`。**生圖不在這顆**:`/grok:image` 已於 0.8.0 移除,搬去 `imagine` plugin
   (預設 `--engine grok` 直接打 xAI 的 HTTP API;另有 `--engine agy`)。理由見那顆的 `AGENTS.md`。
 - `commands/*.md` — slash verb 的薄殼,每支 shell `scripts/grok-companion.mjs <verb>`。
 - `scripts/grok-companion.mjs` — CLI 入口(`runCompanion(argv, deps)`,deps 可注入 seam 測);
@@ -69,7 +70,6 @@
   的 `onLine` hook 把每一行**即時**串到 **stderr**(無 file-tail、無 flush race);最終結果到 stdout、
   失敗時 non-zero exit(死亡可見)。CLI entry 用 `process.exitCode`(非 `process.exit()`)讓 pipe
   自然 flush,否則大量輸出會被截斷。`commands/live.md` 照抄 codex `handoff.md` 的 `run_in_background`
-  模式。設計理由/分階 見 `docs/adr/0003`(Phase 2)。fleet 的
-  `delegating-to-fleet` 已把可見 / 長任務預設指到 `/grok:live`(durable 仍走
-  `/grok:task --background`);再改 fleet 路由仍屬 fleet work-stream,別在 grok
-  work-stream 動 fleet。
+  模式。設計理由/分階 見 `docs/adr/0003`(Phase 2)。可見 / 長任務走 `/grok:live`,
+  durable 走 `/grok:task --background` —— 這個預設原本寫在 fleet 的路由索引裡,那顆已移除,
+  現在只剩這裡記著。

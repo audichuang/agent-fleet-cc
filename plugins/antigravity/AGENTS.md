@@ -12,7 +12,8 @@ review、debug、大 context 調查。
 
 ## 結構角色(判斷,不是清單)
 - `SKILL.md` — 引擎對**其他 host** 的自我推薦 discovery surface。commander(host Claude Code)
-  的路由入口不在這,在 fleet 的 `delegating-to-fleet`(見 `docs/adr/0001`)。
+  這邊靠 `agents/agy-rescue.md` 那顆 proactive subagent —— fleet 的 `delegating-to-fleet`
+  路由索引已隨 fleet plugin 移除(見 `docs/adr/0001` 的 superseded 註記)。
 - `bin/antigravity.mjs` — dual-host CLI 入口;`scripts/lib/host-detect.mjs` 判斷跑在哪個 host。
 - `commands/*.md` — slash verb 的薄殼,只 shell 同名 `scripts/commands/*.mjs`(那才是邏輯,
   `runAsMain` 自呼叫)。例外有二:`handoff.md` 沒有同名 .mjs,殼的是 `rescue.mjs --prompt-file`;

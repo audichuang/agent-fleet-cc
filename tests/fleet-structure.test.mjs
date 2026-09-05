@@ -22,10 +22,10 @@ test("marketplace is agent-fleet and every entry is consistent", () => {
   }
 });
 
-test("marketplace lists exactly the engine plugins plus fleet", () => {
+test("marketplace lists exactly the engine plugins plus imagine", () => {
   const marketplace = readJson(path.join(ROOT, ".claude-plugin/marketplace.json"));
   assert.deepEqual(
     marketplace.plugins.map((p) => p.name).sort(),
-    ["antigravity", "cc", "codex", "fleet", "grok", "imagine"],
+    ["antigravity", "cc", "codex", "grok", "imagine"],
   );
 });

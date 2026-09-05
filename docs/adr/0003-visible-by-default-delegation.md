@@ -1,8 +1,18 @@
 # Visible-by-default delegation: a live shell over a silent detached job
 
-**Status:** accepted (design agreed in a grilling session 2026-07-14; the `${CLAUDE_PLUGIN_ROOT}`
-linchpin was verified — see Consequences — so the mechanism stands, per-engine live verbs pending
-implementation).
+**Status:** accepted, but **its enforcement surface is gone (2026-09-06)**. The decision below
+stands — a delegated job should be visible, and a silent death is the failure this prevents — but
+the convention no longer "lives once in the fleet plugin", because that plugin was removed from the
+marketplace (see `docs/adr/0001`). Nothing model-facing now tells a commander *by default* to
+prefer `/grok:live` over a bare `/grok:task --background`, or `/codex:handoff --background` over
+`/codex:task --background`. The per-engine live verbs the phasing below called for still exist and
+still behave as designed; what was lost is the one place that made choosing them the default. Each
+engine's own command files are now the only place the preference is written, and a command file is
+read only *after* the engine has already been chosen. Re-establishing the default means putting it
+in each engine's own discovery surface, not in a central index.
+
+(design agreed in a grilling session 2026-07-14; the `${CLAUDE_PLUGIN_ROOT}` linchpin was
+verified — see Consequences — so the mechanism stands).
 
 **Context.** When the commander delegates a background task, the default path today is a *detached*
 job (`task --background`): the companion enqueues a worker, prints a job id, and returns
