@@ -63,7 +63,12 @@ describe('agy-rescue agent contract', () => {
     assert.match(agent, /\/antigravity:status <id>/);
     // Cross-host honesty (codex review finding): agent-initiated backgrounding
     // is Claude-Code-only; the verb's own default stays foreground everywhere.
-    assert.match(agent, /Claude Code dispatch policy/i);
+    // Was /Claude Code dispatch policy/ — it attributed the background rule to the
+    // HOST's ten-minute Bash ceiling. agy's own print timeout is half that and fires
+    // first, so the rule is an ENGINE property; the old phrasing sent a model to the
+    // wrong bound. Pin the correct attribution instead.
+    assert.match(agent, /agy's own print-mode timeout/i);
+    assert.match(agent, /the engine always times out first/i);
     assert.match(agent, /foreground-by-default on every host/i);
   });
 
@@ -147,4 +152,146 @@ describe('doc flags exist in the runtime parser', () => {
       }
     });
   }
+});
+
+/**
+ * 0.6.2 — the dispatch facts a model needs before it chooses foreground.
+ *
+ * The agent used to say "past ten minutes", copied from the Bash tool's ceiling.
+ * That is the wrong bound for agy by a factor of two: `--print-timeout` defaults
+ * to 5m (DEFAULT_PRINT_TIMEOUT_MS in scripts/lib/adapter.mjs) and the plugin
+ * passes it, with the Node backstop deliberately one minute later so the engine
+ * always times out first. A model judging by ten would leave a seven-minute task
+ * in the foreground to be killed at five.
+ *
+ * Pinned against the constant, not just the prose: if the default moves, this
+ * goes red and the doc has to move with it.
+ */
+describe('foreground timeout guidance', () => {
+  it('names five minutes, and the number matches the constant it describes', () => {
+    const agent = read('agents/agy-rescue.md');
+    const skill = read('SKILL.md');
+    const adapter = read('scripts/lib/adapter.mjs');
+
+    const declared = /DEFAULT_PRINT_TIMEOUT_MS\s*=\s*(\d+)/.exec(adapter);
+    assert.ok(declared, 'adapter must declare the print timeout default');
+    assert.equal(
+      Number(declared[1]) / 60000,
+      5,
+      'the docs below say five minutes; change them in the same commit as this constant',
+    );
+
+    for (const [name, body] of [['agy-rescue.md', agent], ['SKILL.md', skill]]) {
+      assert.match(body, /five minutes/i, `${name} must name the bound that actually binds`);
+    }
+    // Anchor on the DISPATCH sentence, not on any occurrence of "five minutes" —
+    // the file explains the number a paragraph later, so a bare /five minutes/
+    // stays green even when the rule itself has been switched back to ten. Both
+    // patterns tolerate markdown emphasis, which is where the first version of
+    // this guard leaked: the real text is `running **past about five minutes**`
+    // and an un-escaped `running past ten minutes` matched neither wording.
+    assert.match(
+      agent,
+      /keep agy running[\s*]*past about five minutes/i,
+      'the dispatch rule itself must carry the number, not just the explanation below it',
+    );
+    assert.doesNotMatch(
+      agent,
+      /keep agy running[\s*]*past (about )?ten minutes/i,
+      'the Bash ceiling is the looser bound and never what stops an agy turn',
+    );
+  });
+
+  it('says a killed foreground call still left a record', () => {
+    // runForeground creates the job BEFORE starting the worker (job-runtime.mjs),
+    // so a cut-off run is recoverable — but it can read `running` until a
+    // dead-pid reconcile, which only status/logs/wait trigger. Without this the
+    // honest-looking move is to report a failed review, which is wrong.
+    for (const rel of ['agents/agy-rescue.md', 'SKILL.md']) {
+      const body = read(rel);
+      assert.match(body, /reconcile/i, `${rel} must say what finalizes the record`);
+      assert.match(
+        body,
+        /antigravity:status|\$antigravity status/,
+        `${rel} must name where a cut-off run resolves`,
+      );
+    }
+  });
+});
+
+/**
+ * The stop-rule review.md has carried since it was written, and
+ * adversarial-review.md never did — even though it is the surface used on code
+ * that is about to ship, where auto-applying a finding is worst.
+ */
+describe('review verbs carry the do-not-auto-fix stop-rule', () => {
+  for (const rel of ['commands/review.md', 'commands/adversarial-review.md']) {
+    it(`${rel} tells the host to ask before fixing anything`, () => {
+      const body = read(rel);
+      assert.match(
+        body,
+        /Do not make any code changes based on the review findings/,
+        'presenting findings verbatim is not the same as not acting on them',
+      );
+      assert.match(body, /ask them which finding to address first/i);
+    });
+  }
+});
+
+/**
+ * plugins/antigravity/AGENTS.md: "任何文案都不准把 `--sandbox` 講成 read-only".
+ * It is an nsjail *terminal* container — it blocks shell commands, not
+ * `write_file`, and the model can opt out per call. A doc that calls it
+ * read-only tells the reader the tree is protected when it is not.
+ */
+describe('no shipped prose describes --sandbox as a write guard', () => {
+  const surfaces = [
+    'SKILL.md',
+    'README.md',
+    'commands/review.md',
+    'commands/adversarial-review.md',
+    'commands/task.md',
+    'commands/rescue.md',
+    'agents/agy-rescue.md',
+  ];
+  for (const rel of surfaces) {
+    it(`${rel} does not claim --sandbox prevents writes`, () => {
+      const body = read(rel);
+      // Any sentence putting --sandbox and a can't-write claim together. The
+      // README's "Read-only **by instruction**" phrasing is the correct one and
+      // does not match, because it attributes the posture to the prompt.
+      assert.doesNotMatch(
+        body,
+        /`--sandbox`[^.\n]{0,80}(cannot mutate|read-only|prevents? writ|blocks? writ)/i,
+        'the sandbox blocks shell commands, not write_file — say read-only BY INSTRUCTION',
+      );
+    });
+  }
+});
+
+/**
+ * The model catalog moved two tiers in the weeks after SKILL.md named one, and
+ * nothing went red. Root AGENTS.md forbids enumerating an engine catalog in
+ * shipped prose for exactly this reason; the authority is `agy models`.
+ *
+ * The one allowed mention is the stall hazard, which `agy models` cannot report
+ * and which is explicitly dated — so this counts slugs rather than banning them.
+ */
+describe('SKILL.md does not carry a model catalog', () => {
+  it('names at most the one dated hazard slug, and points at the authority', () => {
+    const skill = read('SKILL.md');
+    const slugs = [...skill.matchAll(/gemini-[\d.]+-[a-z]+(?:-[a-z]+)?/g)].map((m) => m[0]);
+    assert.ok(
+      slugs.length <= 1,
+      `SKILL.md should not list model slugs; found ${slugs.length}: ${slugs.join(', ')}`,
+    );
+    if (slugs.length === 1) {
+      assert.match(
+        skill,
+        new RegExp(`${slugs[0]}[^)]*\\d{4}-\\d{2}-\\d{2}`),
+        'a slug survives only as a dated observation, never as a recommendation',
+      );
+    }
+    assert.match(skill, /`agy models`/, 'the authority has to be named, or removal just loses the answer');
+  });
 });

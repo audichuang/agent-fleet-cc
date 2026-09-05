@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-09-05
+
+### Fixed
+- **The foreground timeout guidance named the wrong bound, by a factor of two.**
+  `agents/agy-rescue.md` told the model to prefer background for anything "likely to keep agy
+  running past ten minutes", attributing the rule to the Bash tool's ceiling. agy's own
+  print-mode timeout is 5m (`DEFAULT_PRINT_TIMEOUT_MS`, passed through by the plugin) with the
+  Node backstop deliberately one minute later so the engine always times out first — so a
+  foreground turn dies at roughly five minutes and the Bash ceiling is never what stops it. A
+  model judging by ten would leave a seven-minute task in the foreground to be killed. Both the
+  agent and `SKILL.md` now name five, say why, and name the env knobs
+  (`AGY_PRINT_TIMEOUT_MS` / `AGY_JOB_TIMEOUT_MS`) that move it.
+- **A killed foreground call read as a lost turn.** `runForeground` creates the job record
+  before it starts the worker, so a run cut off by either timeout — or by the host — left a
+  record behind. It can still read `running` until a dead-pid reconcile, which only
+  `status` / `logs` / `wait` trigger. Both surfaces now say so and point at
+  `/antigravity:status`, instead of leaving "report a failed review" as the obvious move.
+- **`/antigravity:adversarial-review` had no stop-rule.** `review.md` has carried "do not make
+  any code changes based on the review findings; ask which to address first" since it was
+  written; the adversarial verb never did — and it is the surface used on code about to ship,
+  where auto-applying a finding is worst. Copied over and pinned on both.
+- **`commands/adversarial-review.md` described `--sandbox` as a write guard** ("agy runs under
+  `--sandbox` so the review cannot mutate the tree"), which this plugin's own `AGENTS.md`
+  forbids in as many words: it is an nsjail *terminal* container that blocks shell commands,
+  not `write_file`, and the model can opt out of it per call. `README.md` already said
+  "read-only **by instruction**" — this file was the one that drifted. A guard now sweeps every
+  prose surface for the claim.
+
+### Changed
+- **`SKILL.md` no longer carries a model catalog.** It recommended a Flash tier by slug and
+  described the default as a tier that no longer appears in `agy models` at all — two releases
+  of drift with nothing going red, the failure mode root `AGENTS.md` names explicitly. The
+  section now points at `agy models` as the authority and lists no slugs. The one exception is
+  the Pro-tier `--print` stall, which `agy models` cannot report; it survives as an explicitly
+  dated observation rather than a current claim, per this plugin's version+date discipline.
+- **Two claims lost their stale version pins without losing their content.** "agy 1.1.5 has no
+  standalone `plugin run`" and "OAuth-only (still true as of 1.1.5)" are both still true at
+  1.1.19 — verified — so the version anchors moved to
+  `docs/antigravity-cli-contract-audit.md`, where engine facts belong, rather than being
+  restated in shipped prose that cannot be re-verified in place.
+- The skill description dropped its "Survives the June 18, 2026 gemini-cli sunset" clause. The
+  sunset is a past event; nobody is deciding around it, and the description is long.
+
+### Notes
+- Guards added in `tests/antigravity/agent-contract.test.mjs`, each mutation-checked. The
+  timeout guard pins the doc against `DEFAULT_PRINT_TIMEOUT_MS` itself, so moving the constant
+  without moving the prose goes red. The first version of that guard was vacuous — it matched
+  any occurrence of "five minutes", and the file explains the number a paragraph below the rule,
+  so switching the rule back to ten stayed green. It now anchors on the dispatch sentence and
+  tolerates markdown emphasis.
+- The engine contract audit (`docs/antigravity-cli-contract-audit.md`) is still pinned to
+  `agy 1.1.5`; the installed binary is 1.1.19. Re-running that recipe is its own pass and was
+  deliberately not folded in here.
+
 ## [0.6.1] — 2026-08-24
 
 ### Fixed
