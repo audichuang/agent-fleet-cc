@@ -1,5 +1,37 @@
 # imagine — changelog
 
+## 0.2.0
+
+**A second engine: `--engine agy`.** The same command now renders through Google Antigravity's
+CLI as well as xAI — `node scripts/imagine.mjs --engine agy --prompt-file p.txt --aspect 16:9`.
+
+- **No API key at all on that path.** agy's built-in `generate_image` tool renders on the user's
+  own Google login: verified 2026-09-05 with `GEMINI_API_KEY` and `GOOGLE_API_KEY` cleared from
+  the environment and none stored under `~/.gemini/`. A machine with no grok login and no
+  `XAI_API_KEY` can now generate an image, which is what this engine is for.
+- **Image generation in agy is built in, not MCP.** `agy models` lists no image model and
+  `agy mcp list` is irrelevant to it; the third-party nano-banana MCP servers are a different,
+  optional path this plugin does not use. Evidence and the re-run recipe:
+  `docs/imagine-agy-image-audit.md`.
+- **The contract did not move: the file on disk is still the receipt.** The script asks agy for a
+  JPEG at an absolute path and then `statSync`s that path itself. `status: SUCCESS` with no file
+  is a failure, and the error quotes what agy said plus the artifact directory its tool drops
+  renders into. That is the guard that lets this plugin drive an agent without repeating the
+  `/grok:image` failure it was built to escape — deleting the `statSync` turns four tests red.
+- **The prompt still never reaches a shell.** It rides in an argv array (`spawn`, no shell), so
+  quotes, a stray heredoc delimiter and `$(…)` are all inert. `--prompt-file` remains the only
+  transport into the script.
+- **`--dangerously-skip-permissions`, with `cwd` set to the output directory.** A headless run
+  cannot answer a permission prompt. The cwd is there so a relative path of agy's lands where we
+  expect; it is **not** a sandbox, and the docs say so rather than implying the flag is fenced.
+- **`--model`, `--resolution` and `--quality` are refused (exit 2) with `--engine agy`** rather
+  than silently dropped — agy's tool takes a prompt and an aspect ratio and nothing else, and a
+  dropped `--model` is a render nobody asked for, paid for all the same. `--aspect` is passed
+  into the tool's own `AspectRatio`.
+- **The extension still matches the bytes**, now by sniffing the file's own header.
+- `AGY_BIN` overrides the binary; otherwise it comes off PATH. The prompt skill says which of its
+  measured claims carry over to agy (the recipe) and which do not (every number in it).
+
 ## 0.1.0
 First release. `/imagine:image` generates one image with xAI Grok Imagine and reports the path of
 the file that actually landed on disk.

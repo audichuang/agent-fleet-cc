@@ -1,12 +1,17 @@
 ---
 name: imagine-prompts
-description: Craft the prompt for a Grok Imagine still-image render, and choose the model, aspect and resolution to pair with it. Use this skill BEFORE any call to /imagine:image or scripts/imagine.mjs — each render costs quota and there are no free re-rolls, so the prompt is the whole job. Reach for it whenever the user wants a picture MADE rather than found or edited — a poster, hero image, banner, thumbnail, album or book cover, product shot, portrait, mascot, avatar, icon, key visual, illustration, technical diagram, UI mockup, or plainly "a photo of X" — including when they hand over a one-line idea and expect it expanded, and even if they never say the word "prompt". Also use to diagnose a render that came back generic, mushy, badly lit, or carrying invented text nobody asked for.
+description: Craft the prompt for a still-image render on either engine the imagine plugin ships — xAI Grok Imagine, or Google Antigravity (agy, `--engine agy`) — and choose the aspect, model and resolution to pair with it. Use this skill BEFORE any call to /imagine:image or scripts/imagine.mjs — each render costs quota and there are no free re-rolls, so the prompt is the whole job. Reach for it whenever the user wants a picture MADE rather than found or edited — a poster, hero image, banner, thumbnail, album or book cover, product shot, portrait, mascot, avatar, icon, key visual, illustration, technical diagram, UI mockup, or plainly "a photo of X" — including when they hand over a one-line idea and expect it expanded, and even if they never say the word "prompt". Also use to diagnose a render that came back generic, mushy, badly lit, or carrying invented text nobody asked for.
 ---
 
-# Writing prompts for Grok Imagine
+# Writing prompts for a still-image render
 
 There are no free re-rolls and no `seed` — every call spends quota and a re-run will not
 reproduce the last image. The prompt is the whole job.
+
+Everything below was measured on **Grok Imagine**, the default engine. `--engine agy` renders
+through the Antigravity CLI's own `generate_image` tool on a Google account; the recipe
+transfers as prompt-craft, but no claim here has been re-measured on it — see
+"What changes on agy" at the end before you trust a number there.
 
 **Write the prompt to a file and pass `--prompt-file`.** Good prompts contain double quotes,
 which a shell argument silently strips — and a here-document is worse than useless here: a prompt
@@ -167,3 +172,27 @@ prompt was written for the **video** model or the grok.com app, never for this e
 claim is measured, it says so and gives the n; everything else is a transferable observation.
 `references/model-and-params.md` ends with what is still unverified — add to it rather than
 quietly promoting a guess.
+
+## What changes on agy
+
+`--engine agy` (added 2026-09-05) hands the prompt to the Antigravity CLI, which renders with
+its built-in `generate_image` tool. Verified on that date: it renders with **no API key of any
+kind** — not `XAI_API_KEY`, not `GEMINI_API_KEY` — on the user's own agy login, and the tool
+exposes `Prompt`, `AspectRatio` (default `1:1`) and `ImagePaths` and nothing else. The model
+behind it is not disclosed by the tool, so it cannot be chosen or reported.
+
+What that means for this file:
+
+- **The recipe's slots are prompt-craft, not Grok mechanics** — medium, pinned subject,
+  framing, lighting, palette, material, mood, style anchor. Write them the same way.
+- **Every "measured" number above was measured on Grok Imagine**, n as stated, and none of it
+  has been re-run on agy. Slot compliance, the 2k detail jump, the quoting behaviour of
+  on-image text: treat all of it as untested there rather than as a shared finding.
+- **Anti-pattern #10 flips.** Writing the ratio into the prompt is inert on both engines, but
+  on agy `--aspect` is not a request to a sampler — the script passes it into the tool's own
+  `AspectRatio` parameter, so it is the only thing that sets the frame. `16:9` came back as
+  1376×768 (one render).
+- **"Change model, not wording" has no equivalent.** There is one tool and no model choice, so
+  a slot agy ignores cannot be routed around. `--engine grok` is the fallback.
+- `--resolution`, `--model` and `--quality` are xAI-only and are refused with `--engine agy`
+  rather than dropped.

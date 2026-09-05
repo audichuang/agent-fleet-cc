@@ -1,11 +1,22 @@
 ---
-description: generate an image with xAI Grok Imagine and return the verified saved path
-argument-hint: "<description> [--out <path>] [--aspect <ratio|auto>] [--resolution 1k|2k] [--model <id>] [--quality low|medium]"
+description: generate an image with xAI Grok Imagine or Google Antigravity (agy) and return the verified saved path
+argument-hint: "<description> [--engine grok|agy] [--out <path>] [--aspect <ratio|auto>] [--resolution 1k|2k] [--model <id>] [--quality low|medium]"
 ---
 
-Generate ONE image with Grok Imagine and report the path of the file that actually landed
-on disk. This POSTs xAI's `/v1/images/generations` directly — no job, no event stream, no
-log triage. Parse `$ARGUMENTS` yourself and pass the pieces through as flags.
+Generate ONE image and report the path of the file that actually landed on disk. Parse
+`$ARGUMENTS` yourself and pass the pieces through as flags.
+
+Two engines, one contract — **the file on disk is the receipt**, and a failure always exits
+non-zero:
+
+| `--engine` | How it renders | Costs | Needs |
+|---|---|---|---|
+| `grok` (default) | POSTs xAI's `/v1/images/generations` — no job, no event stream, no log triage | the user's SuperGrok subscription | a grok login or `XAI_API_KEY` |
+| `agy` | spawns the Antigravity CLI and drives its built-in `generate_image` tool | the user's Google account | `agy` on PATH, logged in — **no API key at all** |
+
+Pick `grok` unless the user asks for agy, has no xAI credential, or wants to spend Google
+quota instead. `--model`, `--resolution` and `--quality` belong to the xAI endpoint and are
+refused (exit 2) with `--engine agy`, rather than silently dropped.
 
 ## 1. Write the prompt before you spend the quota
 
@@ -51,6 +62,25 @@ accepted only by some models — send it only if the user asks.
 every accepted ratio in the message, which is better than any list this plugin could hold.
 `auto` is legal and genuinely adapts the frame to the prompt.
 
+### Rendering through agy instead
+
+```typescript
+Bash({
+  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/imagine.mjs" --engine agy --prompt-file /abs/path/prompt.txt --aspect 16:9`,
+  description: "agy imagine",
+  timeout: 300000
+})
+```
+
+Same flags, same output line, same `--prompt-file` rule — the script hands the prompt to agy
+in an argv array, so nothing about it ever reaches a shell. `--aspect` is passed through to
+the tool's own `AspectRatio` parameter; the script asks agy for a JPEG at the exact path and
+then **checks that path itself**, so an agy that reports success without rendering fails here
+with agy's own words quoted back. Give it a longer timeout than the xAI path: it is a whole
+agent turn, ~30s in practice.
+
+`AGY_BIN` overrides the binary; otherwise it comes off PATH.
+
 ## 3. Read the result
 
 On success the script prints one line and exits 0:
@@ -80,11 +110,33 @@ rather than re-diagnosing:
   extension was corrected ("generated and billed"), the bytes are gone unless you re-run with a
   different `--out`.
 - **exit 2** → a usage error (unknown flag, missing value, no prompt, an unreadable or empty
-  `--prompt-file`, or a prompt given twice). Nothing was billed.
+  `--prompt-file`, a prompt given twice, an unknown `--engine`, or an xAI-only knob passed with
+  `--engine agy`). Nothing was billed.
+
+With `--engine agy` the model column reads `agy/generate_image` and the failures are different:
+
+- **"exited N but wrote no file"** → the run finished without producing the image. The message
+  quotes what agy said and names `~/.gemini/antigravity-cli/brain/<conversation-id>/`, where its
+  tool parks a render before moving it — a file may be sitting there. Relay it; do not re-run
+  blind.
+- **"agy is not installed"** → the Antigravity CLI is not on PATH. Install it, set `AGY_BIN`, or
+  drop `--engine agy`.
+- **a timeout** → the script's own backstop, after agy's `--print-timeout`. Nothing was saved and
+  the render may still have cost quota.
+
+The agy path runs with `--dangerously-skip-permissions`, because a headless run has nobody to
+answer a permission prompt. The script sets `cwd` to the output directory so a relative path of
+agy's lands where we expect — that is **not** a sandbox, and skipped permissions are not fenced
+by it. Say so if a user asks what the flag costs them.
 
 ## 4. Cost
 
-One call is one image, billed to the user's SuperGrok subscription (verified 2026-08-23:
-generation succeeds with the OAuth bearer alone, no `XAI_API_KEY` present). Models differ in
-price by up to 3×; `skills/imagine-prompts/references/model-and-params.md` has the grid. No
-batching and no free re-rolls — ask before generating a second.
+One call is one image. **No batching and no free re-rolls on either engine — ask before
+generating a second.**
+
+- `--engine grok`: billed to the user's SuperGrok subscription (verified 2026-08-23: generation
+  succeeds with the OAuth bearer alone, no `XAI_API_KEY` present). Models differ in price by up
+  to 3×; `skills/imagine-prompts/references/model-and-params.md` has the grid.
+- `--engine agy`: spends the user's Google account quota, and costs an agent turn on top of the
+  render (verified 2026-09-05 with no `GEMINI_API_KEY` in the environment and none stored — agy
+  renders on its own login).

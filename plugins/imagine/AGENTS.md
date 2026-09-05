@@ -1,13 +1,18 @@
 > 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
 > 本檔只寫 imagine 這顆的**增量**。
 
-# imagine plugin — xAI Grok Imagine 生圖
+# imagine plugin — 生圖(xAI Grok Imagine / Google Antigravity)
 
 ## 定位
 **不是 engine plugin。** fleet 其他四顆(codex/antigravity/cc/grok)都是「把任務委派給另一個
-coding agent」;這顆是一個**能力**:呼叫 xAI 的圖片 API 生一張圖。所以它沒有 job 生命週期、
-沒有 `launch/wait/logs/cancel`、**不用 shared runtime**(`scripts/lib/shared/` 不存在,
-`sync-shared.mjs` 也不該把它加進去)。一個 HTTP POST 就是全部。
+coding agent」;這顆是一個**能力**:生一張圖。所以它沒有 job 生命週期、沒有
+`launch/wait/logs/cancel`、**不用 shared runtime**(`scripts/lib/shared/` 不存在,
+`sync-shared.mjs` 也不該把它加進去)。
+
+兩個引擎共用同一份契約 —— **磁碟上的檔案就是收據**:
+- `--engine grok`(預設):一個 HTTP POST 到 xAI,吃 SuperGrok。
+- `--engine agy`(0.2.0 加):spawn Antigravity CLI,用它內建的 `generate_image` tool,
+  吃使用者的 Google 帳號,**完全不需要 API key**。細節見下面「agy 引擎」。
 
 ## 為什麼不走 grok CLI 的 `image_gen` tool
 0.7.0 之前生圖是 `/grok:image`,做法是驅動 grok companion 的 `task` verb 跑一段 canned prompt、
@@ -16,6 +21,30 @@ coding agent」;這顆是一個**能力**:呼叫 xAI 的圖片 API 生一張圖�
 HTTP 那條回的是 bytes 或 HTTP status,所以整套 triage(`tool_call_update` 的 wire shape、
 `SuperGrok` 子字串比對、`cp` 沒發生的補救分支)全部消失。`/grok:image` 已於此顆上線時從 grok
 plugin 移除,不留重複入口。
+
+## agy 引擎:驅動 agent,但不相信 agent 的話
+0.2.0 之前這顆只有 HTTP 一條路,理由是上面那段(驅動 agent + `cp`,失敗長得像成功)。agy 這條
+之所以能加進來而不重蹈覆轍,是因為**成功判準沒有變**:script 叫 agy 把圖存到一個絕對路徑,
+然後自己 `statSync` 那個路徑。agy 回 `status: SUCCESS` 但沒有檔案 = 失敗,錯誤訊息把 agy
+說的話原樣引回去。這條規則就是 `tests/imagine/agy-engine.test.mjs` 裡那個
+「a SUCCESS with no file is a failure」——拿掉 `statSync` 會有四個測試同時變紅。
+
+- **prompt 走 argv array,不經 shell。** `spawn(bin, [...])` 沒有 word splitting、沒有引號剝除、
+  沒有 here-document 可關,所以 wrapper prompt 可以安全地把使用者的 prompt 原樣嵌進去。
+  這是 `--prompt-file` 那條規則的同一個理由,不是例外。
+- **`--dangerously-skip-permissions` 是必要的**(headless 沒人回答權限提示)。`cwd` 設成輸出檔
+  的目錄,是為了讓 agy 用相對路徑時落在我們預期的位置 —— **它不是沙箱**:權限被跳過的 agent
+  用絕對路徑照樣哪裡都能去。真要圍起來得靠 agy 自己的 `--sandbox`,那個還沒驗過(見 audit doc
+  的 Still unverified)。
+- **絕對路徑是關鍵。** 只說「current working directory」時 agy 會把圖丟到 `$HOME`(實測)。
+  tool 一律先寫進 `~/.gemini/antigravity-cli/brain/<conversation-id>/<ImageName>_<epoch>.jpg`,
+  搬到我們要的位置是 agent 事後做的,所以那個 brain 路徑只出現在**錯誤訊息**裡當線索,
+  不是程式讀的路徑 —— 它沒有文件、會隨 agy 版本變。
+- **副檔名照位元組修正**:sniff `FF D8 FF` / `89 50 4E 47`,和 xAI 那條同一個承諾。
+- **`--model` / `--resolution` / `--quality` 在 agy 上直接 exit 2**,不能默默吃掉:被丟掉的
+  `--model` 是一張使用者沒要求、卻照樣付錢的圖。
+- 契約證據(tool 參數、無 key 實測、落檔行為、重驗食譜)在
+  `docs/imagine-agy-image-audit.md`。學到新東西改那份。
 
 ## 認證:讀 grok CLI 的 token,永遠不寫
 `~/.grok/auth.json`(可用 `GROK_AUTH_FILE` 覆寫)是 grok CLI 的檔案。我們**只讀**兩個欄位:
@@ -46,7 +75,8 @@ plugin 移除,不留重複入口。
   mkdtemp),免得有人在一個 Bash call 算出路徑、再拼進下一個。這條由
   `tests/imagine/plugin-structure.test.mjs` 強制:它走過每一份 shipped `.md`,禁 `<<`、要求每個
   提到 script 的 fence 都有 `--prompt-file`。改文件時別想繞過它 —— 它就是那個缺陷的疫苗。
-- 測試 hermetic:注入 `fetchImpl` 與 `authFile`,temp dir 假 auth.json,不連網。
+- 測試 hermetic:注入 `fetchImpl` / `authFile`(xAI)與 `spawnImpl`(agy),temp dir 假 auth.json、
+  假 agy 行程,不連網也不需要裝 agy。
 
 ## 細節指向
 - prompt 怎麼寫才生得出好圖(recipe / 範例 / 反模式 / 選 model):`skills/imagine-prompts/SKILL.md`。

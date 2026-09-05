@@ -50,8 +50,8 @@
     {
       "name": "imagine",
       "source": "./plugins/imagine",
-      "description": "Generate images with xAI Grok Imagine from Claude Code — one direct API call, prompt-craft guidance, and a verified path on disk.",
-      "version": "0.1.0",
+      "description": "Generate images from Claude Code with xAI Grok Imagine or Google Antigravity (agy) — prompt-craft guidance and a verified path on disk, whichever engine renders it.",
+      "version": "0.2.0",
       "author": {
         "name": "audichuang"
       }

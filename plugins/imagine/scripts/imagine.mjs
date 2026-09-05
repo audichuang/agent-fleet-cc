@@ -1,13 +1,20 @@
 #!/usr/bin/env node
-// Direct xAI Imagine call — no companion, no job, no log triage.
+// Two engines, one contract: the file on disk is the receipt.
 //
+// `grok` (default) is a direct xAI Imagine call — no companion, no job, no log triage.
 // Auth: the grok CLI's own OAuth access token, read from ~/.grok/auth.json. That
 // file is grok's to own — we NEVER write it and never touch `refresh_token`:
 // auth.x.ai may rotate refresh tokens on use, so an out-of-band refresh here
 // could silently log the user out of grok itself. Expired token => tell them to
 // run grok once and let it refresh. `XAI_API_KEY` is the fallback for machines
 // with no grok login.
-import { lstatSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+//
+// `agy` spawns the Antigravity CLI and lets its built-in `generate_image` tool do
+// the render, on the user's Google login — no xAI credential, no key at all. It is
+// an agent, so its word means nothing here: the run is judged by `statSync(out)`
+// exactly like the HTTP path, and "SUCCESS" with no file is a failure.
+import { lstatSync, mkdtempSync, readFileSync, writeFileSync, renameSync, mkdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +22,10 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_BASE_URL = "https://api.x.ai/v1";
 const ISSUER_PREFIX = "https://auth.x.ai::";
 const DEFAULT_TIMEOUT_MS = 180_000;
+// agy renders in ~30s. Its own --print-timeout fires first with a clean error;
+// this backstop only covers a process that hangs without printing.
+const AGY_PRINT_TIMEOUT = "4m";
+const AGY_TIMEOUT_MS = 270_000;
 
 // The API tells us what it actually sent. 2k comes back as PNG, 1k as JPEG —
 // measured, and the single most surprising thing about this endpoint.
@@ -65,6 +76,17 @@ export function outPathFor(out, mimeType) {
   return path.extname(out).toLowerCase() === want ? out : out.slice(0, out.length - path.extname(out).length) + want;
 }
 
+// Reserve the destination BEFORE spending anything. A render that succeeds and then
+// cannot be written is a paid image lost for good.
+// lstat, not existsSync: existsSync follows the link, so a DANGLING symlink reads as
+// free and then fails the write after the image is paid for.
+function reserveOut(out) {
+  mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+  if (lstatSync(out, { throwIfNoEntry: false })) {
+    throw new ImageError(`${out} already exists — refusing to overwrite. Nothing was generated or billed; pick a different --out.`);
+  }
+}
+
 export async function generateImage({
   prompt,
   out,
@@ -77,18 +99,10 @@ export async function generateImage({
   baseUrl = process.env.XAI_BASE_URL ?? DEFAULT_BASE_URL,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
-  // Reserve the destination BEFORE spending money. A generation that succeeds and
-  // then cannot be written is a paid image lost for good — the bytes are in memory
-  // and the API's URL is ephemeral.
-  mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
-  // ...and refuse a taken destination BEFORE the money is spent. The 'wx' write below
-  // still closes the race and the renamed-extension case; this only avoids paying to
-  // discover a collision we could see for free.
-  // lstat, not existsSync: existsSync follows the link, so a DANGLING symlink reads as
-  // free and then fails the 'wx' write after the image is paid for.
-  if (lstatSync(out, { throwIfNoEntry: false })) {
-    throw new ImageError(`${out} already exists — refusing to overwrite. Nothing was generated or billed; pick a different --out.`);
-  }
+  // The bytes are in memory and the API's URL is ephemeral, so the destination is
+  // claimed before the money is spent. The 'wx' write below still closes the race and
+  // the renamed-extension case; this only avoids paying to discover a free collision.
+  reserveOut(out);
 
   const body = { model, prompt, aspect_ratio: aspect, resolution, response_format: "b64_json" };
   if (quality) body.quality = quality;
@@ -161,10 +175,138 @@ export async function generateImage({
   return { out: saved, bytes: bytes.length, model, mimeType: first.mime_type, renamed: saved !== out };
 }
 
-const FLAGS = { "--out": "out", "--prompt-file": "promptFile", "--aspect": "aspect", "--model": "model", "--resolution": "resolution", "--quality": "quality" };
+// ---------------------------------------------------------------- agy engine
+
+// Same name the antigravity plugin uses, so one export overrides both.
+export function resolveAgyBin(env = process.env) {
+  return (env.AGY_BIN ?? "").trim() || "agy";
+}
+
+// The extension has to match the bytes, the same promise the xAI path keeps. agy is
+// asked for a JPEG and has obliged both times measured, but it is an agent holding a
+// tool we do not control, so the file itself decides.
+const MAGIC = [
+  [Buffer.from([0xff, 0xd8, 0xff]), "image/jpeg"],
+  [Buffer.from([0x89, 0x50, 0x4e, 0x47]), "image/png"],
+];
+export function sniffMime(file) {
+  const fd = openSync(file, "r");
+  try {
+    const head = Buffer.alloc(8);
+    const n = readSync(fd, head, 0, 8, 0);
+    return MAGIC.find(([sig]) => n >= sig.length && head.subarray(0, sig.length).equals(sig))?.[1];
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// The prompt is user- and model-authored text, which is why it never reaches a shell
+// anywhere in this plugin. Here it rides in an argv array — spawn without a shell has
+// no word splitting, no quote stripping and no here-document to close, so the wrapper
+// below can safely embed it verbatim.
+export function agyPrompt({ prompt, aspect, out }) {
+  return (
+    `Call your generate_image tool with AspectRatio "${aspect}" and this Prompt, verbatim:\n\n` +
+    `${prompt}\n\n` +
+    `Save the generated image as a JPEG at exactly ${out}. Do not convert or re-encode it. ` +
+    `Reply with only that path — nothing else, no summary.`
+  );
+}
+
+function runAgy({ bin, args, cwd, timeoutMs, spawnImpl }) {
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl(bin, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new ImageError(`agy did not finish within ${Math.round(timeoutMs / 1000)}s. Nothing was saved; the render may still have consumed quota.`));
+    }, timeoutMs);
+    child.stdout?.on("data", (c) => (stdout += c.toString("utf8")));
+    child.stderr?.on("data", (c) => (stderr += c.toString("utf8")));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(
+        new ImageError(
+          e?.code === "ENOENT"
+            ? `agy is not installed (looked for \`${bin}\`). Install the Antigravity CLI, or set AGY_BIN — or drop --engine agy to use xAI.`
+            : `could not run agy: ${e?.message ?? e}`,
+        ),
+      );
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+// Drive agy's built-in generate_image tool. No API key: it renders on the user's own
+// Google login, which is the whole reason this engine exists next to the xAI one.
+export async function generateWithAgy({
+  prompt,
+  out,
+  aspect = "1:1",
+  agyBin = resolveAgyBin(),
+  spawnImpl = spawn,
+  timeoutMs = AGY_TIMEOUT_MS,
+}) {
+  reserveOut(out);
+  const abs = path.resolve(out);
+  const args = [
+    "-p",
+    agyPrompt({ prompt, aspect, out: abs }),
+    "--output-format",
+    "json",
+    "--print-timeout",
+    AGY_PRINT_TIMEOUT,
+    // agy needs to write the file where we asked, which is a tool permission it would
+    // otherwise stop and ask for in a headless run. Note what cwd below does NOT do: an
+    // agent whose permissions are skipped can still reach anywhere by absolute path, so
+    // cwd only decides where a RELATIVE path of agy's lands. It is not a fence.
+    "--dangerously-skip-permissions",
+  ];
+  const { code, stdout, stderr } = await runAgy({ bin: agyBin, args, cwd: path.dirname(abs), timeoutMs, spawnImpl });
+
+  // The receipt is the file, never the JSON — an agent reporting success it did not
+  // achieve is the exact failure mode this plugin refuses to inherit. The response text
+  // is only ever quoted back as the reason a missing file is missing.
+  let saved;
+  try {
+    saved = statSync(abs);
+  } catch {
+    const said = (() => {
+      try {
+        return JSON.parse(stdout)?.response ?? "";
+      } catch {
+        return stdout;
+      }
+    })();
+    const tail = (said || stderr || "").trim().replace(/\s+/g, " ").slice(0, 300);
+    throw new ImageError(
+      `agy exited ${code} but wrote no file at ${abs}. ` +
+        `Its generate_image tool saves into ~/.gemini/antigravity-cli/brain/<conversation-id>/ first, so a render may be there. ` +
+        (tail ? `agy said: ${tail}` : "agy said nothing."),
+    );
+  }
+  if (saved.size === 0) throw new ImageError(`agy wrote an empty file at ${abs}`);
+
+  const mimeType = sniffMime(abs);
+  const target = outPathFor(abs, mimeType);
+  if (target !== abs) renameSync(abs, target);
+  return { out: target, bytes: saved.size, model: "agy/generate_image", mimeType, renamed: target !== abs };
+}
+
+const FLAGS = { "--out": "out", "--prompt-file": "promptFile", "--aspect": "aspect", "--model": "model", "--resolution": "resolution", "--quality": "quality", "--engine": "engine" };
+
+const ENGINES = ["grok", "agy"];
+// Knobs the xAI endpoint owns. agy's tool takes a prompt and an aspect ratio and
+// nothing else, so accepting these there would silently drop them — and a dropped
+// --model is a render the caller did not ask for, billed all the same.
+const GROK_ONLY = ["--model", "--resolution", "--quality"];
 
 export function parseArgs(argv) {
-  const opts = { aspect: "1:1", model: "grok-imagine-image", resolution: "1k" };
+  const opts = { aspect: "1:1", model: "grok-imagine-image", resolution: "1k", engine: "grok" };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -186,6 +328,17 @@ export function parseArgs(argv) {
       rest.push(flag);
     }
   }
+  if (!ENGINES.includes(opts.engine)) {
+    throw new ImageError(`unknown engine ${opts.engine}. Known engines: ${ENGINES.join(" ")}`);
+  }
+  if (opts.engine === "agy") {
+    const given = GROK_ONLY.filter((f) => argv.includes(f));
+    if (given.length) {
+      throw new ImageError(
+        `${given.join(", ")} ${given.length > 1 ? "are" : "is"} xAI-only. --engine agy renders through agy's built-in generate_image tool, which takes a prompt and an aspect ratio.`,
+      );
+    }
+  }
   opts.prompt = rest.join(" ").trim();
   return opts;
 }
@@ -201,7 +354,7 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export async function main(argv, { stdin = readStdin } = {}) {
+export async function main(argv, { stdin = readStdin, spawnImpl = spawn } = {}) {
   let opts;
   try {
     opts = parseArgs(argv);
@@ -227,7 +380,8 @@ export async function main(argv, { stdin = readStdin } = {}) {
   }
   if (!opts.prompt) {
     process.stderr.write(
-      "usage: imagine.mjs --prompt-file <path|-> [--out <path>] [--aspect 1:1] [--resolution 1k|2k] [--model <id>] [--quality low|medium]\n" +
+      "usage: imagine.mjs --prompt-file <path|-> [--engine grok|agy] [--out <path>] [--aspect 1:1]\n" +
+        "                  [--resolution 1k|2k] [--model <id>] [--quality low|medium]   (last three: --engine grok only)\n" +
         '       the prompt may also be a positional argument ("<prompt>") or piped on stdin, but a file\n' +
         "       is the only transport a shell cannot corrupt. Without --out the image lands in a fresh temp dir.\n",
     );
@@ -239,7 +393,9 @@ export async function main(argv, { stdin = readStdin } = {}) {
     // shell and splice it back into the next command line. Inside the try — an unusable
     // TMPDIR must fail as the same one-line reason as everything else, not a stack trace.
     if (!opts.out) opts.out = path.join(mkdtempSync(path.join(tmpdir(), "imagine-")), "image.jpg");
-    const r = await generateImage({ ...opts, token: resolveToken() });
+    // resolveToken is reached only on the xAI path: agy renders on the user's Google
+    // login, so a machine with no grok and no XAI_API_KEY can still generate.
+    const r = opts.engine === "agy" ? await generateWithAgy({ ...opts, spawnImpl }) : await generateImage({ ...opts, token: resolveToken() });
     // The disk is the receipt — statSync so we report what actually landed.
     const note = r.renamed ? ` — extension corrected to match ${r.mimeType}` : "";
     process.stdout.write(`IMAGE_SAVED: ${path.resolve(r.out)} (${statSync(r.out).size} bytes, ${r.model})${note}\n`);

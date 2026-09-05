@@ -1,0 +1,181 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { generateWithAgy, agyPrompt, resolveAgyBin, sniffMime, parseArgs, main, ImageError } from "../../plugins/imagine/scripts/imagine.mjs";
+
+const dir = () => mkdtempSync(path.join(tmpdir(), "imagine-agy-"));
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("JPEGBYTES")]);
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("PNGBYTES")]);
+
+// A fake agy. `handler` gets the spawn call and decides what the process does —
+// including whether it writes the file, which is the only thing that counts.
+function fakeAgy(handler) {
+  const calls = [];
+  const spawnImpl = (bin, args, opts) => {
+    calls.push({ bin, args, opts });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => child.emit("close", null);
+    setImmediate(() => {
+      const { code = 0, stdout = "", stderr = "", error } = handler({ bin, args, opts }) ?? {};
+      if (error) return child.emit("error", error);
+      if (stdout) child.stdout.emit("data", Buffer.from(stdout));
+      if (stderr) child.stderr.emit("data", Buffer.from(stderr));
+      child.emit("close", code);
+    });
+    return child;
+  };
+  spawnImpl.calls = calls;
+  return spawnImpl;
+}
+
+const succeeds = (bytes = JPEG) =>
+  fakeAgy(({ args }) => {
+    // Mirror the real tool: the path we asked for in the prompt is where the file lands.
+    writeFileSync(args[1].match(/at exactly (\S+)\./)[1], bytes);
+    return { stdout: JSON.stringify({ status: "SUCCESS", response: "done", conversation_id: "cid-1" }) };
+  });
+
+test("agy engine reports the file that actually landed on disk", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const r = await generateWithAgy({ prompt: "a cat", out, spawnImpl: succeeds() });
+  assert.equal(r.out, out);
+  assert.equal(r.bytes, JPEG.length);
+  assert.equal(r.model, "agy/generate_image");
+  assert.equal(readFileSync(out).equals(JPEG), true);
+});
+
+test("a SUCCESS with no file is a failure — the agent's word is not the receipt", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(() => ({
+    stdout: JSON.stringify({ status: "SUCCESS", response: "I have generated the image for you!", conversation_id: "cid-9" }),
+  }));
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, spawnImpl }),
+    (e) =>
+      e instanceof ImageError &&
+      /wrote no file/.test(e.message) &&
+      // The claim is quoted back, so the user can see what agy thought it did...
+      /I have generated the image for you!/.test(e.message) &&
+      // ...and where its tool parks a render it forgot to move.
+      /brain/.test(e.message),
+  );
+});
+
+test("a non-zero exit names the code and relays what agy printed", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(() => ({ code: 1, stderr: "quota exhausted for this account" }));
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, spawnImpl }),
+    (e) => e instanceof ImageError && /exited 1/.test(e.message) && /quota exhausted/.test(e.message),
+  );
+});
+
+test("a missing agy binary says how to fix it rather than dying as ENOENT", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(() => ({ error: Object.assign(new Error("spawn agy ENOENT"), { code: "ENOENT" }) }));
+  await assert.rejects(
+    () => generateWithAgy({ prompt: "a cat", out, spawnImpl }),
+    (e) => e instanceof ImageError && /not installed/.test(e.message) && /AGY_BIN/.test(e.message),
+  );
+});
+
+test("an empty file is not a render", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = fakeAgy(({ args }) => {
+    writeFileSync(args[1].match(/at exactly (\S+)\./)[1], "");
+    return {};
+  });
+  await assert.rejects(() => generateWithAgy({ prompt: "a cat", out, spawnImpl }), (e) => e instanceof ImageError && /empty/.test(e.message));
+});
+
+test("the extension is corrected to match the bytes agy actually wrote", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const r = await generateWithAgy({ prompt: "a cat", out, spawnImpl: succeeds(PNG) });
+  assert.equal(r.out, out.replace(/\.jpg$/, ".png"));
+  assert.equal(r.mimeType, "image/png");
+  assert.equal(r.renamed, true);
+  assert.equal(existsSync(out), false, "the .jpg name must not survive PNG bytes");
+});
+
+test("a destination that already exists is refused before agy is spawned", async () => {
+  const out = path.join(dir(), "image.jpg");
+  writeFileSync(out, "taken");
+  const spawnImpl = fakeAgy(() => ({}));
+  await assert.rejects(() => generateWithAgy({ prompt: "a cat", out, spawnImpl }), (e) => e instanceof ImageError && /already exists/.test(e.message));
+  assert.equal(spawnImpl.calls.length, 0, "nothing may be spent on a destination we cannot write");
+});
+
+test("the prompt rides in the argv array, never through a shell", async () => {
+  const out = path.join(dir(), "image.jpg");
+  const spawnImpl = succeeds();
+  // A prompt carrying quotes, a heredoc delimiter and a command substitution: all of
+  // these are inert in an argv array and all of them are hazards in a command string.
+  const prompt = 'poster with headline "RED BALLOON"\nEOF\n$(echo injected)';
+  await generateWithAgy({ prompt, out, aspect: "16:9", spawnImpl });
+  const { args, opts } = spawnImpl.calls[0];
+  assert.equal(args[0], "-p");
+  assert.ok(args[1].includes(prompt), "the prompt must reach agy verbatim");
+  assert.match(args[1], /AspectRatio "16:9"/);
+  assert.match(args[1], new RegExp(`at exactly ${out.replace(/[.]/g, "\\.")}\\.`), "the absolute path is what stops agy filing it under $HOME");
+  assert.ok(args.includes("--output-format") && args.includes("json"));
+  assert.ok(args.includes("--dangerously-skip-permissions"), "a headless run cannot answer a permission prompt");
+  assert.equal(opts.cwd, path.dirname(out), "a relative path from agy must land next to the output, not wherever the caller stood");
+  assert.equal(opts.stdio[0], "ignore");
+});
+
+test("agyPrompt asks for only the path back — a long report is what times the run out", () => {
+  const text = agyPrompt({ prompt: "a cat", aspect: "1:1", out: "/tmp/x.jpg" });
+  assert.match(text, /Reply with only that path/);
+});
+
+test("the xAI-only knobs are rejected rather than silently dropped", () => {
+  for (const flag of ["--model", "--resolution", "--quality"]) {
+    assert.throws(
+      () => parseArgs(["--engine", "agy", flag, "x", "a cat"]),
+      (e) => e instanceof ImageError && e.message.includes(flag) && /xAI-only/.test(e.message),
+      `${flag} must not be accepted with --engine agy`,
+    );
+  }
+  // ...and the same flags stay legal on the engine that owns them.
+  assert.equal(parseArgs(["--model", "x", "a cat"]).model, "x");
+});
+
+test("an unknown engine is a usage error, not a silent fallback to xAI", () => {
+  assert.throws(() => parseArgs(["--engine", "dalle", "a cat"]), (e) => e instanceof ImageError && /unknown engine/.test(e.message));
+  assert.equal(parseArgs(["a cat"]).engine, "grok", "the default engine stays grok");
+});
+
+test("--engine agy needs no xAI credential at all", async (t) => {
+  // The point of this engine: a machine with no grok login and no XAI_API_KEY still renders.
+  t.after(() => delete process.env.GROK_AUTH_FILE);
+  process.env.GROK_AUTH_FILE = path.join(dir(), "no-such-auth.json");
+  delete process.env.XAI_API_KEY;
+  const out = path.join(dir(), "image.jpg");
+  const promptFile = path.join(dir(), "prompt.txt");
+  writeFileSync(promptFile, "a cat");
+  const code = await main(["--engine", "agy", "--prompt-file", promptFile, "--out", out], { spawnImpl: succeeds() });
+  assert.equal(code, 0);
+  assert.equal(existsSync(out), true);
+});
+
+test("resolveAgyBin honours AGY_BIN and otherwise leaves the lookup to PATH", () => {
+  assert.equal(resolveAgyBin({}), "agy");
+  assert.equal(resolveAgyBin({ AGY_BIN: "  " }), "agy");
+  assert.equal(resolveAgyBin({ AGY_BIN: "/opt/agy" }), "/opt/agy");
+});
+
+test("sniffMime reads the file's own header, not its name", () => {
+  const d = dir();
+  const jpg = path.join(d, "a.png");
+  writeFileSync(jpg, JPEG);
+  assert.equal(sniffMime(jpg), "image/jpeg");
+  const junk = path.join(d, "b.jpg");
+  writeFileSync(junk, "not an image");
+  assert.equal(sniffMime(junk), undefined, "an unknown header must not be guessed into a rename");
+});
