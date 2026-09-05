@@ -100,11 +100,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - **Editing `plugins/<name>/` does NOT change the agent/skill/command Claude Code actually runs.**
   It spawns from the installed copy at `~/.claude/plugins/cache/agent-fleet/<plugin>/<version>/`,
   so a subagent keeps its **old** frontmatter `description` (and body) until the plugin is bumped
-  and reinstalled. Verifying a prose/routing change therefore needs a reinstall — a worktree edit
-  plus a green `npm test` proves nothing about the live agent. Quickest check that you are looking
-  at the live text: `diff ~/.claude/plugins/cache/agent-fleet/<plugin>/<version>/agents/<a>.md
-  plugins/<plugin>/agents/<a>.md`. (The agent list in a running session shows the installed
-  description — that is the authoritative tell.)
+  and reinstalled. **A worktree edit plus a green `npm test` proves nothing about the live
+  agent** — the agent list in a running session shows the *installed* description, and that is
+  the authoritative tell. How to swap the installed copy for your edited one: the
+  `local-install-test` skill.
 - `tests/codex/runtime.test.mjs`, `tests/shared/worker.test.mjs` and
   `tests/antigravity/job-runtime.test.mjs` (`missing event finalized`) are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
@@ -124,4 +123,6 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   source anchor (or, for a closed binary, an evidence class) + the recipe to re-run the check.
   Update the audit doc, not the plugin's `AGENTS.md`, when you learn something about an engine:
   `docs/codex-protocol-sync-audit.md` · `docs/grok-cli-contract-audit.md` ·
-  `docs/antigravity-cli-contract-audit.md` (`cc` has none — its engine is Claude Code itself).
+  `docs/antigravity-cli-contract-audit.md` · imagine has two, one per engine it renders on:
+  `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`
+  (`cc` alone has none — its engine is Claude Code itself).

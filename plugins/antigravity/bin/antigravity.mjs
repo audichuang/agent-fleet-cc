@@ -13,9 +13,17 @@ const SCRIPT_ROOT = process.env.ANTIGRAVITY_SCRIPT_ROOT
   : resolve(ROOT, 'scripts', 'commands');
 
 const INSTALL_URL = 'https://antigravity.google/download';
-const KNOWN = ['setup', 'review', 'adversarial-review', 'rescue', 'task', 'image', 'status', 'result', 'cancel', 'wait', 'logs'];
+const KNOWN = ['setup', 'review', 'adversarial-review', 'rescue', 'task', 'status', 'result', 'cancel', 'wait', 'logs'];
+// Verbs this plugin used to ship. Anyone arriving with old muscle memory or an old
+// doc deserves the new address, not "unknown command" plus a Levenshtein guess.
+const RETIRED = {
+  image:
+    'image generation moved to the imagine plugin, which verifies the file on disk\n' +
+    'instead of parsing a path out of agy\'s prose:\n' +
+    '  /imagine:image --engine agy <description>',
+};
 // Commands that shell out to `agy`. status/result/cancel only read disk state.
-const AGY_REQUIRED = new Set(['setup', 'review', 'adversarial-review', 'rescue', 'task', 'image']);
+const AGY_REQUIRED = new Set(['setup', 'review', 'adversarial-review', 'rescue', 'task']);
 
 /** Help text per command — flag/positional contract. */
 const COMMAND_HELP = {
@@ -63,16 +71,6 @@ const COMMAND_HELP = {
     'Flags:\n' +
     '  --wait, --foreground, --continue\n' +
     '  --conversation <id>     resume a specific conversation\n' +
-    '  --add-dir <path>        extra workspace dir (repeatable)\n' +
-    '  --json                  emit JSON\n' +
-    '  --cwd <path>            override working directory',
-  image:
-    'antigravity-plugin image — generate an image with agy (Imagen).\n\n' +
-    'Usage: antigravity-plugin image <description> [flags]\n' +
-    'Runs in the foreground and returns the saved image path.\n\n' +
-    'Flags:\n' +
-    '  --name <id>             ask agy to save the image under this name\n' +
-    '  --output <path>         copy the generated file to this path\n' +
     '  --add-dir <path>        extra workspace dir (repeatable)\n' +
     '  --json                  emit JSON\n' +
     '  --cwd <path>            override working directory',
@@ -134,6 +132,11 @@ if (!arg0 || arg0 === '-h' || arg0 === '--help' || arg0 === 'help') {
   }
   printHelp();
   process.exit(0);
+}
+
+if (RETIRED[arg0]) {
+  process.stderr.write(`antigravity-plugin: '${raw}' was removed from this plugin.\n${RETIRED[arg0]}\n`);
+  process.exit(2);
 }
 
 if (!KNOWN.includes(arg0)) {
@@ -254,7 +257,6 @@ function printHelp(stream = process.stdout) {
     '  adversarial-review  Strict structured (JSON) review of the diff',
     '  rescue     Hand a task off to agy (investigate, fix, refactor, ...)',
     '  task       Free-form prompt with state tracking',
-    '  image      Generate an image with agy (Imagen)',
     '  status     List active/recent delegation jobs',
     '  result     Fetch the result of a finished job',
     '  cancel     Cancel a running job',

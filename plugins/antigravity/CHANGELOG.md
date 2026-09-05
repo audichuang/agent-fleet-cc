@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-05
+
+### Removed
+
+- **`/antigravity:image` (and `antigravity-plugin image`).** Image generation is the
+  `imagine` plugin's: `/imagine:image --engine agy`. This verb parsed the saved path out of
+  agy's prose (`IMAGE_PATH:` marker) and, when the marker or the file was missing, warned and
+  still exited 0 — the "failure looks like success" shape that retired `/grok:image` in
+  `grok@0.8.0`. Removed with it: `lib/image.mjs`, `buildImagePrompt`, and the verb's rows in
+  `SKILL.md`, `agents/openai.yaml`, `README.md`, `docs/INSTALL.md` and fleet's routing.
+  `antigravity-plugin image` exits 2 naming the replacement.
+
+### Fixed
+
+- **Stopped calling the model behind agy's `generate_image` "Imagen".** The string arrived
+  with the upstream fork (`a9093bc`) and was never verified here; agy's tool definition
+  discloses no model and its logs carry none (agy 1.1.27, 2026-09-05). It also broke this
+  repo's rule against naming an engine's runtime catalog in shipped prose.
+
 ## [0.6.1] — 2026-08-24
 
 ### Fixed

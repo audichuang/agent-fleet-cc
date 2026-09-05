@@ -21,6 +21,5 @@ switch (mode) {
   case "not-installed": process.exit(127);
   case "hang": line("working..."); setInterval(() => {}, 1 << 30); break;
   case "grandchild": { const gc = spawn(process.execPath, ["-e", "setInterval(()=>{},1e9)"], { stdio: "ignore" }); line(`GRANDCHILD_PID: ${gc.pid}`); setInterval(() => {}, 1 << 30); break; }
-  case "image": line("Done."); line("IMAGE_PATH: /tmp/fake.png"); process.exit(0);
   default: line("OK"); process.exit(0);
 }

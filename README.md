@@ -5,11 +5,11 @@ Six Claude Code plugins, one marketplace:
 | Plugin | Commands | What it delegates to |
 |---|---|---|
 | `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server) |
-| `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, image, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
+| `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
 | `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
 | `grok` | `/grok:*` (task, status, wait, logs, result, cancel, setup) | xAI Grok Build (`grok`), headless — default model grok-4.5; auth via `grok login` or `XAI_API_KEY` |
 | `fleet` | `/fleet:*` (setup, doctor, status) | Guided onboarding plus read-only fleet diagnostics/status |
-| `imagine` | `/imagine:image` | xAI Grok Imagine, over `POST /v1/images/generations` directly — reuses the grok CLI's OAuth login (read-only) or `XAI_API_KEY`. Not a delegation engine: one API call, one file on disk |
+| `imagine` | `/imagine:image` | The marketplace's only image entry point, on either of two engines: xAI Grok Imagine over `POST /v1/images/generations` (reuses the grok CLI's OAuth login read-only, or `XAI_API_KEY`), or `--engine agy` through Antigravity's built-in `generate_image` (the user's Google login, no API key). Not a delegation engine: the file on disk is the receipt |
 
 > **`cc` v0.3.0** runs on the shared job runtime (`shared/lib/`). Its companion
 > CLI also exposes machine-layer re-entry verbs `wait` and `logs` (with `--json`

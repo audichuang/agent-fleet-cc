@@ -30,21 +30,12 @@ plugin 移除,不留重複入口。
 「a SUCCESS with no file is a failure」——拿掉 `statSync` 會有四個測試同時變紅。
 
 - **prompt 走 argv array,不經 shell。** `spawn(bin, [...])` 沒有 word splitting、沒有引號剝除、
-  沒有 here-document 可關,所以 wrapper prompt 可以安全地把使用者的 prompt 原樣嵌進去。
-  這是 `--prompt-file` 那條規則的同一個理由,不是例外。
-- **`--dangerously-skip-permissions` 是必要的**(headless 沒人回答權限提示)。`cwd` 設成輸出檔
-  的目錄,是為了讓 agy 用相對路徑時落在我們預期的位置 —— **它不是沙箱**:權限被跳過的 agent
-  用絕對路徑照樣哪裡都能去。真要圍起來得靠 agy 自己的 `--sandbox`,那個還沒驗過(見 audit doc
-  的 Still unverified)。
-- **絕對路徑是關鍵。** 只說「current working directory」時 agy 會把圖丟到 `$HOME`(實測)。
-  tool 一律先寫進 `~/.gemini/antigravity-cli/brain/<conversation-id>/<ImageName>_<epoch>.jpg`,
-  搬到我們要的位置是 agent 事後做的,所以那個 brain 路徑只出現在**錯誤訊息**裡當線索,
-  不是程式讀的路徑 —— 它沒有文件、會隨 agy 版本變。
-- **副檔名照位元組修正**:sniff `FF D8 FF` / `89 50 4E 47`,和 xAI 那條同一個承諾。
+  沒有 here-document 可關 —— 這是 `--prompt-file` 那條規則的同一個理由,不是例外。
+- **wrapper prompt 一定要給絕對路徑**,而且**副檔名照位元組修正**(和 xAI 那條同一個承諾)。
+  為什麼(agy 的落檔行為、`--dangerously-skip-permissions` 與 cwd 為何不是沙箱、tool 參數、
+  無 key 實測、重跑 recipe)全在 `docs/imagine-agy-image-audit.md` —— 學到新東西改那份,別在此重抄。
 - **`--model` / `--resolution` / `--quality` 在 agy 上直接 exit 2**,不能默默吃掉:被丟掉的
   `--model` 是一張使用者沒要求、卻照樣付錢的圖。
-- 契約證據(tool 參數、無 key 實測、落檔行為、重驗食譜)在
-  `docs/imagine-agy-image-audit.md`。學到新東西改那份。
 
 ## 認證:讀 grok CLI 的 token,永遠不寫
 `~/.grok/auth.json`(可用 `GROK_AUTH_FILE` 覆寫)是 grok CLI 的檔案。我們**只讀**兩個欄位:

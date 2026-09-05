@@ -153,25 +153,3 @@ export function buildTaskPrompt(userPrompt) {
   return userPrompt;
 }
 
-/**
- * Build the image-generation prompt for `/antigravity:image`.
- *
- * agy `--print` only returns natural-language text, so we ask the model to use
- * its built-in `generate_image` tool and then end its reply with a single
- * `IMAGE_PATH:` marker line that extractImagePath() recovers.
- *
- * @param {string} description - What to draw.
- * @param {{ name?: string }} [opts]
- * @returns {string}
- */
-export function buildImagePrompt(description, { name } = {}) {
-  const nameClause = name ? ` Save the image with name "${name}".` : "";
-  const lines = [];
-  lines.push(`Use your built-in generate_image tool to create the following image. Description: ${description}.${nameClause}`);
-  lines.push("");
-  lines.push("After the tool returns, you MUST end your reply with a single line in this exact format (no quotes, no markdown, nothing after it):");
-  lines.push("IMAGE_PATH: <absolute filesystem path to the saved image>");
-  lines.push("");
-  lines.push("The IMAGE_PATH line is required — the calling wrapper parses it to locate the file.");
-  return lines.join("\n");
-}

@@ -45,7 +45,7 @@ describe('agy-rescue agent contract', () => {
     assert.match(agent, /Never hardcode a cache\/versioned path/i);
     assert.match(agent, /--prompt-file <path>/);
     assert.match(agent, /Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own/i);
-    assert.match(agent, /Do not call `setup`, `review`, `adversarial-review`, `task`, `image`, `status`, `result`, `cancel`, `wait`, or `logs`/i);
+    assert.match(agent, /Do not call `setup`, `review`, `adversarial-review`, `task`, `status`, `result`, `cancel`, `wait`, or `logs`/i);
     assert.match(agent, /Do not add commentary before or after/i);
   });
 

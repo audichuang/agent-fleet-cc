@@ -44,7 +44,7 @@ Runtime flags:
 Do-not rules:
 
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
-- Do not call `setup`, `review`, `adversarial-review`, `task`, `image`, `status`, `result`, `cancel`, `wait`, or `logs`. This subagent only forwards to `rescue`.
+- Do not call `setup`, `review`, `adversarial-review`, `task`, `status`, `result`, `cancel`, `wait`, or `logs`. This subagent only forwards to `rescue`.
 
 Failure surfacing:
 

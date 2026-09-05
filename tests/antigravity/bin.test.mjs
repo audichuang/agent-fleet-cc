@@ -85,18 +85,15 @@ export async function run(argv, ctx) {
     assert.match(res.stdout, /--scope/);
   });
 
-  it('help image prints the image command help and exits 0', () => {
-    const res = run(['help', 'image']);
-    assert.equal(res.status, 0, res.stderr);
-    assert.match(res.stdout, /antigravity-plugin image/);
-    assert.match(res.stdout, /--output/);
-    assert.match(res.stdout, /--name/);
-  });
-
-  it('lists image in the top-level help', () => {
-    const res = run([]);
-    assert.equal(res.status, 0);
-    assert.match(res.stdout, /image/);
+  it('the retired image verb names its replacement instead of guessing a typo', () => {
+    // Removed in 0.7.0 — generation moved to the imagine plugin, which verifies the
+    // file on disk rather than parsing a path out of agy's prose. Anyone arriving with
+    // the old verb should be sent there, not told "did you mean rescue?".
+    const res = run(['image', 'a red bicycle']);
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /was removed from this plugin/);
+    assert.match(res.stderr, /imagine:image --engine agy/);
+    assert.doesNotMatch(res.stderr, /Did you mean/);
   });
 
   it('lists wait and logs in top-level help and per-command help', () => {

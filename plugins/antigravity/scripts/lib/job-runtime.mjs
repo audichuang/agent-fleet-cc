@@ -120,7 +120,7 @@ function makeRecord({ cwd, kind, title, request, env }) {
   return record;
 }
 
-// FOREGROUND (rescue/review/adversarial/image + task --foreground): in-process
+// FOREGROUND (rescue/review/adversarial + task --foreground): in-process
 // await of the shared worker lifecycle, then return the projected terminal job.
 export async function runForeground({
   cwd,

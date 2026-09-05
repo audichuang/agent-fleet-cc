@@ -7,7 +7,7 @@
 
 ## 定位
 把 host(Claude Code / Codex)委派的任務交給 `agy` CLI 跑:code review、adversarial
-review、debug、大 context 調查、raster 圖生成(Imagen,獨立 user-run 的 `image` verb)。
+review、debug、大 context 調查。
 刻意只依賴 `agy` binary —— 撐過已日落的 gemini-cli。
 
 ## 結構角色(判斷,不是清單)

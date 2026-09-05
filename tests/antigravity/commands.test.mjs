@@ -3,7 +3,7 @@
  *
  * Read commands (status/result/wait/logs/cancel) seed the shared dir-per-job
  * layout via createJob/finalizeJob (seedSharedJob). Launch commands
- * (task/rescue/review/adversarial/image) run their real run() entry in-process
+ * (task/rescue/review/adversarial) run their real run() entry in-process
  * against a directly-spawnable bash `agy` stub (AGY_BIN) so the shared worker
  * lifecycle is exercised end-to-end without a real agy binary.
  */

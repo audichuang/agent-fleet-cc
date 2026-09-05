@@ -26,7 +26,6 @@ All verbs map to `scripts/commands/<verb>.mjs` and are byte-equivalent across Cl
 | `adversarial-review` | Stricter structured review: asks agy for a JSON verdict and renders it (falls back to raw text). Foreground only. |
 | `rescue` | Delegates an investigation or fix to agy — e.g. `$antigravity rescue why are the tests failing`. Foreground by default — prints agy's answer; `--background` returns a job id. Repo writes are opt-in via `--apply`. |
 | `task`   | Generic long-running delegation, background by default (returns a job id). Supports `--continue`, `--conversation <id>`, `--add-dir <path>`, `--wait`, `--foreground`, `--json`, `--apply`. |
-| `image`  | Generates an image with agy's `generate_image` tool (Imagen) and recovers the saved file path; `--output <path>` copies it. Foreground only. |
 | `status` | Shows a compact table of current and recent jobs (id, kind, phase, health, last progress). Surfaces any pending OAuth URL prominently. |
 | `result` | Prints the final output of a completed job by id. |
 | `cancel` | Sends SIGTERM to a running worker by job id. |

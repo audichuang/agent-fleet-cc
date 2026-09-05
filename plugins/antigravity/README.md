@@ -7,7 +7,7 @@ Hardened fork of
 [`sakibsadmanshajib/antigravity-plugin`](https://github.com/sakibsadmanshajib/antigravity-plugin)
 (itself the successor to `gemini-plugin-cc`, archived because Google
 [retires Gemini CLI on June 18, 2026](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)
-for free / personal users). This fork adds image generation and a handoff
+for free / personal users). This fork adds a handoff
 loop, runs the job runtime on the shared `shared/lib/` foundation (directory-per-job
 state-store with cross-process terminal CAS + TTL dead-PID reconcile, the same runtime
 as `cc`), and ships the missing slash-command wiring with a CI-gated test suite.
@@ -27,7 +27,6 @@ preferred AI host so you can:
 - Review uncommitted changes or a branch diff — free-form or as a strict,
   structured **adversarial review**.
 - Delegate a fix, investigation, or refactor without leaving your current host.
-- Generate images with agy's built-in Imagen tool.
 - **Hand off** the session to agy with a one-key reflect → handoff → continue loop.
 - Run multiple delegations in parallel with background job tracking that
   **survives a crashed worker** (a detached watchdog reaps dead/hung jobs).
@@ -66,7 +65,6 @@ claude plugin install antigravity@antigravity
 # 4. use
 /antigravity:review
 /antigravity:rescue investigate why the tests started failing
-/antigravity:image a flat icon of a paper plane --output /tmp/plane.png
 /antigravity:handoff           # hand the session to agy to continue
 ```
 
@@ -79,7 +77,6 @@ claude plugin install antigravity@antigravity
 | `/antigravity:adversarial-review [--no-sandbox]` | Strict, structured (JSON) review rendered as markdown. Same read-only posture as `review`. |
 | `/antigravity:rescue <task> [--background] [--continue] [--model <id>] [--prompt-file <p>]` | Delegate a free-form task to agy (routes through the `agy-rescue` subagent). |
 | `/antigravity:task <task> [--foreground] [--wait]` | Free-form prompt with background job tracking (background by default). |
-| `/antigravity:image <desc> [--name <n>] [--output <path>]` | Generate an image with agy's `generate_image` (Imagen). |
 | `/antigravity:handoff [focus] [--print] [--background]` | Write a handoff doc and hand the work to agy to continue. |
 | `/antigravity:status [<id>] [--wait]` · `/antigravity:result [<id>]` · `/antigravity:cancel [<id>]` | Inspect / fetch / cancel background jobs. |
 
@@ -116,7 +113,7 @@ npm test   # node --test --experimental-test-module-mocks tests/*.test.mjs
 The suite is **hermetic**: it never spawns the real `agy` or touches your real
 `~/.claude`. Instead it points `CLAUDE_PLUGIN_DATA` at a temp dir and uses a
 fake `agy` (a stub script via `AGY_BIN`). It covers the pure logic (CAS,
-liveness classification, image-path extraction, review-JSON parsing) plus
+liveness classification, review-JSON parsing) plus
 real-subprocess integration of the worker, the watchdog reaping a dead-PID job,
 and each command's self-invoke path. Runs in CI on Node 22.x/24.x.
 

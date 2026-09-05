@@ -27,7 +27,7 @@ by choosing self-contained subtasks.
 ## Pick an engine (by task shape)
 
 Each arrow points to the engine's **model-invocable** entry point — the verb you
-can call yourself. Some verbs (codex/agy `task`, `review`, `image`; grok's
+can call yourself. Some verbs (codex/agy `task`, `review`; grok's
 lifecycle/query verbs `status` / `wait` / `logs` / `result` / `cancel`) are user-run
 (`disable-model-invocation`) and will not fire on their own; where a niche lives
 behind one, ask the user to run it — or, for grok's watch loop, drive it by
@@ -39,9 +39,9 @@ fitting engine's verbs aren't available, tell the user to install it (`/fleet:se
   → `/codex:rescue`.
 - **antigravity (agy)** — offload a self-contained task (including generating
   markup / SVG / HTML as text output), or get a large-context second opinion across
-  many files → `/antigravity:rescue` · `/antigravity:handoff`. Raster image
-  generation (Imagen) is a separate user-run verb — ask the user to run
-  `/antigravity:image`.
+  many files → `/antigravity:rescue` · `/antigravity:handoff`.
+- **raster image** — `/imagine:image` (`--engine grok` by default, `--engine agy` to render on
+  the user's Google login). One render costs quota and there are no free re-rolls.
 - **grok** — a self-contained subtask delivered in one shot, or an independent
   chunk of code/tests to offload → `/grok:task` for a quick foreground answer, or
   `/grok:live` when you want to **watch it run** (a background streaming shell —

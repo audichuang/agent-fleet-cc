@@ -10,8 +10,8 @@
 ## 結構角色(判斷,不是清單)
 - **無 `SKILL.md` / `README`** —— grok 沒有自我推薦 surface;commander 靠 fleet 的
   `delegating-to-fleet` 路由 + model-invocable `/grok:task` / `/grok:live` 才找得到它
-  (見 `docs/adr/0001`)。**生圖不在這顆**:`/grok:image` 已於 0.8.0 移除,搬去 `imagine`
-  plugin 直接打 xAI 的 HTTP API(理由見那顆的 `AGENTS.md`)。
+  (見 `docs/adr/0001`)。**生圖不在這顆**:`/grok:image` 已於 0.8.0 移除,搬去 `imagine` plugin
+  (預設 `--engine grok` 直接打 xAI 的 HTTP API;另有 `--engine agy`)。理由見那顆的 `AGENTS.md`。
 - `commands/*.md` — slash verb 的薄殼,每支 shell `scripts/grok-companion.mjs <verb>`。
 - `scripts/grok-companion.mjs` — CLI 入口(`runCompanion(argv, deps)`,deps 可注入 seam 測);
   `bin/grok-companion` 是啟動器。

@@ -35,8 +35,6 @@ commands:
     description: "Delegate an investigation or fix request to agy — e.g. 'why are the tests failing on main'. Foreground by default — prints agy's answer; --background returns a job id for $antigravity status / result."
   - name: task
     description: "Generic long-running task delegation, background by default (returns a job id). Supports --continue / --conversation <id> / --add-dir for follow-up agy conversations."
-  - name: image
-    description: "Generate an image with agy's generate_image tool (Imagen) and recover the saved file path; --output <path> copies it. Foreground only."
   - name: status
     description: "Show a Markdown table of current and recent agy jobs, with health, last progress, and any pending OAuth URL."
   - name: result

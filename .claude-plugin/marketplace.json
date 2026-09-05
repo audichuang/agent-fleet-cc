@@ -4,7 +4,7 @@
     "name": "audichuang"
   },
   "metadata": {
-    "description": "One marketplace for AI-agent delegation plugins: Codex, Antigravity (agy), and Claude Code (cc) via profiles.",
+    "description": "One marketplace for AI-agent delegation plugins — Codex, Antigravity (agy), Grok, and Claude Code (cc) via profiles — plus the fleet router and image generation.",
     "version": "0.2.0"
   },
   "plugins": [
@@ -20,8 +20,8 @@
     {
       "name": "antigravity",
       "source": "./plugins/antigravity",
-      "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, generate images, and hand off work — with a liveness watchdog and cross-process-safe job state.",
-      "version": "0.6.1",
+      "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, and hand off work — with a liveness watchdog and cross-process-safe job state.",
+      "version": "0.7.0",
       "author": {
         "name": "audichuang"
       }
