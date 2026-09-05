@@ -256,3 +256,53 @@ test("renderReviewResult adds no failure marker when there is no reason", () => 
 
   assert.doesNotMatch(output, /Codex review failed/);
 });
+
+// Codex's independent review found this one, and it is the branch the earlier round had
+// waved through as "nothing to compare against". True of the RAW output — this branch
+// never echoes it — but not of the rendered body: `summary` and every finding body are
+// model-written text, so a review whose summary quotes the failure it observed gets the
+// reason printed twice, once as the header and once as its own summary.
+//
+// The fix compares against the assembled body, not `parsedResult.rawOutput`. Those are
+// different fixes and only one is right here: rawOutput is not what this branch prints,
+// and using it would let a verdict that merely quotes the error suppress a header the
+// reader needs.
+test("renderReviewResult does not restate a reason its own summary already carries", () => {
+  const reason = "401 Unauthorized";
+  const output = renderReviewResult(
+    {
+      parsed: {
+        verdict: "fail",
+        summary: `The turn ended with 401 Unauthorized before review completed.`,
+        findings: [],
+        next_steps: []
+      }
+    },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: reason }
+  );
+
+  assert.match(output, /Codex review failed/, "the failure must still be marked");
+  assert.equal(
+    (output.match(/401 Unauthorized/g) ?? []).length,
+    1,
+    "the summary already carries the reason; a header restating it says it twice"
+  );
+});
+
+// The other direction, so the fix above cannot be "always suppress the header": when the
+// body does NOT carry the reason, the reader has no other way to learn the review came
+// from a dead turn, so the full header must survive.
+test("renderReviewResult still states a reason its body does not carry", () => {
+  const output = renderReviewResult(
+    {
+      parsed: { verdict: "pass", summary: "No material issues found.", findings: [], next_steps: [] }
+    },
+    { reviewLabel: "Review", targetLabel: "working tree", errorMessage: "stream disconnected" }
+  );
+
+  assert.match(output, /Codex review failed: stream disconnected/);
+  assert.ok(
+    output.indexOf("Codex review failed") < output.indexOf("No material issues found."),
+    "the failure must sit above the verdict, or a verbatim paste reads as a clean review"
+  );
+});

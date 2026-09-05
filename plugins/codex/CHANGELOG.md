@@ -60,7 +60,7 @@ found the price table the paragraph above had deferred, plus five ways a run can
 user learning about it. The prose and the two confirmed render defects are fixed here; the
 remaining findings are recorded, not acted on.
 
-**The model catalog is gone from `references/prompting.md`.** Prices, benchmark indices, context
+**The rot-prone half of the model catalog is gone from `references/prompting.md`.** Prices, benchmark indices, context
 and output sizes, the price-cut date, and the low-end effort listing were exactly what the root
 `AGENTS.md`
 forbids putting in shipped prose. The guard that replaced them is the tell: the old test pinned
@@ -69,6 +69,13 @@ rotted once while the suite stayed green. Routing is now by role (thinker / exec
 ticket-runner) with the authority named for anything numeric. The cost: the "25× cheaper" order
 of magnitude is no longer written down, and `models_cache.json` has no price field to recover it
 from. A table that lies is worse than a table that is absent.
+
+What deliberately stays is the load-bearing half: the three slugs, and the `luna` + `--effort max`
+pairing. Those are not description — `agents/codex-rescue.md` forwards a ticket with
+`--model gpt-5.6-luna --effort max` and `tests/codex/commands.test.mjs` pins both halves, so
+removing them from the prose would leave a routing capability with no explanation anywhere. An
+independent review read the remaining slugs as the same violation; the distinction is that a price
+rots without anything going red, while a slug that changes breaks a pinned test on the next run.
 
 **`commands/execute-plan.md` armed a wait that dies before the job does.** It told the model to
 run an `until` loop under `Monitor` and said nothing about `timeout_ms` — a required parameter
@@ -171,6 +178,37 @@ marker is load-bearing and the alternative is a regex on our own prose, so the s
 The empty-output branch also now prefers the capped reason over the uncapped `failureMessage`,
 so a stderr past `MAX_TURN_ERROR_LEN` is truncated where it previously was not — a bound at a
 trust boundary, which is why `cap` exists.
+
+### What the independent Codex review changed
+
+Run on `gpt-5.6-luna --effort max`. It returned **do not merge** on two counts, and was right
+about the one that mattered.
+
+- **The valid-JSON review branch could state the reason twice.** `reviewFailureLines` was called
+  without a body there, on the reasoning that the branch has no raw echo to duplicate. True of
+  the RAW output — and beside the point: `summary` and every finding body are model-written text,
+  so a review whose summary quotes the failure it observed gets the reason printed once as the
+  header and once as its own summary. An earlier round had waved this branch through as
+  deliberate. It now assembles the body first and compares against that. Not against
+  `parsedResult.rawOutput`, which would be wrong twice over — it is not what this branch prints,
+  and a verdict that merely quotes the error would suppress a header the reader needs. Both
+  directions are pinned.
+- **A count-only assertion could not see a missing marker.** The adversarial-review e2e asserted
+  only that `401 Unauthorized` appears once; the fixture already puts it in the raw body, so
+  deleting the render's marker entirely left exactly one occurrence and the test stayed green.
+  Third guard of this shape found on this branch. It now asserts the marker exists and sits above
+  the body as well.
+- **`commands/rescue.md` said "one `Bash` call"** while the agent it dispatches to must write a
+  `--prompt-file` first for any multi-line prompt. Read literally, that sent the agent to a path
+  nothing had written, and the companion throws on the missing file. The invariant is one `task`
+  invocation; preparing the prompt is expected.
+
+Reported and deliberately not taken: the review read the three model slugs and the
+`luna` + `--effort max` pairing as the same catalog violation as the prices. They are not the
+same. A price rots with nothing going red; a slug that changes breaks a pinned test on the next
+run, and `agents/codex-rescue.md` forwards a ticket with those exact values. The CHANGELOG claim
+was overstated, though — it said the catalog was gone when only its rot-prone half is — and that
+half of the finding is fixed above.
 
 Considered and rejected: moving off the app-server protocol to `codex exec --json`. The
 protocol side is the best-defended part of this design — `prebuild:codex` generates types from

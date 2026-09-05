@@ -477,6 +477,15 @@ test("e2e: a failed adversarial review with NO agent message states the reason e
   const result = run("node", [SCRIPT, "adversarial-review"], { cwd: repo, env: buildEnv(binDir) });
 
   assert.notEqual(result.status, 0);
+  // A count alone cannot see this: the fixture already puts the reason in the raw body,
+  // so deleting the render's marker entirely still leaves exactly one occurrence and the
+  // count passes. Assert the marker exists and sits above the body, THEN that the reason
+  // is not restated — the three together are what pin "marked, once, in that order".
+  assert.match(result.stdout, /Codex review failed/, "the marker must exist at all");
+  assert.ok(
+    result.stdout.indexOf("Codex review failed") < result.stdout.lastIndexOf("401 Unauthorized"),
+    "the marker must sit above the body, or a verbatim paste reads as a clean review"
+  );
   assert.equal(
     (result.stdout.match(/401 Unauthorized/g) ?? []).length,
     1,

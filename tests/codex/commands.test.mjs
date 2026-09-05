@@ -174,7 +174,13 @@ test("rescue command absorbs continue semantics", () => {
   assert.match(rescue, /thin forwarder only/i);
   assert.match(rescue, /Return the Codex companion stdout verbatim to the user/i);
   assert.match(rescue, /Do not paraphrase, summarize, rewrite, or add commentary before or after it/i);
-  assert.match(rescue, /return that command's stdout as-is/i);
+  // Was /return that command's stdout as-is/. The sentence around it said "one `Bash`
+  // call", which a multi-line prompt cannot honour — it has to write a `--prompt-file`
+  // first, and read literally the rule sent the agent to a path nothing had written.
+  // The invariant is one `task` invocation; preparing the prompt file is expected.
+  assert.match(rescue, /\*\*one `task` invocation\*\*/i);
+  assert.match(rescue, /returns that command's stdout as-is/i);
+  assert.match(rescue, /not "one Bash call"/i);
   assert.match(rescue, /Leave `--resume` and `--fresh` in the forwarded request/i);
   assert.match(agent, /--resume/);
   assert.match(agent, /--fresh/);

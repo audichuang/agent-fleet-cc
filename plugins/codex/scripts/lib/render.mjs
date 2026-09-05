@@ -303,10 +303,15 @@ export function renderReviewResult(parsedResult, meta) {
 
   const data = normalizeReviewResultData(parsedResult.parsed);
   const findings = [...data.findings].sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
-  const lines = [
-    `# Codex ${meta.reviewLabel}`,
-    "",
-    ...reviewFailureLines(meta),
+
+  // Assemble the body BEFORE the failure line, so the line can be compared against
+  // everything that will actually be printed. This branch has no raw echo, which is why
+  // the comparison was originally skipped here — but the reason can land in `summary` or
+  // a finding body just as easily, and then the header restates it. Comparing against
+  // `parsedResult.rawOutput` instead would be wrong twice over: it is not what this
+  // branch prints, and a verdict that merely quotes the error would suppress a header
+  // the reader needs.
+  const body = [
     `Target: ${meta.targetLabel}`,
     `Verdict: ${data.verdict}`,
     "",
@@ -315,25 +320,32 @@ export function renderReviewResult(parsedResult, meta) {
   ];
 
   if (findings.length === 0) {
-    lines.push("No material findings.");
+    body.push("No material findings.");
   } else {
-    lines.push("Findings:");
+    body.push("Findings:");
     for (const finding of findings) {
       const lineSuffix = formatLineRange(finding);
-      lines.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
-      lines.push(`  ${finding.body}`);
+      body.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
+      body.push(`  ${finding.body}`);
       if (finding.recommendation) {
-        lines.push(`  Recommendation: ${finding.recommendation}`);
+        body.push(`  Recommendation: ${finding.recommendation}`);
       }
     }
   }
 
   if (data.next_steps.length > 0) {
-    lines.push("", "Next steps:");
+    body.push("", "Next steps:");
     for (const step of data.next_steps) {
-      lines.push(`- ${step}`);
+      body.push(`- ${step}`);
     }
   }
+
+  const lines = [
+    `# Codex ${meta.reviewLabel}`,
+    "",
+    ...reviewFailureLines(meta, body.join("\n")),
+    ...body
+  ];
 
   appendReasoningSection(lines, meta.reasoningSummary);
 
