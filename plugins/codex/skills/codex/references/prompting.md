@@ -1,106 +1,66 @@
-# GPT-5.6 Prompting
+# GPT-6.1 Prompting
 
-Use this reference when composing a prompt for Codex / GPT-5.6 — both when `codex:codex-rescue` delegates a `task`, and when `/codex:handoff` builds one — which by default it sends to Codex and returns the answer;
-`--print` is the path that hands the prompt back for the user to paste.
+Use this when composing a prompt for Codex — when `codex:codex-rescue` tightens a forwarded `task`, or when the host writes a prompt before calling the companion.
 
-GPT-5.6 works best with **outcome-first** prompts: define the target outcome, success criteria, constraints, and available context, then leave the model room to choose the path. Do not carry over process-heavy instruction stacks from older models — they add noise, narrow the search space, and produce mechanical answers.
+GPT-6.1 works best outcome-first: name the outcome, the success criteria, the constraints, and the files, then leave the path open. A process script from an older model adds noise. The 6.1 harness already covers autonomy, skills, plugins, and apps, so restating those is noise.
 
-## Model selection (which gpt-5.6 variant)
+## Model selection
 
-Route by **how much thinking is left** — these are three different jobs, not three sizes of one job.
+**Route by which job it is, not by price.** This file quotes no prices. A written price table rots the first time OpenAI reprints it, and nothing here would go red. Slugs and effort levels come from the catalog: the companion `setup` verb probes `model/list`, and the offline read is `~/.codex/models_cache.json`.
+
+Pass an explicit slug. The plugin does not rewrite names. The old family alias `gpt-5.6` was rejected with HTTP 400, so do not invent a `gpt-6.1` alias either.
 
 | Model | Job | Route here when |
 | --- | --- | --- |
-| **gpt-5.6-sol** | **thinker** (default) | The work still needs figuring out: planning, hard diagnosis, long autonomous runs, high-stakes review — or the blast radius is large even when the change is small. |
-| **gpt-5.6-terra** | **executor** | The plan is settled, but carrying it out is still substantial. |
-| **gpt-5.6-luna** | **ticket-runner** | The work fits on a **ticket**: one bounded change, spelled out, nothing left to decide. |
+| **gpt-6.1-sol** | **workhorse** (default) | Everyday coding, planning, diagnosis, review, and long runs. The companion sends this when `--model` is omitted. |
+| **gpt-6-astra** | **frontier** | The most demanding work, and only when the user asks for it (`--model gpt-6-astra`). |
 
-Cost tracks that order — `sol` is the expensive tier and `luna` the cheap one, by a wide margin
-— but **route by which job it is, not by price**. This file quotes no numbers on purpose: a
-written-down price table reads authoritative and rots invisibly the first time OpenAI reprints
-its pricing, and nothing in the repo would go red. For current prices, check OpenAI's pricing
-page; for which slugs and reasoning levels an account can actually reach, the authority is the
-catalog itself (`/codex:setup` probes `model/list`; the offline read is in
-`docs/codex-protocol-sync-audit.md`), which carries slugs, visibility and per-model effort
-levels but **no prices**.
+Delegation is for a stronger model to review and explain. Do not pass `--model gpt-6-sol` or `--model gpt-6-luna`. If `gpt-6.1-sol` is gated, the turn fails with the gate message; the companion does not retry on a weaker slug. Do not pass a service tier. The companion has no Fast path.
 
-**Luna always runs at `--effort max`.** Its capability is an effort curve, not a fixed number: with reasoning off it is far below the other two, and at `max` it approaches `sol` on bounded agentic work. The cheap tokens are the saving; the thinking still has to be bought.
+`gpt-6.1-sol` can generate images. The companion enables `image_generation` and returns each saved path. Say which slug you chose when it is not the default. `setup` warns, without blocking, when the configured default is missing from `model/list`.
 
-**One ticket per run.** A queue of tickets is N Luna runs, not one prompt carrying all N — separate runs stay inside what Luna is good at, and each can go `--background` in parallel. Bundling them lands on the weak spots below instead.
+The companion defaults effort to `xhigh` for a task and for a review, once, at the start of the run. It does not change effort mid-turn. The catalog's own default for `gpt-6.1-sol` is `low`; the override is intentional. Keep delegated work in the `high` → `xhigh` → `max` band, and reserve `max` for the hardest pass. The catalog also advertises `ultra`. The companion rejects it, because that level hands the turn to agents this runner cannot observe.
 
-**Needle-hunting in a huge context and GUI/computer-use go to `sol`:** those are Luna's two measured weak spots, and the gap is large enough to change the routing decision rather than merely shade it.
+## The reviewer role
 
-All three take text+image input and share the same large context window. Always pass an explicit slug, and say which you chose and why when it isn't the default.
+Most delegations here are an independent second opinion on work the host just did. Stay on the workhorse. The value is catching what the author missed, so tell Codex it did not write the change.
 
-> Not every Codex version/account is gated into 5.6 yet. `/codex:setup` probes the account's `model/list` and warns (without blocking) when the configured default isn't available, pointing the user to `codex update` or a `CODEX_DEFAULT_MODEL` override.
+For local git changes, use the companion `review` / `adversarial-review` verbs. Those prompts already carry the review contract. Reach for a hand-built `task` prompt only when the target is not the working tree.
 
-## The reviewer role (this plugin's primary use)
+When you do write one, name the lenses and require each to be weighed: correctness, contract, edge cases, concurrency, security, performance, error handling, tests, maintainability. Separate confirmed issues from suspicions. Every finding needs `file:line` and a concrete failure. Omit `--write` unless the user asked for fixes.
 
-Most delegations here cast Codex as an **independent, multi-angle reviewer** — a cross-model second opinion on work Claude just did (code review, plan/spec gate, root-cause check). This is the `sol` "thinker" role above. Its value is catching what the author missed, so position it to disagree, not to agree.
+## Core rules
 
-- **Role framing.** "You are a senior/staff engineer doing an independent review. You did not write this; your job is to find what's wrong, not to confirm it's fine." Make the independence explicit — it must not rubber-stamp Claude's work.
-- **Sweep multiple angles, not the first bug.** Name the lenses and require each be weighed: correctness / logic, contract & API violations, edge cases & failure modes, concurrency / races, security, performance, error handling & data loss, test coverage, maintainability. One finding per lens beats one obvious bug.
-- **Adversarial stance.** Ask it to try to break the change / refute the diagnosis — construct the input or sequence where it fails. Default to skepticism when evidence is thin, and separate **confirmed** issues from **needs-verification** suspicions.
-- **Ground every finding.** `file:line` + a concrete failure scenario (specific inputs → wrong output / crash) + a severity. No hand-waving; say "Need to verify" when it cannot confirm.
-- **Output contract.** Severity-ranked findings, each with location, why it's wrong, and a fix direction. An explicit "no issues found in X" when a checked area is clean. Don't pad — a short correct list beats a long speculative one.
-- **Effort & model.** Review is the **thinker**'s job — `sol` at `xhigh` (default), `max` for the hardest or most safety-critical. Its value is what it notices that nobody specified, which is exactly what a **ticket** cannot contain, so review keeps the expensive tier however small the diff. Keep it a non-editing run (omit `--write`) unless the user asked for fixes.
-- **Use the built-ins first.** For reviewing local git changes, prefer the `review` / `adversarial-review` commands — they already carry this contract. Reach for `task` with a hand-built review prompt only when the target isn't the working tree (a design doc, an inherited diagnosis, a specific file set). When you want several independent takes cross-checked rather than one, that is the adversarial-generation pattern.
-
-## Core rules (from the official GPT-5.6 prompting guide)
-
-- **Outcome-first, not process-first.** State the goal and what "done" looks like; don't script every step. Avoid "first inspect A, then B, then compare every field, then…".
-- **Shorter prompts win.** GPT-5.6 has absorbed most older harness boilerplate as default behavior. Start with the smallest prompt and tool set that reliably completes the task; add instructions or examples only to close a proven gap. Long, explicit system prompts tend to trigger extra exploration and repeated validation.
-- **Don't ask for generic brevity.** GPT-5.6 is already biased toward compression and is sensitive to "be concise / keep it short" — those can make it drop required content. Instead prioritize: "Lead with the conclusion. Keep required facts, decisions, caveats, and next steps; trim intros, repetition, and generic reassurance."
-- **Use `ALWAYS` / `NEVER` / `must` only for true invariants** — safety, required output fields, actions that must never happen. For judgment calls (when to search, ask, use a tool, keep iterating) write **decision rules** instead.
-- **Define autonomy and permissions once.** GPT-5.6 is proactive; state what a request authorizes in one compact policy (safe local actions without asking; confirm for external writes, destructive actions, or scope expansion). Do not repeat "ask first" / "do not mutate" throughout — repetition causes needless permission checks.
-- **Always include stop rules.** GPT-5.6 will loop; tell it when to stop. Example: "After each result, ask: can I answer the user's core request now with cited evidence? If yes, answer."
-- **Reasoning effort: default `xhigh`, floor `high`.** The companion defaults `--effort` to `xhigh` when unset. For the substantial coding / review / diagnosis work this plugin delegates, keep effort in the **`high` → `xhigh` → `max`** band — don't drop to the low end of the scale, it buys nothing for these tasks. The set the companion accepts is `VALID_REASONING_EFFORTS` in `scripts/codex-companion.mjs`; which of them a given model actually offers is per-model, so ask the catalog rather than assuming. **`max`** is the top tier the companion accepts (above `xhigh`); on `sol` / `terra` reserve it for the hardest quality-first tasks and compare it against `xhigh` rather than reaching for it by reflex — `luna` is the standing exception (see Model selection). (Codex's catalog also advertises an `ultra` tier on `sol` / `terra` — the companion deliberately does not accept it, because it triggers proactive multi-agent delegation that this single-agent runner can't observe. Don't pass it. `luna` doesn't offer it at all.)
-- **Give it a way to check its work** when validation is possible — targeted unit tests for changed behavior, type/lint checks, build checks, or a minimal smoke test. If validation can't run, say why and give the next best check.
-- **Tool routing: parallelise independent reads, keep dependent ones sequential, and don't stop at the first empty result.** Expose only task-relevant tools, and say what each is for when the route depends on context. If a search / read returns empty, partial, or suspiciously narrow results, try one or two meaningful fallbacks before concluding nothing exists.
-- **Ground factual claims.** Define what needs support, what counts as enough evidence, and what to do when evidence is missing (absence of evidence is not a factual "no"). Add a retrieval budget for search-capable tasks.
-- **Files: give absolute paths.** If the target can read files (Codex, Claude Code), list absolute paths and have it read them itself — never ask anyone to paste code.
-
-## When to add what
-
-- **Coding / debugging:** success criteria + a verification loop (tests/lint/build) + "ask only for the smallest missing high-risk detail."
-- **Review / adversarial review:** grounding rules (cite `file:line`) + a structured, severity-ranked output contract + a "dig deeper / don't pad" nudge.
-- **Research / recommendation:** a retrieval budget + citation rules.
-- **Write-capable tasks:** a side-effect/safety constraint so Codex stays narrow and avoids unrelated refactors.
-- **Conversational / agentic:** a short Personality + collaboration style, and a preamble for tool-heavy work.
+- State the goal and what done looks like. A numbered procedure narrows the search.
+- Add a line only to close a gap you have already seen. "Be concise" makes GPT-6.1 drop required content. Say "lead with the conclusion and keep the required facts" instead.
+- Save `ALWAYS` / `NEVER` for invariants: required output fields, and actions that must not happen. Judgment calls get a decision rule.
+- Say the permission once. Safe local actions proceed. External writes, destructive actions, and scope expansion wait for confirmation.
+- GPT-6.1 will loop, so include a stop rule. Copy the wording from [prompt-blocks.md](prompt-blocks.md) rather than inventing a longer one.
+- Give absolute file paths and have Codex read them. When validation exists, name the check (tests, types, build, or a smoke run). Lines that reliably hurt are in [codex-prompt-antipatterns.md](codex-prompt-antipatterns.md).
 
 ## How to choose prompt shape
 
-- Use the built-in `review` / `adversarial-review` commands when the job is reviewing local git changes — those prompts already carry the review contract.
-- Use `task` when the task is diagnosis, planning, research, or implementation and you need to control the prompt directly.
-- Use `task --resume-last` for a follow-up on the same Codex thread — send only the delta instruction unless the direction changed materially.
+- Use the companion `review` / `adversarial-review` verbs when the job is reviewing local git changes.
+- Use `task` when the task is diagnosis, planning, research, implementation, or image generation and you need to control the prompt.
+- Use `task --resume-last` for a follow-up on the same Codex thread. Send only the delta.
 
-Choosing the **delivery path** (direct `task` · `--resume-last` · the `codex:codex-rescue` subagent · a conversation fork) is a separate decision from choosing the model, with its own measured costs and one naming trap: [references/delivery-paths.md](delivery-paths.md).
+Which process hands the work over is a separate choice: [delivery-paths.md](delivery-paths.md).
 
 ## Suggested structure
 
-Keep each section short; add detail only where it changes behavior. Omit sections a task doesn't need.
+Omit any section the task does not need. Complete templates are in [codex-prompt-recipes.md](codex-prompt-recipes.md).
 
 ```text
-Role: [1-2 sentences: the model's function, context, and job]
-
-# Personality        (conversational / agentic surfaces only)
-# Goal               [the user-visible outcome]
-# Success criteria   [what must be true before the final answer]
-# Constraints        [policy, safety, evidence, and side-effect limits]
-# Tools              [which tools to use, when, and what not to use — when routing depends on context]
-# Output             [sections, length, tone]
-# Stop rules         [when to retry, fall back, abstain, ask, or stop]
+Role: [1-2 sentences]
+# Goal
+# Success criteria
+# Constraints
+# Output
+# Stop rules
 ```
 
-## Output-language convention (for `/codex:handoff` and any user-facing prompt)
+## Output language
 
-- Prose, narrative, and business context in the **user's language** (e.g. 繁體中文).
-- Structural headers (`Role` / `Goal` / `Success criteria` / …), field names, and technical directives in **English** — GPT is most stable on English headers and it matches the official examples.
-- Keep technical identifiers in their original form.
-- Output the finished prompt inside a fenced ` ```text ` block so the user can copy-paste it directly into Codex / ChatGPT.
+Prose in the user's language. Structural headers (`Role`, `Goal`, `Success criteria`) and technical directives in English. Keep identifiers as written. Put the finished prompt in a fenced `text` block so it can be passed through `--prompt-file`.
 
-> The user's-language rule here is a **deliberate product choice** — the handoff prompt is read by the human user. It is not the blanket "always respond in the user's language" the official guide warns against; that concerns the model's *answer* language, decided per task.
-
-Reusable blocks live in [references/prompt-blocks.md](prompt-blocks.md).
-Concrete end-to-end templates live in [references/codex-prompt-recipes.md](codex-prompt-recipes.md).
-Common failure modes to avoid live in [references/codex-prompt-antipatterns.md](codex-prompt-antipatterns.md).
+That language rule is for the prompt a person reads. The language of Codex's answer is decided per task.

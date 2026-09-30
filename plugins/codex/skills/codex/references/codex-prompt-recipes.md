@@ -1,9 +1,19 @@
-# Codex task prompts — GPT-5.6 recipes
+# Codex task prompts — GPT-6.1 recipes
 
-Use these as starting templates for Codex task prompts. They follow the GPT-5.6
-guide: outcome-first, success criteria, decision rules instead of blanket
+Use these as starting templates for Codex task prompts. They follow the GPT-6.1
+guidance: outcome-first, success criteria, decision rules instead of blanket
 `ALWAYS`/`NEVER`, explicit stop rules, and absolute file paths so Codex reads
 the files itself. Trim any section a task does not need.
+
+## Contents
+
+- [Diagnosis](#diagnosis)
+- [Narrow Fix](#narrow-fix)
+- [Code review](#code-review)
+- [Document / design analysis](#document--design-analysis)
+- [Research / grounded answer](#research--grounded-answer)
+- [Rewrite / content](#rewrite--content)
+- [Agentic / tool-heavy](#agentic--tool-heavy)
 
 ## Diagnosis
 

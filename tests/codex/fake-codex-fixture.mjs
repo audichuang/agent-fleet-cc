@@ -16,7 +16,7 @@ const readline = require("node:readline");
 	const BEHAVIOR = ${JSON.stringify(behavior)};
 	// A terminal turn error whose .message is a JSON-ENCODED error envelope — the
 	// real HTTP-400 model-unavailable shape the silent-death fix must surface.
-	const TERMINAL_ERROR_ENVELOPE = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-5.6-sol' model requires a newer version of Codex." } });
+	const TERMINAL_ERROR_ENVELOPE = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-6.1-sol' model requires a newer version of Codex." } });
 	// Real 0.146.0 sends the structured code alongside the message, and an upstream 400 is
 	// CodexErrorDetails::UnexpectedStatus, which maps to the "other" catch-all (verified
 	// against a live rejected turn). The error notifications below mirror that, or the
@@ -35,7 +35,7 @@ const readline = require("node:readline");
 	// Every turn/completed error in this fixture is UNDECORATED, while every standalone
 	// error notification carries codexErrorInfo. The real protocol has no such asymmetry:
 	// v2 TurnError declares codexErrorInfo as a required nullable key, and
-	// isModelUnavailableFailure reads it straight off turn.error. That asymmetry is
+	// describeTurnError reads it straight off turn.error. That asymmetry is
 	// load-bearing for the "reason stated once" assertions, because describeTurnError
 	// appends a bracketed code, making the decorated reason a strict superset of the bare
 	// body so the render containment check cannot match. This shape drives that on purpose.
@@ -145,14 +145,15 @@ function buildModelListResult() {
   if (BEHAVIOR === "model-list-fails") {
     throw new Error("model/list failed");
   }
-  // Shapes mirror a real model/list includeHidden:true call (see
-  // docs/codex-protocol-sync-audit.md): the 5.6 family is all hidden:false, and the
-  // one genuinely hidden entry is codex-auto-review. The unsupported branch carries
-  // that hidden entry so setup's !hidden filter is actually exercised — without it the
-  // "suggest alternatives" assertion passes whether or not the filter works.
+  // Shapes mirror a real model/list includeHidden:true call. The routed 6.x slugs
+  // are hidden:false, and the one genuinely hidden entry is codex-auto-review. The
+  // unsupported branch carries that hidden entry so setup's !hidden filter is
+  // actually exercised — without it the "suggest alternatives" assertion passes
+  // whether or not the filter works. It also keeps an older visible slug so the
+  // suggestion text has something to name.
   const models = BEHAVIOR === "model-unsupported"
     ? [{ id: "gpt-5.4", hidden: false }, { id: "gpt-5.5", hidden: false }, { id: "gpt-5.6-terra", hidden: false }, { id: "codex-auto-review", hidden: true }]
-    : [{ id: "gpt-5.6-sol", hidden: false }, { id: "gpt-5.6-terra", hidden: false }, { id: "gpt-5.4", hidden: false }, { id: "gpt-5.6-luna", hidden: false }];
+    : [{ id: "gpt-6.1-sol", hidden: false }, { id: "gpt-6-astra", hidden: false }, { id: "gpt-6-sol", hidden: false }, { id: "gpt-6-luna", hidden: false }];
   return { data: models, nextCursor: null };
 }
 
@@ -347,6 +348,11 @@ rl.on("line", (line) => {
         }
         const thread = nextThread(state, message.params.cwd, message.params.ephemeral);
         thread.model = message.params.model ?? null; // remember the requested model so review/start can gate on it
+        thread.effort = message.params.config?.model_reasoning_effort ?? null;
+        state.lastThreadStart = {
+          model: thread.model,
+          effort: thread.effort
+        };
         // Record the isolation fields exactly as they arrived. The result below reports a
         // readOnly sandbox regardless of what was sent, so a test that trusts the reply
         // learns nothing about what the plugin actually put on the wire.
@@ -411,8 +417,8 @@ rl.on("line", (line) => {
           break;
         }
         // Native review runs on the thread's model (set at thread/start); reject any
-        // non-terra so the review fallback path can be proven end-to-end.
-        if (BEHAVIOR === "model-fallback" && thread.model !== "gpt-5.6-terra") {
+        // non-fallback slug so the review fallback path can be proven end-to-end.
+        if (BEHAVIOR === "model-fallback" && thread.model !== "gpt-6-sol") {
           send({ method: "turn/started", params: { threadId: reviewThread.id, turn: buildTurn(turnId) } });
           send({ method: "error", params: { threadId: reviewThread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;
@@ -513,9 +519,10 @@ rl.on("line", (line) => {
           send({ method: "turn/completed", params: { threadId: thread.id, turn: buildTurn(turnId, "interrupted") } });
           break;
         }
-        // Model fallback: sol (or any non-terra) is rejected as unavailable; the
-        // executor tier succeeds — so the companion's retry-on-terra path can be proven.
-        if (BEHAVIOR === "model-fallback" && message.params.model !== "gpt-5.6-terra") {
+        // Model fallback: the requested slug (anything other than the previous
+        // workhorse) is rejected as unavailable; gpt-6-sol succeeds — so the
+        // companion's one-shot retry can be proven.
+        if (BEHAVIOR === "model-fallback" && message.params.model !== "gpt-6-sol") {
           send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
           send({ method: "error", params: { threadId: thread.id, turnId, willRetry: false, error: { message: TERMINAL_ERROR_ENVELOPE, codexErrorInfo: "other" } } });
           break;

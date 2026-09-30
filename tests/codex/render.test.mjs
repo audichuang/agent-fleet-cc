@@ -144,6 +144,24 @@ test("renderTaskResult leaves a successful turn's output untouched", () => {
   assert.equal(output, "All done.\n");
 });
 
+test("renderTaskResult appends saved image paths and a failed generation", () => {
+  const output = renderTaskResult(
+    {
+      rawOutput: "Diagram is ready.",
+      failureMessage: "",
+      imageGenerations: [
+        { savedPath: "/tmp/diagram.png", status: "completed" },
+        { status: "failed", failure: { type: "usageLimitExceeded" }, result: null }
+      ]
+    },
+    {}
+  );
+  assert.match(output, /Diagram is ready\./);
+  assert.match(output, /Images:/);
+  assert.match(output, /\/tmp\/diagram\.png/);
+  assert.match(output, /usageLimitExceeded/);
+});
+
 test("renderStoredJobResult prefixes status and failure reason onto a failed job's stored output", () => {
   // The rawOutput branch used to preempt the status/errorMessage block entirely, so
   // /codex:result re-served a failed job's partial answer with no status line at all.
@@ -187,6 +205,26 @@ test("renderStoredJobResult does not repeat a failure reason that IS the stored 
 // null at status 0, so a completed job must render byte-identically). Do not "fix" them
 // into failure-path tests; the failure path is pinned by the e2e tests in
 // turn-error-surfacing.test.mjs, which go through the real companion.
+test("renderStoredJobResult appends saved image paths when it reprints raw output", () => {
+  const output = renderStoredJobResult(
+    { id: "task-ok", status: "completed", title: "Codex Task", jobClass: "task" },
+    {
+      result: {
+        rawOutput: "Diagram is ready.",
+        imageGenerations: [
+          { savedPath: "/tmp/diagram.png", status: "completed" },
+          { status: "failed", failure: { type: "usageLimitExceeded" } }
+        ]
+      }
+    }
+  );
+
+  assert.match(output, /Diagram is ready\./);
+  assert.match(output, /Images:/);
+  assert.match(output, /\/tmp\/diagram\.png/);
+  assert.match(output, /usageLimitExceeded/);
+});
+
 test("renderStoredJobResult does not prefix a status header onto a completed job", () => {
   const output = renderStoredJobResult(
     { id: "task-ok", status: "completed", title: "Codex Task", jobClass: "task" },

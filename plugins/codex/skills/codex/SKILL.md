@@ -1,33 +1,48 @@
 ---
 name: codex
-description: Internal contract for the Codex plugin. Consult it BEFORE presenting any Codex review, rescue, task or result payload — it carries the stop-rule that findings must never be auto-fixed (ask the user first, even when the fix is obvious), the rule that a failed or never-invoked Codex run must be reported rather than replaced with a Claude-side answer, and how to preserve verdicts, severity order, file:line precision and inference-vs-fact boundaries. Its references carry the GPT-5.6 prompt-composition guidance for /codex:handoff and the codex-rescue subagent.
+description: Runs Codex for a review, a check, a diagnosis, an implementation, or an image, and is consulted before any Codex payload is shown. The host runs the companion script; there is no slash command. Findings are never auto-fixed, a failed or never-invoked run is reported rather than replaced, and generated image files are shown. Default model is gpt-6.1-sol.
 user-invocable: false
 ---
 
 # Codex
 
+## Calling Codex
+
+When the user wants Codex to review, check, or do the work, run the companion. A `/codex:*` name is the verb below, not a command to invoke. A raw `codex` or `codex exec` call does not record the job or return the image files this plugin prints.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" <verb> ...
+```
+
+- `review` — built-in review of local git changes. Review-only. It does not take extra focus text; use `adversarial-review` when the user wants a focus or a stricter pass.
+- `adversarial-review` — same targets as `review`, plus optional focus text.
+- `task` — diagnosis, implementation, image generation, or any prompt that is not the built-in reviewer. Multi-line prompts go through `--prompt-file`; an inline multi-line string gets mangled or collapses to empty. A follow-up on the same Codex thread is `task --resume-last`.
+- `status`, `result`, `cancel`, `wait`, `logs`, `setup` — follow a job, or check auth.
+
+Leave `--model` unset. The companion uses `gpt-6.1-sol` at `xhigh`, the stronger model this delegation is for. Pass `--model` only when the user names a model. Do not pass `gpt-6-sol` or `gpt-6-luna`. Do not pass a service tier. `gpt-6-astra` only when the user asks for the frontier model.
+
+A run that will not finish inside ten minutes uses the companion's own `--background` (and `--json` when you need the job id). That is the tracked job. A foreground call killed at that ceiling is a SIGTERM; the record is already on disk. Say so and run `status`. Do not treat the empty stdout as a failed review.
+
+Return the companion stdout verbatim. If Codex generated images, show the user the saved files: non-JSON stdout has an `Images:` section, and `--json` carries `imageGenerations[].savedPath`.
+
 ## Result handling
 
-When the helper returns Codex output:
-- Preserve the helper's verdict, summary, findings, and next steps structure.
-- For review output, present findings first and keep them ordered by severity.
-- Use the file paths and line numbers exactly as the helper reports them.
-- Preserve evidence boundaries. If Codex marked something as an inference, uncertainty, or follow-up question, keep that distinction.
-- Preserve output sections when the prompt asked for them, such as observed facts, inferences, open questions, touched files, or next steps.
-- If there are no findings, say that explicitly and keep the residual-risk note brief.
-- If Codex made edits, say so explicitly and list the touched files when the helper provides them.
-- Do not turn a failed or incomplete Codex run into a Claude-side implementation attempt. Report the failure and stop.
+The stdout is the answer. Relay its verdict, findings, file:line locations, and uncertainty marks as printed, in the order and severity Codex used.
+
+- Do not turn a failed or incomplete Codex run into a Claude-side implementation attempt. Report the failure, including the most actionable stderr lines, and stop.
 - If Codex was never successfully invoked, do not generate a substitute answer at all.
-- CRITICAL: After presenting review findings, STOP. Do not make any code changes. Do not fix any issues. You MUST explicitly ask the user which issues, if any, they want fixed before touching a single file. Auto-applying fixes from a review is strictly forbidden, even if the fix is obvious.
-- If the helper reports malformed output or a failed Codex run, include the most actionable stderr lines and stop there instead of guessing.
-- If the helper reports that setup or authentication is required, direct the user to `/codex:setup` and do not improvise alternate auth flows.
+- After presenting review findings, stop and ask which issues, if any, the user wants fixed. Auto-applying fixes from a review is strictly forbidden.
+- If Codex edited files, name the files it names, then stop.
+- If setup or authentication is required, run the companion `setup` verb. Do not improvise a login flow.
 
 ## References
 
+Open one of these when the row matches. Each file is one hop from here.
+
 | Reference | Read it when |
 | --- | --- |
-| [references/prompting.md](references/prompting.md) | Composing any prompt for Codex — the outcome-first shape, model selection, and the reviewer role this plugin mostly casts Codex in. The entry point for `/codex:handoff` and for `codex:codex-rescue` tightening a forwarded request. |
-| [references/prompt-blocks.md](references/prompt-blocks.md) | You want a reusable section (Role, Success criteria, Constraints, Stop rules) rather than writing one from scratch. |
-| [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md) | You want a complete template for a task type — diagnosis, narrow fix, review, research. |
-| [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md) | Checking a drafted prompt against known failure modes before sending it. |
-| [references/delivery-paths.md](references/delivery-paths.md) | Choosing between a direct `task`, `task --resume-last`, the `codex:codex-rescue` subagent, or a conversation fork — with the measured costs and the `context: fork` trap. |
+| [references/prompting.md](references/prompting.md) | Composing the prompt — outcome-first shape, which model, and the reviewer stance. `codex:codex-rescue` starts here when it tightens a forwarded request. |
+| [references/prompt-blocks.md](references/prompt-blocks.md) | You need a reusable section (stop rules, verification, retrieval budget) rather than writing one. |
+| [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md) | You need a complete template for a task type — diagnosis, narrow fix, review, research. |
+| [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md) | Checking a drafted prompt for lines that make GPT-6.1 worse. |
+| [references/delivery-paths.md](references/delivery-paths.md) | Choosing a direct `task`, `task --resume-last`, the `codex:codex-rescue` subagent, or a conversation fork. |

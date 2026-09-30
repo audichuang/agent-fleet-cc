@@ -147,7 +147,7 @@ test("setup confirms the default model is supported by the account", () => {
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.model.checked, true);
-  assert.equal(payload.model.defaultModel, "gpt-5.6-sol");
+  assert.equal(payload.model.defaultModel, "gpt-6.1-sol");
   assert.equal(payload.model.supported, true);
   assert.ok(!payload.nextSteps.some((step) => step.includes("does not list the default model")));
 });
@@ -169,7 +169,7 @@ test("setup warns when the default model is not in the account catalog", () => {
   assert.equal(payload.model.supported, false);
   const warning = payload.nextSteps.find((step) => step.includes("does not list the default model"));
   assert.ok(warning, "expected a model-support warning in nextSteps");
-  assert.match(warning, /gpt-5\.6-sol/);
+  assert.match(warning, /gpt-6\.1-sol/);
   // Surfaces alternatives the account actually has, excluding hidden models.
   assert.match(warning, /gpt-5\.6-terra/);
   assert.doesNotMatch(warning, /codex-auto-review/, "a hidden model must never be suggested");
@@ -798,7 +798,7 @@ test("task does not alias 'spark' (the fabricated gpt-5.3-codex-spark slug is go
   assert.equal(fakeState.lastTurnStart.model, "spark");
 });
 
-test("task defaults the model to gpt-5.6-sol and reasoning effort to xhigh when unspecified", () => {
+test("task defaults the model to gpt-6.1-sol and reasoning effort to xhigh when unspecified", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   const statePath = path.join(binDir, "fake-codex-state.json");
@@ -815,7 +815,7 @@ test("task defaults the model to gpt-5.6-sol and reasoning effort to xhigh when 
 
   assert.equal(result.status, 0, result.stderr);
   const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  assert.equal(fakeState.lastTurnStart.model, "gpt-5.6-sol");
+  assert.equal(fakeState.lastTurnStart.model, "gpt-6.1-sol");
   assert.equal(fakeState.lastTurnStart.effort, "xhigh");
 });
 
@@ -1066,7 +1066,51 @@ test("adversarial review rejects staged-only scope to match review target select
   assert.match(result.stderr, /Use one of: auto, working-tree, branch, or pass --base <ref>/i);
 });
 
-test("review accepts --background while still running as a tracked review job", () => {
+test("review defaults the model to gpt-6.1-sol and reasoning effort to xhigh", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  const statePath = path.join(binDir, "fake-codex-state.json");
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "hello again\n");
+
+  const result = run("node", [SCRIPT, "review"], {
+    cwd: repo,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  assert.equal(fakeState.lastThreadStart.model, "gpt-6.1-sol");
+  assert.equal(fakeState.lastThreadStart.effort, "xhigh");
+});
+
+test("adversarial review defaults reasoning effort to xhigh on turn/start", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  const statePath = path.join(binDir, "fake-codex-state.json");
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  fs.writeFileSync(path.join(repo, "README.md"), "hello again\n");
+
+  const result = run("node", [SCRIPT, "adversarial-review", "focus on the diff"], {
+    cwd: repo,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  assert.equal(fakeState.lastTurnStart.model, "gpt-6.1-sol");
+  assert.equal(fakeState.lastTurnStart.effort, "xhigh");
+});
+
+test("review --background detaches a tracked review job", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeCodex(binDir);
@@ -1083,18 +1127,29 @@ test("review accepts --background while still running as a tracked review job", 
 
   assert.equal(launched.status, 0, launched.stderr);
   const launchPayload = JSON.parse(launched.stdout);
-  assert.equal(launchPayload.review, "Review");
-  assert.match(launchPayload.codex.stdout, /No material issues found/);
+  assert.equal(launchPayload.status, "queued");
+  assert.match(launchPayload.jobId, /^review-/);
 
-  const status = run("node", [SCRIPT, "status"], {
+  const waitedStatus = run(
+    "node",
+    [SCRIPT, "status", launchPayload.jobId, "--wait", "--timeout-ms", "15000", "--json"],
+    {
+      cwd: repo,
+      env: buildEnv(binDir)
+    }
+  );
+
+  assert.equal(waitedStatus.status, 0, waitedStatus.stderr);
+  const waitedPayload = JSON.parse(waitedStatus.stdout);
+  assert.equal(waitedPayload.job.id, launchPayload.jobId);
+  assert.equal(waitedPayload.job.status, "completed");
+
+  const result = run("node", [SCRIPT, "result", launchPayload.jobId], {
     cwd: repo,
     env: buildEnv(binDir)
   });
-
-  assert.equal(status.status, 0, status.stderr);
-  assert.match(status.stdout, /# Codex Status/);
-  assert.match(status.stdout, /Codex Review/);
-  assert.match(status.stdout, /completed/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /No material issues found/);
 });
 
 test("status shows phases, hints, and the latest finished job", () => {

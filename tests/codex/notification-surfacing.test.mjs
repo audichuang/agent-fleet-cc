@@ -47,6 +47,42 @@ async function progressFor(method, params) {
   return progress.filter((m) => typeof m === "string");
 }
 
+test("a completed imageGeneration item keeps its saved path", async () => {
+  const client = makeFakeClient();
+  let resolveAck;
+  const promise = captureTurn(client, "thread1", () => new Promise((resolve) => (resolveAck = resolve)), {
+    idleTimeoutMs: 0
+  });
+  promise.catch(() => {});
+  await tick();
+  resolveAck({ turn: { id: "turn1", status: "inProgress" } });
+  await tick();
+  client.notificationHandler({
+    method: "item/completed",
+    params: {
+      threadId: "thread1",
+      turnId: "turn1",
+      item: {
+        type: "imageGeneration",
+        id: "img1",
+        status: "completed",
+        revisedPrompt: "a diagram",
+        result: "ok",
+        failure: null,
+        savedPath: "/tmp/diagram.png"
+      }
+    }
+  });
+  client.notificationHandler({
+    method: "turn/completed",
+    params: { threadId: "thread1", turn: { id: "turn1", status: "completed" } }
+  });
+  const state = await promise;
+  assert.equal(state.imageGenerations.length, 1);
+  assert.equal(state.imageGenerations[0].savedPath, "/tmp/diagram.png");
+  assert.equal(state.imageGenerations[0].revisedPrompt, "a diagram");
+});
+
 test("model/rerouted surfaces a safety-visible line (from → to + reason)", async () => {
   const lines = await progressFor("model/rerouted", {
     threadId: "thread1",

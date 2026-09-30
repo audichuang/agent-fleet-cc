@@ -250,6 +250,33 @@ export function renderSetupReport(report) {
 // `result.hadAgentMessage` was false. That proxy answered a different question — "was
 // there an agent message?" rather than "is the body already the reason?" — and on the
 // shapes where it guessed wrong nothing else carried the failure at all.
+function imageGenerationLines(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return [];
+  }
+  const lines = ["", "Images:"];
+  for (const item of items) {
+    const saved = typeof item?.savedPath === "string" ? item.savedPath.trim() : "";
+    if (saved) {
+      lines.push(`- ${saved}`);
+      continue;
+    }
+    const failure = item?.failure?.type ? ` (${item.failure.type})` : "";
+    const note = typeof item?.result === "string" && item.result.trim() ? `: ${item.result.trim()}` : "";
+    lines.push(`- image generation ${item?.status ?? "finished"}${failure}${note}`);
+  }
+  return lines;
+}
+
+function appendImages(text, items) {
+  const extra = imageGenerationLines(items);
+  if (extra.length === 0) {
+    return text.endsWith("\n") ? text : `${text}\n`;
+  }
+  const base = text.endsWith("\n") ? text.slice(0, -1) : text;
+  return `${base}\n${extra.join("\n")}\n`;
+}
+
 function reviewFailureLines(meta, body = "") {
   const reason = String(meta?.errorMessage ?? "").trim();
   if (!reason) {
@@ -277,7 +304,7 @@ export function renderReviewResult(parsedResult, meta) {
 
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
-    return `${lines.join("\n").trimEnd()}\n`;
+    return appendImages(`${lines.join("\n").trimEnd()}\n`, meta.imageGenerations);
   }
 
   const validationError = validateReviewResultShape(parsedResult.parsed);
@@ -298,7 +325,7 @@ export function renderReviewResult(parsedResult, meta) {
 
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
-    return `${lines.join("\n").trimEnd()}\n`;
+    return appendImages(`${lines.join("\n").trimEnd()}\n`, meta.imageGenerations);
   }
 
   const data = normalizeReviewResultData(parsedResult.parsed);
@@ -349,7 +376,7 @@ export function renderReviewResult(parsedResult, meta) {
 
   appendReasoningSection(lines, meta.reasoningSummary);
 
-  return `${lines.join("\n").trimEnd()}\n`;
+  return appendImages(`${lines.join("\n").trimEnd()}\n`, meta.imageGenerations);
 }
 
 export function renderNativeReviewResult(result, meta) {
@@ -393,7 +420,7 @@ export function renderNativeReviewResult(result, meta) {
 
   appendReasoningSection(lines, meta.reasoningSummary);
 
-  return `${lines.join("\n").trimEnd()}\n`;
+  return appendImages(`${lines.join("\n").trimEnd()}\n`, result.imageGenerations);
 }
 
 export function renderTaskResult(parsedResult, meta) {
@@ -412,11 +439,11 @@ export function renderTaskResult(parsedResult, meta) {
   if (rawOutput) {
     const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
     if (!failureReason) {
-      return output;
+      return appendImages(output, parsedResult?.imageGenerations);
     }
     // State the failure once. With no agent message `resolveFinalMessage` fell back to
     // the turn error text, so the body is USUALLY the reason and repeating it above
-    // prints the same sentence twice. `commands/task.md` tells Claude to relay this
+    // prints the same sentence twice. The skill tells the host to relay this
     // stdout verbatim, so the marker has to be here either way — what varies is whether
     // the reason is worth restating.
     // ponytail: same ceiling as renderStoredJobResult below — `describeTurnError`
@@ -426,17 +453,20 @@ export function renderTaskResult(parsedResult, meta) {
     // trades a readable near-repeat for the risk of swallowing a real distinct reason.
     // Before main this shape printed NO marker at all, so near-duplication is the
     // strictly better failure mode.
-    return output.includes(failureReason)
-      ? `Codex turn failed.\n\n${output}`
-      : `Codex turn failed: ${failureReason}\n\n${output}`;
+    return appendImages(
+      output.includes(failureReason)
+        ? `Codex turn failed.\n\n${output}`
+        : `Codex turn failed: ${failureReason}\n\n${output}`,
+      parsedResult?.imageGenerations
+    );
   }
 
   if (failureReason) {
-    return `Codex turn failed: ${failureReason}\n`;
+    return appendImages(`Codex turn failed: ${failureReason}\n`, parsedResult?.imageGenerations);
   }
 
   const message = String(parsedResult?.failureMessage ?? "").trim() || "Codex did not return a final message.";
-  return `${message}\n`;
+  return appendImages(`${message}\n`, parsedResult?.imageGenerations);
 }
 
 export function renderStatusReport(report) {
@@ -543,7 +573,9 @@ export function renderStoredJobResult(job, storedJob) {
     (typeof storedJob?.result?.codex?.stdout === "string" && storedJob.result.codex.stdout) ||
     "";
   if (rawOutput) {
-    return withContext(rawOutput);
+    // rawOutput is the turn text alone. Images live on the payload, and a later
+    // `result` has to show the same saved paths the live stdout did.
+    return appendImages(withContext(rawOutput), storedJob?.result?.imageGenerations);
   }
 
   if (storedJob?.rendered) {

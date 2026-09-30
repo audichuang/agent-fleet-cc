@@ -31,7 +31,7 @@
  *   messages: Array<{ lifecycle: string, phase: string | null, text: string }>,
  *   fileChanges: ThreadItem[],
  *   commandExecutions: ThreadItem[],
- *   startedSideEffect: boolean,
+ *   imageGenerations: Array<{ id: string | null, status: string | null, revisedPrompt: string | null, savedPath: string | null, failure: unknown, result: string | null }>,
  *   commandOutputBytes: number,
  *   lastCommandHeartbeatMs: number,
  *   onProgress: ProgressReporter | null
@@ -83,7 +83,7 @@ export function resolveSandboxMode(_requested, options = {}) {
 
 /** @returns {ThreadStartParams} */
 function buildThreadParams(cwd, options = {}) {
-  return {
+  const params = {
     cwd,
     model: options.model ?? null,
     approvalPolicy: options.approvalPolicy ?? "never",
@@ -91,6 +91,12 @@ function buildThreadParams(cwd, options = {}) {
     serviceName: SERVICE_NAME,
     ephemeral: options.ephemeral ?? true
   };
+  // review/start has no effort field. The review turn copies the parent thread's
+  // model_reasoning_effort, so a review thread has to carry it from the start.
+  if (options.effort) {
+    params.config = { model_reasoning_effort: options.effort };
+  }
+  return params;
 }
 
 /** @returns {ThreadResumeParams} */
@@ -305,6 +311,8 @@ function describeStartedItem(state, item) {
     }
     case "webSearch":
       return { message: `Searching: ${shorten(item.query, 96)}`, phase: "investigating" };
+    case "imageGeneration":
+      return { message: "Generating an image.", phase: "investigating" };
     default:
       return null;
   }
@@ -336,6 +344,11 @@ function describeCompletedItem(state, item) {
     }
     case "exitedReviewMode":
       return { message: "Reviewer finished.", phase: "finalizing" };
+    case "imageGeneration": {
+      const saved = typeof item.savedPath === "string" && item.savedPath ? ` saved ${item.savedPath}` : "";
+      const failed = item.failure?.type ? ` failed (${item.failure.type})` : "";
+      return { message: `Image generation ${item.status ?? "finished"}${saved}${failed}.`, phase: "investigating" };
+    }
     default:
       return null;
   }
@@ -374,11 +387,7 @@ function createTurnCaptureState(threadId, options = {}) {
     messages: [],
     fileChanges: [],
     commandExecutions: [],
-    // Set as soon as a command/file-change item is even STARTED (fileChanges/
-    // commandExecutions only record COMPLETED items). The model-fallback retry guard
-    // reads this so a turn that began mutating — but errored before item/completed —
-    // is never re-run.
-    startedSideEffect: false,
+    imageGenerations: [],
     // Command-output heartbeat throttle state (see the outputDelta handler).
     // -Infinity so the first delta always fires immediately under a monotonic
     // clock (performance.now() starts near 0, unlike Date.now()).
@@ -480,12 +489,22 @@ function belongsToTurn(state, message) {
   return trackedTurnId === null || messageTurnId === null || messageTurnId === trackedTurnId;
 }
 
+function imageGenerationRecord(item) {
+  const savedPath = typeof item.savedPath === "string" && item.savedPath.trim() ? item.savedPath : null;
+  const revised = typeof item.revisedPrompt === "string" ? item.revisedPrompt.trim() : "";
+  const rawResult = typeof item.result === "string" ? item.result.trim() : "";
+  const result = !savedPath && rawResult && rawResult.length <= 300 && !rawResult.startsWith("data:") ? rawResult : null;
+  return {
+    id: item.id ?? null,
+    status: item.status ?? null,
+    revisedPrompt: revised ? revised.slice(0, 300) : null,
+    savedPath,
+    failure: item.failure ?? null,
+    result
+  };
+}
+
 function recordItem(state, item, lifecycle, threadId = null) {
-  // A command/file-change item existing at all (started OR completed) means the turn
-  // began doing work — flag it so the model-fallback retry never re-runs a mutation.
-  if (item.type === "commandExecution" || item.type === "fileChange") {
-    state.startedSideEffect = true;
-  }
   if (item.type === "collabAgentToolCall") {
     if (!threadId || threadId === state.threadId) {
       if (lifecycle === "started" || item.status === "inProgress") {
@@ -566,6 +585,17 @@ function recordItem(state, item, lifecycle, threadId = null) {
 
   if (item.type === "commandExecution" && lifecycle === "completed") {
     state.commandExecutions.push(item);
+    return;
+  }
+
+  if (item.type === "imageGeneration" && lifecycle === "completed") {
+    const record = imageGenerationRecord(item);
+    const index = state.imageGenerations.findIndex((existing) => existing.id && existing.id === record.id);
+    if (index >= 0) {
+      state.imageGenerations[index] = record;
+    } else {
+      state.imageGenerations.push(record);
+    }
   }
 }
 
@@ -1213,62 +1243,6 @@ export function codexErrorCode(error) {
 const MAX_TURN_ERROR_LEN = 2000;
 const MAX_TURN_ERROR_PARSE_LEN = 32_000;
 
-// The frontier tier (gpt-5.6-sol) is intermittently gated on ChatGPT-account Codex —
-// a turn is rejected with HTTP 400 "The 'X' model requires a newer version of Codex"
-// (or a model not-found / unavailable variant). The companion falls back to this
-// executor tier once when that happens, so an intermittent gate reads as "retried on
-// terra", not "the plugin died". Kept as an explicit slug — the `gpt-5.6` family alias
-// is not resolvable on ChatGPT-account Codex.
-export const MODEL_FALLBACK_SLUG = "gpt-5.6-terra";
-
-// Match ONLY the one CONFIRMED model-gate signal: HTTP 400 "The '<slug>' model
-// requires a newer version of Codex." Requires BOTH the exact gate phrase AND the word
-// "model" (in any order) so unrelated "requires a newer version of Codex" notices — e.g.
-// an MCP integration notice — never trigger a model switch. We deliberately do NOT match
-// speculative "unsupported/unknown/not-found model" phrasings: there is no evidence Codex
-// emits them, and broad model+keyword matching false-fires on real turn errors like
-// "unsupported model output format" / "model failed with an unknown transport error".
-// Add a phrase here only with a real captured sample. A genuine bug (auth, rate limit,
-// a real turn error) must be surfaced, never model-switched.
-const MODEL_UNAVAILABLE_RE = /(?=[\s\S]*\bmodel\b)[\s\S]*requires a newer version of codex/i;
-
-// The codes a model gate can actually arrive under. `badRequest` is the obvious one,
-// but `other` is REQUIRED and verified live: Codex maps an error to a code by error
-// VARIANT, not HTTP status, and an upstream 400 is `CodexErrorDetails::UnexpectedStatus`,
-// which falls into the `_ => CodexErrorInfo::Other` catch-all
-// (codex-rs/protocol/src/error.rs `to_codex_protocol_error`). A real rejected turn
-// returned `[other]` live on codex-cli 0.146.0 — so allowing only `badRequest` would
-// silently disable the fallback. Re-checked for 0.149.0 (the installed binary) by the
-// schema/source pass at upstream main 99660ab3c7, not a fresh live run: no drift on
-// this surface. Anything NOT in this set is a genuine failure.
-const MODEL_GATE_CODES = new Set(["badRequest", "other"]);
-
-// True when a FAILED turn/review result failed specifically because its model was
-// unavailable. Checks BOTH error sources (turn.error AND the error notification)
-// independently — a `??` would let a generic message on one source mask the
-// model-unavailable message on the other.
-export function isModelUnavailableFailure(result) {
-  if (!result || result.status === 0) {
-    return false;
-  }
-  const sources = [
-    { error: result.turn?.error ?? null, message: describeTurnError(result.turn?.error) },
-    { error: result.error ?? null, message: describeTurnError(result.error, result.stderr) }
-  ];
-  return sources.some(({ error, message }) => {
-    // A structured `codexErrorInfo` narrows the regex: a code that can never be a
-    // model gate — `unauthorized`, `usageLimitExceeded`, `contextWindowExceeded`, … —
-    // is a genuine failure and must not be model-switched however its prose reads.
-    // No code (older CLI, or a message recovered from stderr) → the regex decides
-    // alone, as before. Unknown future code → no fallback, i.e. the safe direction.
-    const code = codexErrorCode(error);
-    if (code && !MODEL_GATE_CODES.has(code)) {
-      return false;
-    }
-    return typeof message === "string" && MODEL_UNAVAILABLE_RE.test(message);
-  });
-}
-
 const BUILTIN_PROVIDER_LABELS = new Map([
   ["openai", "OpenAI"],
   ["ollama", "Ollama"],
@@ -1499,7 +1473,7 @@ export async function getCodexAuthStatus(cwd, options = {}) {
 
 // Ask the app-server which models THIS account/CLI can actually use, so setup can
 // warn when the configured default model isn't available (an older Codex that
-// predates gpt-5.6, or an account not yet gated into it). Best-effort: returns
+// predates gpt-6.1, or an account not yet gated into it). Best-effort: returns
 // checked:false on any failure so setup never breaks on a model probe. Needs an
 // authenticated session — callers should gate on login before calling.
 export async function listSupportedModels(cwd, options = {}) {
@@ -1615,7 +1589,8 @@ export async function runAppServerReview(cwd, options = {}) {
       model: options.model,
       sandbox: "read-only",
       ephemeral: true,
-      threadName: options.threadName
+      threadName: options.threadName,
+      effort: options.effort
     });
     const sourceThreadId = thread.thread.id;
     emitProgress(options.onProgress, `Thread ready (${sourceThreadId}).`, "starting", {
@@ -1654,7 +1629,8 @@ export async function runAppServerReview(cwd, options = {}) {
       reasoningSummary: turnState.reasoningSummary,
       turn: turnState.finalTurn,
       error: turnState.error,
-      stderr: cleanCodexStderr(client.stderr)
+      stderr: cleanCodexStderr(client.stderr),
+      imageGenerations: turnState.imageGenerations
     };
   });
 }
@@ -1726,7 +1702,7 @@ export async function runAppServerTurn(cwd, options = {}) {
       fileChanges: turnState.fileChanges,
       touchedFiles: collectTouchedFiles(turnState.fileChanges),
       commandExecutions: turnState.commandExecutions,
-      startedSideEffect: turnState.startedSideEffect
+      imageGenerations: turnState.imageGenerations
     };
   });
 }

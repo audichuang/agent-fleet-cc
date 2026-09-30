@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.6.4
+
+**Delegation stays on the stronger model.** A Codex check exists so a stronger model reviews
+and explains. The companion no longer retries a gated `gpt-6.1-sol` turn on `gpt-6-sol`, and
+the `gpt-6-luna --effort max` ticket lane is gone. `gpt-6-astra` stays opt-in. No service tier
+(no Fast). `ultra` stays rejected.
+
+- Slash commands are gone (`plugins/codex/commands/`). The host loads `skills/codex/SKILL.md`
+  and runs `scripts/codex-companion.mjs`. Hooks, the companion verbs, and `codex-rescue` stay.
+- `codex app-server` is spawned with `--enable image_generation`. A completed `imageGeneration`
+  item is kept (`savedPath`, failure) and printed as an `Images:` section; `--json` carries
+  `imageGenerations`.
+- The skill body is the invocation contract: which verb, which model, how a long run and a
+  saved image come back, and the stop-rule. Prompt craft stays in `references/`. The ~20K
+  note in `delivery-paths.md` keeps the measured figure and drops the 1.6.1 preload retelling.
+  `codex-prompt-recipes.md` has a contents list, since it is over 100 lines.
+- `review` and `adversarial-review` use the same default effort as `task` (`xhigh`, unless
+  `--effort` or `CODEX_DEFAULT_EFFORT` says otherwise). Their `--background` detaches a tracked
+  job. A later non-JSON `result` keeps the `Images:` section. The skill names `task --resume-last`.
+
+## 1.6.3
+
+**Default model is `gpt-6.1-sol`.** The installed Codex CLI (0.159.2, catalog fetched
+2026-09-30) lists it as the current workhorse. `gpt-5.6-sol` / `terra` / `luna` are still
+in the catalog and labeled older; there is no 6.x terra.
+
+- `resolveDefaultModel()` returns `gpt-6.1-sol`. A model-unavailable turn retries once on
+  `gpt-6-sol` (previous workhorse), not `gpt-5.6-terra`.
+- The ticket lane is `gpt-6-luna --effort max`. The 5.6 "max approaches the workhorse"
+  curve was not re-measured; the pairing stays until it is.
+- `gpt-6-astra` is documented as the opt-in frontier. Review stays on the workhorse.
+- `ultra` stays rejected. `gpt-6-luna` is multi-agent v2 and still has no `ultra` level,
+  so the old "luna is v1" reason is gone; the refusal is the delegation the runner
+  cannot observe.
+
 ## 1.6.2
 
 **Three skills became one.** `codex` was the only plugin in the marketplace shipping more than one

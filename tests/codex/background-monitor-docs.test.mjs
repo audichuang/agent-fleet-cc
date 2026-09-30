@@ -11,64 +11,22 @@ function read(relativePath) {
   return fs.readFileSync(path.join(PLUGIN_ROOT, relativePath), "utf8");
 }
 
-test("execute-plan background flow documents the signal-file Monitor + PushNotification handoff", () => {
-  const source = read("commands/execute-plan.md");
-  assert.match(source, /signalFile/);
-  assert.match(source, /Monitor/);
-  assert.match(source, /until \[ -f/);
-  assert.match(source, /PushNotification/);
+// The old execute-plan command told the host to wait with Monitor. Monitor's
+// timeout_ms defaults to five minutes and the wait dies while a succeeded job
+// stays silent. That command is gone. The skill is now the only place that
+// tells the host how to background a Codex run, so the pin lives here.
+test("the skill backgrounds through the companion's own --background flag", () => {
+  const skill = read("skills/codex/SKILL.md");
+  assert.match(skill, /companion's own `--background`/);
+  assert.match(skill, /ten minutes/i);
+  assert.match(skill, /SIGTERM/);
+  assert.match(skill, /tracked job/i);
+  if (/Monitor/.test(skill)) {
+    assert.match(skill, /persistent:\s*true/);
+  }
 });
 
-// A wait that dies before the job does reports nothing, and the job it abandons
-// usually SUCCEEDED — silence is indistinguishable from "still running". `Monitor`'s
-// `timeout_ms` is a required parameter defaulting to five minutes and capped at one
-// hour, and this command routes to the background exactly when the plan is big enough
-// to outlast that. So the doc has to name a route with no deadline: `run_in_background`
-// (the loop exits on its own, so one notification, no ceiling) or `persistent: true`.
-// Naming the tools without naming the deadline is what left the hole.
-test("execute-plan tells the model how to outlive Monitor's five-minute default", () => {
-  const source = read("commands/execute-plan.md");
-  // NOT a bare /run_in_background/ — line 77 already contains that token, in a sentence
-  // telling the model NOT to set it on the launch call. A guard that matches text the
-  // file has always carried cannot fail, and this one silently could not: deleting the
-  // whole bullet it was written for left the suite green.
-  assert.match(
-    source,
-    /you must pass `persistent: true`/,
-    "the unbounded-wait requirement must be stated as a requirement, not implied"
-  );
-  assert.match(source, /five minutes|300000|5 minutes/i, "the default that bites must be stated");
-  assert.match(
-    source,
-    /the monitor dies[\s\S]{0,200}for a job that succeeded/,
-    "the consequence is the point: the wait dies while the job is fine, so silence reads as progress"
-  );
-});
-
-// The old text promised the watchdog made this wait "always terminate". It does not:
-// a watchdog that fails to spawn is swallowed into a job-log `Warning:` line and the
-// launch payload carries no field reporting it, so the model arms its wait believing a
-// backstop exists. The doc may describe the watchdog; it may not promise it.
-test("execute-plan does not promise the liveness watchdog always terminates the wait", () => {
-  const source = read("commands/execute-plan.md");
-  assert.doesNotMatch(source, /always terminates/i);
-});
-
-test("execute-plan background launch emits the JSON payload it tells the model to parse", () => {
-  const source = read("commands/execute-plan.md");
-  // jobId + signalFile only exist when the launch uses --background --json. Without
-  // them the companion prints plain text and the documented parse step is impossible.
-  assert.match(source, /task --background --json --write --prompt-file/);
-});
-
-test("execute-plan grants the Monitor + PushNotification tools its background flow uses", () => {
-  const source = read("commands/execute-plan.md");
-  const frontmatter = source.split("---")[1] ?? "";
-  assert.match(frontmatter, /allowed-tools:.*\bMonitor\b/);
-  assert.match(frontmatter, /allowed-tools:.*\bPushNotification\b/);
-});
-
-test("status command documents the liveness watchdog", () => {
-  const source = read("commands/status.md");
+test("status still documents the liveness watchdog for operators reading the companion", () => {
+  const source = read("scripts/codex-companion.mjs");
   assert.match(source, /watchdog/i);
 });

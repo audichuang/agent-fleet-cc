@@ -321,7 +321,9 @@ export class SpawnedCodexAppServerClient extends AppServerClientBase {
   }
 
   async initialize() {
-    this.proc = spawn("codex", ["app-server"], {
+    // image_generation is stable-on in current catalogs, and off in some configs.
+    // --enable forces the tool on for this process so a generated file can come back.
+    this.proc = spawn("codex", ["app-server", "--enable", "image_generation"], {
       cwd: this.cwd,
       env: this.options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
