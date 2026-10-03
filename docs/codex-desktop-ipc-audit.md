@@ -194,6 +194,7 @@ The workspace is outside the repo at `~/Project/codex-skill-workspace` (`evals/e
 | --- | --- | --- | --- |
 | Iteration 1 (5 cases) | 19/19 | 14/19 | old: no `--backend desktop`; cannot target a thread, so it asks instead of launching |
 | Iteration 2 (6 cases, +stricter thread check, +plain-task-stays-CLI) | **24/24** | 17/24 | old: 0/5 on "continue my app conversation" |
+| Iteration 3 (after `--new-thread-via`; 2 cases) | 2/2 | — | "a chat the app creates itself, in snip-sync" → `--backend desktop --new-thread-via app` with the project as cwd; the computer-use case still picks `--backend desktop` without the new option |
 | Trigger A/B (20 queries × 3, with agy, orca-cli and ego-browser installed) | 19/20 with a desktop-app description | **20/20** with the 1.6.4 description | the longer description fired on "write a script that lists the app's threads", so the 1.6.4 description was kept (`61e94be`) |
 
 The non-discriminating cases are the approval-wait, app-not-running and review cases: both skills
