@@ -1793,7 +1793,7 @@ export async function runDesktopTurn(cwd, options = {}) {
     threadId = await (deps.findNewThread ?? findThreadStartedWithPrompt)(prompt, { since, timeoutMs: deps.findTimeoutMs ?? 30_000 });
     if (!threadId) {
       throw new Error(
-        "The prompt was filled into a new Codex desktop chat, but no new thread appeared — the Enter key did not reach it. Send it in the app yourself, or rerun with --new-thread-via cli."
+        "The prompt was filled into a new Codex desktop chat, but no new thread appeared within 30 s, so whether it was sent is unknown. Check the app first: if the prompt is still in the composer, send it there; if it is running, follow it there. Rerunning without checking can run the task twice."
       );
     }
     appStartedTurn = true;

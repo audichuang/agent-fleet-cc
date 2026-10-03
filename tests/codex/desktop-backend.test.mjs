@@ -585,7 +585,7 @@ test("when the Enter never lands, the run says so and points at the prefilled ch
   const fake = await startFakeDesktop(t);
   await assert.rejects(
     runDesktopTurn("/w", { prompt: "fix it", newThreadVia: "app", desktopDeps: appNewChatDeps(fake, [], { found: false }) }),
-    /no new thread appeared.*Send it in the app yourself, or rerun with --new-thread-via cli/
+    /no new thread appeared.*whether it was sent is unknown.*Check the app first/
   );
 });
 
@@ -604,6 +604,16 @@ test("when no thread appears, Enter is not pressed a second time", async (t) => 
     /no new thread appeared/
   );
   assert.deepEqual(calls.map((c) => c[0]), ["open", "enter", "find"]);
+});
+
+test("a send whose thread is never found gets no rerun advice", async (t) => {
+  // Review finding: a null lookup does not prove the Enter missed (the rollout can be
+  // slow or unreadable), and rerunning a sent task runs it twice.
+  const fake = await startFakeDesktop(t);
+  const deps = { ...appNewChatDeps(fake, []), findNewThread: async () => null };
+  const error = await runDesktopTurn("/w", { prompt: "fix it", newThreadVia: "app", desktopDeps: deps }).catch((e) => e);
+  assert.match(error.message, /whether it was sent is unknown/);
+  assert.doesNotMatch(error.message, /rerun with|--new-thread-via cli/i);
 });
 
 test("a prompt too long for a deep link is refused before anything opens", async () => {

@@ -53,7 +53,7 @@ companion's `Thread ready` (CLI) or `Attaching to thread` (desktop) progress lin
 | `not reachable` / `not running` | The app is closed, or this OS has no app socket. | Ask the user to open the Codex desktop app, or run on the CLI with `--backend cli`. |
 | `version mismatch` | The installed app speaks a different IPC version than this plugin. | Use `--backend cli` and report it; the plugin needs an update for that app build. |
 | `did not load thread` | The app never took the thread, usually because a CLI process still holds it. | Wait for that run to end, then retry. |
-| `no new thread appeared` / `Could not press Enter` | With `--new-thread-via app`, the prompt was filled in but never sent (focus moved, no Accessibility permission, no X11). | The user sends it in the app, or rerun with `--new-thread-via cli`. |
+| `no new thread appeared` / `Could not press Enter` | With `--new-thread-via app`, the prompt was filled in but the companion could not confirm it was sent (focus moved, no Accessibility permission, no X11, or the thread was slow to appear). | The user checks the app: sends the prompt if it is still in the composer, or follows the run if it started. Do not rerun before that; a sent prompt would run twice. |
 | `already running a turn` | The thread is busy in the app. | Wait, or let the user stop it in the app. |
 
 Report the failure as printed. Do not rerun the prompt on the CLI on your own: the user chose
