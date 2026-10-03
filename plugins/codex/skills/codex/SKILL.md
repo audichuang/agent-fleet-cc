@@ -23,7 +23,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" <verb> ...
 
 `task` runs on the Codex CLI unless the work belongs in the user's Codex desktop app (macOS or Linux):
 
-- `--backend desktop` when the user wants it done in the app: computer use, its browser, or a run they want to watch there. The thread opens in the app, which the user sees.
+- `--backend desktop` when the user wants it done in the app: computer use, its browser, or a run they want to watch there. The thread opens in the app, which the user sees. Add `--new-thread-via app` when they want the chat created by the app itself (it presses Enter in the app's window).
 - `--thread <id>` continues one named thread. Without `--backend` it goes to the app only if the app has that thread loaded right now; otherwise the CLI continues it. So when the user means their conversation *in the app* (a `codex://threads/<id>` link, "my Codex desktop chat"), pass `--backend desktop` too.
 - A plain task (fix, diagnose, implement) stays on the CLI. Do not add `--backend desktop` because the app happens to be running.
 - A desktop run that stops on an approval fails with that reason; the turn is still waiting in the app. Tell the user to approve it there.

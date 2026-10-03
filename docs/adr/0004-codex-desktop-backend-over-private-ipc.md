@@ -45,9 +45,16 @@ What was found before deciding, all checked against the live app on 2026-10-03:
    task goes to the app only when asked for with `--backend desktop`. When the user means a
    conversation they have in the app, the skill pairs `--thread` with `--backend desktop`,
    because `auto` only sees threads the app has loaded right now.
-3. **A new desktop task bootstraps its thread with one tiny CLI turn.** It runs on a throwaway
-   (non-broker) app-server, whose exit releases the writer lock; then the real prompt goes to the
-   app. A broker would keep the thread loaded and the app could not open it.
+3. **A new desktop task gets its thread one of two ways (`--new-thread-via`).** The app's IPC has
+   no "new thread" call; the app creates threads through its own in-process app-server.
+   - `cli` (default) runs one tiny bootstrap turn on a throwaway (non-broker) app-server, whose
+     exit releases the writer lock; then the real prompt goes to the app. A broker would keep the
+     thread loaded and the app could not open it. No UI is involved.
+   - `app` lets the app make the thread. `codex://threads/new?prompt=…&path=<cwd>` opens a new chat
+     in that project with the prompt in the focused composer. No parameter auto-submits it; the
+     bundle was searched. So the companion presses Enter in the app's window and finds the new
+     thread by its first user message in the rollout files. The thread is native to the app and
+     needs no extra turn. In exchange the run takes window focus and needs keystroke permission.
 4. **The job knows its backend.** The record carries `backend: "desktop"`. Cancel, the hard
    timeout, the crash net and the watchdog stop a desktop turn through the app
    (`thread-follower-interrupt-turn`). They **never reap the broker** for it, since the broker
@@ -57,8 +64,7 @@ What was found before deciding, all checked against the live app on 2026-10-03:
    closed, a protocol version the app rejects, a thread the app stops owning mid-turn, and a
    snapshot we cannot resync. The skill tells the host to report these rather than rerun the
    prompt on the CLI: the user chose the app for what only the app can do.
-6. **macOS and Linux only.** The Windows app uses a named pipe; it is reported as unsupported, not
-   attempted.
+6. **macOS and Linux.** That is where it was built and verified.
 
 ## Consequences
 
@@ -79,15 +85,17 @@ What was found before deciding, all checked against the live app on 2026-10-03:
 - **Security surface.** Anything running as the user can talk to that socket and drive a thread
   with its permissions. That was already true of the app itself; the plugin does not add a
   listener, it only connects as a client.
-- **Cost.** A new desktop task spends one bootstrap turn (`effort: low`, one line). Follow-ups cost
-  nothing extra.
+- **Cost.** With `--new-thread-via cli` a new desktop task spends one bootstrap turn (`effort:
+  low`, one line). With `app` it spends none, but it presses a key in the user's window. Follow-ups
+  cost nothing extra either way.
 
 ## Alternatives considered
 
 - **UI automation** (macOS AX tree / Linux AT-SPI, clipboard, keystrokes). It works and was
   prototyped, but it depends on the window, the clipboard and the scroll position, and the text
   comes back lossy (code blocks split into highlight tokens, tables duplicated). It is kept only
-  as the way to *create* a thread when no CLI is available, and the plugin does not use it.
+  for one keystroke: the Enter of `--new-thread-via app`, sent after the app's own deep link has
+  filled the chat.
 - **A separate `codex app-server` for desktop-like runs.** It cannot use the app's loaded thread,
   which the single-writer lock forbids, and it does not show in the user's window.
 - **Changing `task`'s default to the desktop app.** Rejected: it would open windows on the user's

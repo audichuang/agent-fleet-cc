@@ -24,9 +24,15 @@ companion's `Thread ready` (CLI) or `Attaching to thread` (desktop) progress lin
 
 ## What happens on the user's machine
 
-- **A new desktop task costs one tiny CLI turn first.** The app cannot load a thread that has
-  no turns, so the companion creates the thread with a one-line bootstrap turn on a throwaway
-  app-server, then hands the real prompt to the app.
+- **A new desktop task needs a thread first**, and the app's IPC cannot create one. There are two
+  ways, chosen with `--new-thread-via`:
+  - `cli` (default): a one-line bootstrap turn on a throwaway app-server, then the real prompt goes
+    to the app. No UI involved, so it is safe while the user is typing. It costs one tiny turn.
+  - `app`: the app makes the thread itself. A new chat opens in the project with the prompt filled
+    in, and the companion presses Enter in the app's window. The thread is native to the app, with
+    no extra turn. It takes window focus for a moment, and needs Accessibility permission for the
+    terminal (macOS) or an X11 session (Linux). Use it when the user is watching and wants an
+    app-native chat. `CODEX_COMPANION_NEW_THREAD_VIA=app` makes it the default.
 - **The thread opens in the app.** If the app has not loaded the thread, the companion opens it
   with the `codex://threads/<id>` deep link (`open` on macOS, `xdg-open` on Linux). The user sees
   it. Over SSH on Linux the companion borrows the graphical session's `DISPLAY` from the
@@ -46,6 +52,7 @@ companion's `Thread ready` (CLI) or `Attaching to thread` (desktop) progress lin
 | `not reachable` / `not running` | The app is closed, or this OS has no app socket. | Ask the user to open the Codex desktop app, or run on the CLI with `--backend cli`. |
 | `version mismatch` | The installed app speaks a different IPC version than this plugin. | Use `--backend cli` and report it; the plugin needs an update for that app build. |
 | `did not load thread` | The app never took the thread, usually because a CLI process still holds it. | Wait for that run to end, then retry. |
+| `no new thread appeared` / `Could not press Enter` | With `--new-thread-via app`, the prompt was filled in but never sent (focus moved, no Accessibility permission, no X11). | The user sends it in the app, or rerun with `--new-thread-via cli`. |
 | `already running a turn` | The thread is busy in the app. | Wait, or let the user stop it in the app. |
 
 Report the failure as printed. Do not rerun the prompt on the CLI on your own: the user chose
@@ -53,7 +60,6 @@ the app for what only the app can do.
 
 ## Limits
 
-- macOS and Linux only. Windows uses a named pipe and is not supported.
 - The IPC protocol is private to the desktop app. It can change with an app update; a change
   surfaces as the version-mismatch failure above, not as a wrong answer.
 - `--write` changes nothing on either backend: CLI threads already run with full access in this

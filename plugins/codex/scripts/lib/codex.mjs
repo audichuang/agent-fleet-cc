@@ -40,7 +40,15 @@
 import { readJsonFile } from "./fs.mjs";
 import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from "./app-server.mjs";
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
-import { DesktopIpcClient, DesktopThread } from "./desktop-ipc.mjs";
+import {
+  DesktopIpcClient,
+  DesktopThread,
+  MAX_PREFILL_PROMPT_CHARS,
+  buildNewThreadUrl,
+  findThreadStartedWithPrompt,
+  openDesktopUrl,
+  pressEnterInDesktopApp
+} from "./desktop-ipc.mjs";
 import { binaryAvailable } from "./process.mjs";
 
 const SERVICE_NAME = "claude_code_codex_plugin";
@@ -1742,6 +1750,37 @@ function emptyDesktopResult(threadId, turnId, error) {
 export async function runDesktopTurn(cwd, options = {}) {
   const deps = options.desktopDeps ?? {};
   let threadId = options.resumeThreadId ?? null;
+  const prompt = options.prompt?.trim() || options.defaultPrompt || "";
+  // Set when the app itself started the first turn (new thread via the app's own
+  // "new chat"); the follower then waits on that turn instead of starting one.
+  let appStartedTurn = false;
+
+  if (!threadId && options.newThreadVia === "app") {
+    if (!prompt) {
+      throw new Error("A prompt is required for this Codex run.");
+    }
+    if (prompt.length > MAX_PREFILL_PROMPT_CHARS) {
+      throw new Error(
+        `The prompt is ${prompt.length} characters, too long to prefill a new Codex desktop chat (limit ${MAX_PREFILL_PROMPT_CHARS}). Rerun with --new-thread-via cli.`
+      );
+    }
+    const since = Date.now() - 2_000;
+    emitProgress(
+      options.onProgress,
+      "Opening a new chat in the Codex desktop app with the prompt filled in, then pressing Enter in its window.",
+      "starting"
+    );
+    await (deps.openUrl ?? openDesktopUrl)(buildNewThreadUrl({ prompt, projectPath: cwd }));
+    await new Promise((resolve) => setTimeout(resolve, deps.settleMs ?? 1_500));
+    await (deps.pressEnter ?? pressEnterInDesktopApp)();
+    threadId = await (deps.findNewThread ?? findThreadStartedWithPrompt)(prompt, { since, timeoutMs: deps.findTimeoutMs ?? 30_000 });
+    if (!threadId) {
+      throw new Error(
+        "The prompt was filled into a new Codex desktop chat, but no new thread appeared — the Enter key did not reach it. Send it in the app yourself, or rerun with --new-thread-via cli."
+      );
+    }
+    appStartedTurn = true;
+  }
 
   if (!threadId) {
     emitProgress(
@@ -1771,16 +1810,22 @@ export async function runDesktopTurn(cwd, options = {}) {
   });
 
   try {
-    if (thread.runtimeStatus() && thread.runtimeStatus() !== "idle") {
-      throw new Error(`Thread ${threadId} is already running a turn in the Codex desktop app. Wait for it, or stop it there.`);
+    let turnId;
+    if (appStartedTurn) {
+      await thread.waitFor(() => thread.turns().length > 0, 30_000, "first turn of the new chat");
+      const turns = thread.turns();
+      turnId = turns[turns.length - 1].turnId;
+      emitProgress(options.onProgress, `The Codex desktop app started the turn (${turnId}).`, "running", { threadId, turnId });
+    } else {
+      if (thread.runtimeStatus() && thread.runtimeStatus() !== "idle") {
+        throw new Error(`Thread ${threadId} is already running a turn in the Codex desktop app. Wait for it, or stop it there.`);
+      }
+      if (!prompt) {
+        throw new Error("A prompt is required for this Codex run.");
+      }
+      turnId = await thread.startTurn(prompt, { model: options.model ?? null, effort: options.effort ?? null });
+      emitProgress(options.onProgress, `Turn started in the Codex desktop app (${turnId}).`, "running", { threadId, turnId });
     }
-    const prompt = options.prompt?.trim() || options.defaultPrompt || "";
-    if (!prompt) {
-      throw new Error("A prompt is required for this Codex run.");
-    }
-
-    const turnId = await thread.startTurn(prompt, { model: options.model ?? null, effort: options.effort ?? null });
-    emitProgress(options.onProgress, `Turn started in the Codex desktop app (${turnId}).`, "running", { threadId, turnId });
 
     // An approval the app settles on its own (auto-review, policy) is pending only
     // briefly; fail fast only on one that stays. And if the app stops owning the thread

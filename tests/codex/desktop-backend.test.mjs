@@ -5,16 +5,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
+import { EventEmitter } from "node:events";
 import {
   DesktopIpcClient,
   DesktopThread,
+  MAX_PREFILL_PROMPT_CHARS,
   METHOD_VERSIONS,
   applyPatch,
+  buildNewThreadUrl,
+  findThreadStartedWithPrompt,
   isThreadOwnedByDesktop,
+  pressEnterInDesktopApp,
   resolveDesktopOpenEnv
 } from "../../plugins/codex/scripts/lib/desktop-ipc.mjs";
 import { interruptAppServerTurn, runDesktopTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
-import { resolveTaskBackend } from "../../plugins/codex/scripts/codex-companion.mjs";
+import { resolveNewThreadVia, resolveTaskBackend } from "../../plugins/codex/scripts/codex-companion.mjs";
 
 // A stand-in for the Codex desktop app's IPC router + the window that owns a thread.
 // It speaks the real framing (u32 LE length + JSON) over a real Unix socket and records
@@ -522,4 +527,138 @@ test("xdg-open borrows the Codex app's own display over another process's", () =
   const env = resolveDesktopOpenEnv({}, { procDir, uid });
   assert.equal(env.DISPLAY, ":1");
   assert.equal(env.XAUTHORITY, "/x");
+});
+
+// --- a new thread created by the app itself (deep link + Enter) --------------------------
+
+function appNewChatDeps(fake, calls, { found = true } = {}) {
+  return {
+    attachOptions: fake.attachOptions,
+    settleMs: 0,
+    findTimeoutMs: 50,
+    openUrl: async (url) => calls.push(["open", url]),
+    pressEnter: async () => {
+      calls.push(["enter"]);
+      if (!found) return;
+      // The app starts the turn itself; it is already in progress when we attach.
+      const key = "tail:app-turn";
+      fake.state.turnHistory.history.entitiesByKey[key] = {
+        turnId: "app-turn",
+        status: "inProgress",
+        items: [{ type: "userMessage", content: [{ type: "text", text: "fix it" }] }]
+      };
+      setTimeout(() => {
+        fake.patch([
+          { op: "add", path: ["turnHistory", "history", "entitiesByKey", key, "items", "-"], value: { type: "agentMessage", id: "m", text: "APP-MADE" } },
+          { op: "replace", path: ["turnHistory", "history", "entitiesByKey", key, "status"], value: "completed" }
+        ]);
+      }, 30);
+    },
+    findNewThread: async (prompt) => {
+      calls.push(["find", prompt]);
+      return found ? fake.threadId : null;
+    },
+    runBootstrapTurn: async () => assert.fail("a thread made by the app needs no CLI bootstrap")
+  };
+}
+
+test("a new chat made by the app: deep link with prompt and project, one Enter, then follow the app's own turn", async (t) => {
+  const fake = await startFakeDesktop(t);
+  const calls = [];
+  const result = await runDesktopTurn("/work/project", {
+    prompt: "fix it",
+    newThreadVia: "app",
+    desktopDeps: appNewChatDeps(fake, calls)
+  });
+  assert.deepEqual(calls.map((c) => c[0]), ["open", "enter", "find"]);
+  const url = new URL(calls[0][1]);
+  assert.equal(`${url.protocol}//${url.host}${url.pathname}`, "codex://threads/new");
+  assert.equal(url.searchParams.get("prompt"), "fix it");
+  assert.equal(url.searchParams.get("path"), "/work/project");
+  assert.equal(fake.requests("thread-follower-start-turn").length, 0, "the app already started the turn; sending another would run the prompt twice");
+  assert.equal(result.turnId, "app-turn");
+  assert.equal(result.finalMessage, "APP-MADE");
+  assert.equal(result.status, 0);
+});
+
+test("when the Enter never lands, the run says so and points at the prefilled chat", async (t) => {
+  const fake = await startFakeDesktop(t);
+  await assert.rejects(
+    runDesktopTurn("/w", { prompt: "fix it", newThreadVia: "app", desktopDeps: appNewChatDeps(fake, [], { found: false }) }),
+    /no new thread appeared.*Send it in the app yourself, or rerun with --new-thread-via cli/
+  );
+});
+
+test("a prompt too long for a deep link is refused before anything opens", async () => {
+  await assert.rejects(
+    runDesktopTurn("/w", {
+      prompt: "x".repeat(MAX_PREFILL_PROMPT_CHARS + 1),
+      newThreadVia: "app",
+      desktopDeps: { openUrl: async () => assert.fail("must not open"), pressEnter: async () => assert.fail("must not press") }
+    }),
+    /too long to prefill.*--new-thread-via cli/
+  );
+});
+
+test("the new thread is found by its first user message, newer than the moment we pressed Enter", async () => {
+  const home = makeTempDir("codex-home-");
+  const now = new Date();
+  const dir = path.join(home, "sessions", String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0"));
+  fs.mkdirSync(dir, { recursive: true });
+  const write = (id, text, mtimeMs) => {
+    const file = path.join(dir, `rollout-2026-10-03T00-00-00-${id}.jsonl`);
+    fs.writeFileSync(file, `${JSON.stringify({ type: "response_item", payload: { role: "user", content: [{ type: "input_text", text }] } })}\n`);
+    fs.utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
+  };
+  const since = Date.now() - 1_000;
+  const prompt = "fix the \"symlink\" bug\nin gitsrc.rs";
+  write("11111111-1111-1111-1111-111111111111", prompt, since - 60_000); // same prompt, older run
+  write("22222222-2222-2222-2222-222222222222", "something else", Date.now());
+  write("33333333-3333-3333-3333-333333333333", `${prompt}\n`, Date.now());
+  const found = await findThreadStartedWithPrompt(prompt, { since, env: { CODEX_HOME: home }, timeoutMs: 0 });
+  assert.equal(found, "33333333-3333-3333-3333-333333333333");
+  assert.equal(await findThreadStartedWithPrompt("never sent", { since, env: { CODEX_HOME: home }, timeoutMs: 0 }), null);
+});
+
+function fakeSpawn(script) {
+  const calls = [];
+  const spawnImpl = (command, args) => {
+    calls.push([command, ...args]);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    const { code = 0, stdout = "", stderr = "" } = script(command, args) ?? {};
+    setImmediate(() => {
+      if (stdout) child.stdout.emit("data", stdout);
+      if (stderr) child.stderr.emit("data", stderr);
+      child.emit("exit", code);
+    });
+    return child;
+  };
+  return { calls, spawnImpl };
+}
+
+test("Enter goes to the app window: System Events on macOS, xdotool on the app's X11 window on Linux", async () => {
+  const mac = fakeSpawn(() => ({}));
+  await pressEnterInDesktopApp({ platform: "darwin", spawnImpl: mac.spawnImpl });
+  assert.equal(mac.calls[0][0], "osascript");
+  assert.match(mac.calls[0].join(" "), /activate.*key code 36/);
+
+  const denied = fakeSpawn(() => ({ code: 1, stderr: "not allowed assistive access" }));
+  await assert.rejects(pressEnterInDesktopApp({ platform: "darwin", spawnImpl: denied.spawnImpl }), (error) =>
+    error.code === "KEYPRESS_FAILED" && /Accessibility/.test(error.message)
+  );
+
+  const linux = fakeSpawn((command, args) => (args[0] === "search" ? { stdout: "54525953\n" } : {}));
+  await pressEnterInDesktopApp({ platform: "linux", env: { DISPLAY: ":1" }, spawnImpl: linux.spawnImpl });
+  assert.deepEqual(linux.calls[0], ["xdotool", "search", "--onlyvisible", "--class", "chatgpt"]);
+  assert.deepEqual(linux.calls[1], ["xdotool", "windowactivate", "--sync", "54525953", "key", "--clearmodifiers", "Return"]);
+});
+
+test("--new-thread-via: cli by default, app by flag or env, nothing else", () => {
+  assert.equal(resolveNewThreadVia(undefined, {}), "cli");
+  assert.equal(resolveNewThreadVia(undefined, { CODEX_COMPANION_NEW_THREAD_VIA: "app" }), "app");
+  assert.equal(resolveNewThreadVia("cli", { CODEX_COMPANION_NEW_THREAD_VIA: "app" }), "cli");
+  assert.throws(() => resolveNewThreadVia("ui", {}), /Use cli or app/);
+  assert.equal(buildNewThreadUrl({ prompt: "a b&c" }), "codex://threads/new?prompt=a+b%26c");
 });

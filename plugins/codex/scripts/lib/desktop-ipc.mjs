@@ -12,8 +12,6 @@
 // (framing). The versions are a contract with one desktop build, not a catalog: a request
 // the installed app no longer accepts comes back `request-version-mismatch`, which
 // DesktopIpcError surfaces as such instead of as a generic failure.
-//
-// Windows uses a named pipe and is not supported here.
 
 import fs from "node:fs";
 import net from "node:net";
@@ -340,12 +338,15 @@ export function resolveDesktopOpenEnv(env = process.env, { procDir = "/proc", ui
 // one; past this, treat it as launched and let the ownership poll decide.
 const OPEN_COMMAND_TIMEOUT_MS = 10_000;
 
-export function openDesktopThread(threadId, { platform = process.platform, env = process.env, spawnImpl = spawn } = {}) {
-  const url = `codex://threads/${encodeURIComponent(threadId)}`;
+export function openDesktopThread(threadId, options = {}) {
+  return openDesktopUrl(`codex://threads/${encodeURIComponent(threadId)}`, options);
+}
+
+export function openDesktopUrl(url, { platform = process.platform, env = process.env, spawnImpl = spawn } = {}) {
   const [command, childEnv] =
     platform === "darwin" ? ["open", env] : platform === "linux" ? ["xdg-open", resolveDesktopOpenEnv(env)] : [null, env];
   if (!command) {
-    throw new DesktopIpcError(`Opening a Codex desktop thread is not supported on ${platform}.`, "UNSUPPORTED");
+    throw new DesktopIpcError(`Opening the Codex desktop app is not supported on ${platform}.`, "UNSUPPORTED");
   }
   return new Promise((resolve, reject) => {
     const child = spawnImpl(command, [url], { env: childEnv, stdio: "ignore", detached: true });
@@ -363,6 +364,147 @@ export function openDesktopThread(threadId, { platform = process.platform, env =
       code === 0 ? resolve() : reject(new DesktopIpcError(`${command} ${url} exited with ${code}.`, "OPEN_FAILED"));
     });
   });
+}
+
+// --- A new thread made by the app itself -----------------------------------------------
+//
+// The app creates threads through its own in-process app-server; nothing on the IPC
+// router does. What it does expose is `codex://threads/new?prompt=…&path=…`, which opens
+// a new chat in that project with the prompt in the focused composer — but never sends
+// it (no auto-submit parameter exists). So: open it, press Enter in the app's window, and
+// find the thread the app just wrote by its first user message.
+
+// A deep link has to fit through `open` / `xdg-open` and a URL handler; past this, use
+// the CLI bootstrap instead.
+export const MAX_PREFILL_PROMPT_CHARS = 16_000;
+
+export function buildNewThreadUrl({ prompt, projectPath = null }) {
+  const url = new URL("codex://threads/new");
+  url.searchParams.set("prompt", prompt);
+  if (projectPath) url.searchParams.set("path", projectPath);
+  return url.toString();
+}
+
+function runCommand(command, args, { env = process.env, spawnImpl = spawn, timeoutMs = 10_000 } = {}) {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let child;
+    try {
+      child = spawnImpl(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (error) {
+      resolve({ code: null, stdout, stderr: error.message });
+      return;
+    }
+    const timer = setTimeout(() => {
+      child.kill?.();
+      resolve({ code: null, stdout, stderr: `${command} timed out` });
+    }, timeoutMs);
+    timer.unref?.();
+    child.stdout?.on("data", (chunk) => (stdout += chunk));
+    child.stderr?.on("data", (chunk) => (stderr += chunk));
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      resolve({ code: null, stdout, stderr: error.message });
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+// Press Enter in the app's window. macOS: System Events (the calling terminal needs
+// Accessibility permission). Linux: xdotool, X11 only.
+export async function pressEnterInDesktopApp({ platform = process.platform, env = process.env, spawnImpl = spawn } = {}) {
+  if (platform === "darwin") {
+    const result = await runCommand(
+      "osascript",
+      ["-e", 'tell application "ChatGPT" to activate', "-e", "delay 0.4", "-e", 'tell application "System Events" to key code 36'],
+      { env, spawnImpl }
+    );
+    if (result.code !== 0) {
+      throw new DesktopIpcError(
+        `Could not press Enter in the Codex desktop app (${result.stderr.trim() || "osascript failed"}). Allow this terminal under System Settings → Privacy & Security → Accessibility.`,
+        "KEYPRESS_FAILED"
+      );
+    }
+    return;
+  }
+  if (platform === "linux") {
+    const desktopEnv = resolveDesktopOpenEnv(env);
+    if (!desktopEnv.DISPLAY) {
+      throw new DesktopIpcError("Pressing Enter in the Codex desktop app needs an X11 display (xdotool); none was found.", "KEYPRESS_FAILED");
+    }
+    const found = await runCommand("xdotool", ["search", "--onlyvisible", "--class", "chatgpt"], { env: desktopEnv, spawnImpl });
+    const windowId = found.stdout.split(/\s+/).find(Boolean);
+    if (found.code !== 0 || !windowId) {
+      throw new DesktopIpcError(`Could not find the Codex desktop window with xdotool (${found.stderr.trim() || "no window"}).`, "KEYPRESS_FAILED");
+    }
+    const pressed = await runCommand("xdotool", ["windowactivate", "--sync", windowId, "key", "--clearmodifiers", "Return"], {
+      env: desktopEnv,
+      spawnImpl
+    });
+    if (pressed.code !== 0) {
+      throw new DesktopIpcError(`xdotool could not press Enter in the Codex desktop window (${pressed.stderr.trim()}).`, "KEYPRESS_FAILED");
+    }
+    return;
+  }
+  throw new DesktopIpcError(`Pressing Enter in the Codex desktop app is not supported on ${platform}.`, "UNSUPPORTED");
+}
+
+function sessionDirsToScan(codexHome, now) {
+  const dirs = [];
+  for (const offsetDays of [0, -1]) {
+    const day = new Date(now + offsetDays * 86_400_000);
+    const y = String(day.getFullYear());
+    const m = String(day.getMonth() + 1).padStart(2, "0");
+    const d = String(day.getDate()).padStart(2, "0");
+    dirs.push(path.join(codexHome, "sessions", y, m, d));
+  }
+  return dirs;
+}
+
+// The app writes each thread's rollout to $CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<id>.jsonl
+// as soon as the first turn starts; the first user message identifies ours.
+/** @param {string} prompt @param {{ since?: number, env?: NodeJS.ProcessEnv, timeoutMs?: number, pollMs?: number, now?: () => number }} [options] */
+export async function findThreadStartedWithPrompt(prompt, {
+  since = 0,
+  env = process.env,
+  timeoutMs = 30_000,
+  pollMs = 500,
+  now = () => Date.now()
+} = {}) {
+  const codexHome = env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const needle = JSON.stringify(prompt.trim().slice(0, 200)).slice(1, -1);
+  const deadline = now() + timeoutMs;
+  for (;;) {
+    for (const dir of sessionDirsToScan(codexHome, now())) {
+      let names = [];
+      try {
+        names = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        const match = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(name);
+        if (!match) continue;
+        const file = path.join(dir, name);
+        try {
+          if (fs.statSync(file).mtimeMs < since) continue;
+          const fd = fs.openSync(file, "r");
+          const head = Buffer.alloc(256 * 1024);
+          const read = fs.readSync(fd, head, 0, head.length, 0);
+          fs.closeSync(fd);
+          if (head.subarray(0, read).toString("utf8").includes(needle)) return match[1];
+        } catch {
+          continue;
+        }
+      }
+    }
+    if (now() > deadline) return null;
+    await sleep(pollMs);
+  }
 }
 
 export function summarizeTurn(entity) {

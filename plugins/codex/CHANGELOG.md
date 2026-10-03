@@ -11,8 +11,8 @@ the app has — computer use, its browser — and the user can watch it there.
   (single-writer lock). A new task goes to the app only with `--backend desktop`, and so does
   a `--thread` follow-up the app has not loaded — the skill pairs the two for a conversation the
   user has in the app.
-- A new desktop task first runs a one-line bootstrap turn on a throwaway app-server: the app
-  will not load a thread that has no turns.
+- By default a new desktop task first runs a one-line bootstrap turn on a throwaway app-server:
+  the app will not load a thread that has no turns, and its IPC has no "new thread" call.
 - The job record carries `backend: "desktop"`. `cancel`, the hard timeout, the crash net and the
   watchdog stop a desktop turn through the app and never reap the broker for it. `status`, `wait`, `logs` and
   `result` are unchanged; the result shape is the same as a CLI run.
@@ -20,7 +20,13 @@ the app has — computer use, its browser — and the user can watch it there.
   reason and is left waiting in the app. A protocol the installed app rejects fails as a version
   mismatch. If the app stops owning the thread mid-turn, or our copy of the thread cannot be
   resynced, the run fails within about a minute instead of at the job's hard timeout.
-- `setup` reports whether the desktop app is reachable. Windows is not supported.
+- A new desktop task gets its thread one of two ways. `--new-thread-via cli` (default) runs a
+  one-line bootstrap turn with no UI. `--new-thread-via app` (or `CODEX_COMPANION_NEW_THREAD_VIA=app`)
+  has the app make it: the `codex://threads/new?prompt=…&path=<cwd>` deep link fills a new chat
+  in that project, the companion presses Enter in the app's window (System Events on macOS,
+  `xdotool` on Linux), and finds the thread by its first message. The thread is app-native,
+  with no extra turn, but the run takes window focus.
+- `setup` reports whether the desktop app is reachable.
 - New reference: `skills/codex/references/desktop-backend.md`.
 
 ## 1.6.4

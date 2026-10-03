@@ -113,7 +113,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [--prompt-file <path> | prompt]",
+      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--new-thread-via <cli|app>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [--prompt-file <path> | prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
       "  node scripts/codex-companion.mjs logs [job-id]",
@@ -660,6 +660,7 @@ async function executeTaskRun(request) {
     sandbox: request.write ? "workspace-write" : "read-only",
     onProgress: request.onProgress,
     persistThread: true,
+    newThreadVia: request.newThreadVia ?? "cli",
     threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
   });
 
@@ -796,8 +797,9 @@ function buildTaskJob(workspaceRoot, taskMetadata, write, backend = "cli") {
   return backend === "desktop" ? { ...job, backend } : job;
 }
 
-function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId, expected, backend = "cli", threadId = null }) {
+function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId, expected, backend = "cli", threadId = null, newThreadVia = "cli" }) {
   return {
+    ...(newThreadVia === "app" && { newThreadVia }),
     cwd,
     model,
     effort,
@@ -812,6 +814,16 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
 }
 
 const TASK_BACKENDS = new Set(["auto", "cli", "desktop"]);
+
+// How a NEW desktop task gets its thread: "cli" (a one-line bootstrap turn, no UI) or
+// "app" (the app's own new chat: deep link + one Enter keypress in its window).
+export function resolveNewThreadVia(requested, env = process.env) {
+  const value = requested ?? env.CODEX_COMPANION_NEW_THREAD_VIA ?? "cli";
+  if (value !== "cli" && value !== "app") {
+    throw new Error(`Unknown --new-thread-via ${value}. Use cli or app.`);
+  }
+  return value;
+}
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // auto keeps today's behaviour (the CLI) unless the target thread is already open in
@@ -1081,7 +1093,7 @@ async function handleReview(argv) {
 
 async function handleTask(argv) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["model", "effort", "cwd", "prompt-file", "backend", "thread", "expected-worktree", "expected-branch", "expected-base"],
+    valueOptions: ["model", "effort", "cwd", "prompt-file", "backend", "thread", "new-thread-via", "expected-worktree", "expected-branch", "expected-base"],
     // "wait" is accepted and discarded (as in handleReviewCommand): an unrecognised
     // --flag becomes a positional, and positionals ARE the prompt — so a forwarded
     // `--wait` would otherwise be sent to Codex as part of the prompt text.
@@ -1123,6 +1135,7 @@ async function handleTask(argv) {
     throw new Error("No previous Codex task thread was found for this repository.");
   }
   const backend = await resolveTaskBackend(options.backend, threadId);
+  const newThreadVia = resolveNewThreadVia(options["new-thread-via"]);
 
   if (options.background) {
     ensureCodexAvailable(cwd);
@@ -1139,7 +1152,8 @@ async function handleTask(argv) {
       jobId: job.id,
       expected,
       backend,
-      threadId
+      threadId,
+      newThreadVia
     });
     const { payload } = enqueueBackgroundTask(cwd, job, request);
     outputCommandResult(payload, renderQueuedTaskLaunch(payload), options.json);
@@ -1160,6 +1174,7 @@ async function handleTask(argv) {
         jobId: job.id,
         backend,
         threadId,
+        newThreadVia,
         onProgress: progress
       }),
     { json: options.json }

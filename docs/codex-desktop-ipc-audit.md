@@ -90,6 +90,7 @@ followed by that many bytes of UTF-8 JSON.
 | Start a turn | `request thread-follower-start-turn {conversationId, turnStart:{request:{threadId, turnTrigger:"composer", clientUserMessageId, input:[{type:"text", text, text_elements:[]}], model?, effort?}, context:{inheritThreadSettings:true}}}` | `result.result.turn.id` (status `inProgress`) |
 | Stop a turn | `request thread-follower-interrupt-turn {conversationId, mode:"user-stop", expectedTurnId?}` | `result.interruptedTurnId` |
 | Open a thread | `open` / `xdg-open codex://threads/<id>` | the app loads the thread and starts owning it (≈1 s Linux; within the 2 s poll on macOS) |
+| New chat (`--new-thread-via app`) | `open` / `xdg-open codex://threads/new?prompt=<p>&path=<cwd>`, then Enter: `osascript … key code 36` (macOS) or `xdotool windowactivate --sync <id> key Return` (Linux) | a new chat in that project, with the prompt in the focused composer. Recognised params: `browserUrl`, `mode`, `originUrl`, `path`, `prompt`; **none auto-submits**. The thread id comes from the newest rollout file whose first user message is the prompt |
 
 Every request also carries `requestId`, `sourceClientId`, `version` (per method, from the map) and
 `timeoutMs`. A version the app does not accept comes back `request-version-mismatch`.
@@ -124,6 +125,7 @@ Every request also carries `requestId`, `sourceClientId`, `version` (per method,
 | B8 | A thread made by `thread/start` alone (no turn) **cannot be loaded** by the app | ✅ | not re-run | `[start-only-test]` |
 | B9 | Threads created outside the app (companion tasks, ACP extension) can be opened and driven by it | ✅ | ✅ | the auto-open test on two such threads |
 | B10 | The negative `thread-owner-discovery` answer is slow on macOS (~10 s) and immediate on Linux | ✅ | ✅ | timing probe |
+| B11 | The new-chat deep link plus one Enter creates an **app-native** thread (`originator: Codex Desktop`, `cwd` = the `path` param) that the companion then follows to completion | ✅ `VIA-APP-MAC` | ✅ `VIA-APP-LINUX` (over SSH) | companion `task --backend desktop --new-thread-via app` |
 
 `ipc_e2e.py`, `autoopen.py` and the timing probe were throwaway Python scripts from the discovery
 session. They are not in the repo. Their checks are what the hermetic suite and the companion
@@ -202,10 +204,11 @@ prompt sent to Codex.
 
 ## Known limits and open items
 
-- **Windows is unsupported.** The app uses a named pipe, and `probeDesktop` says so.
-- **Creating a thread needs the CLI.** The app's IPC has no "new thread" call that the plugin
-  uses. The UI route (`codex://threads/new?prompt=…` plus a keystroke) works but was left out on
-  purpose.
+- **Creating a thread.** The app's IPC has no "new thread" call. Either the CLI bootstrap
+  (`--new-thread-via cli`) or the app's own new-chat deep link plus one Enter keypress
+  (`--new-thread-via app`). The keypress is the one place the plugin touches the UI. It is not
+  verified against the composer's content first, so focus moving between the deep link and the
+  Enter can send nothing; the run then fails, saying "no new thread appeared".
 - **An approval ends the job, not the turn.** Answering approvals over IPC
   (`thread-follower-command-approval-decision` and friends) exists but is not wired. The decision
   was fail-fast.
