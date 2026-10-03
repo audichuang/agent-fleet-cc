@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -35,9 +34,15 @@ for (const argv of [["task", "--fresh", "--", "--help"], ["task", "--prompt-file
   });
 }
 
-test("the help check knows every value option a verb declares", () => {
-  const source = fs.readFileSync(SCRIPT, "utf8");
-  const declared = new Set([...source.matchAll(/valueOptions: \[([^\]]*)\]/g)].flatMap((m) => [...m[1].matchAll(/"([^"]+)"/g)].map((v) => v[1])));
-  const known = new Set([...source.match(/const ALL_VALUE_OPTIONS = \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map((v) => v[1]));
-  assert.deepEqual([...declared].filter((option) => !known.has(option)), []);
+// Judged with the verb's own options: task has no --base (so it is prompt text and
+// --help is a request), and -C is task's alias for --cwd (so its value is data).
+test("task --fresh --base --help is a help request: --base is not a task option", () => {
+  const result = spawnSync(process.execPath, [SCRIPT, "task", "--fresh", "--base", "--help"], { encoding: "utf8", env: { ...process.env, PATH: "" } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^Usage:/);
+});
+
+test("task -C --help names a cwd, not a help request", () => {
+  const result = spawnSync(process.execPath, [SCRIPT, "task", "-C", "--help", "--fresh", "hello"], { encoding: "utf8", env: { ...process.env, PATH: "" } });
+  assert.doesNotMatch(result.stdout, /^Usage:/);
 });

@@ -46,7 +46,6 @@ import {
   MAX_PREFILL_PROMPT_CHARS,
   buildNewThreadUrl,
   findThreadStartedWithPrompt,
-  listRolloutFiles,
   openDesktopUrl,
   pressEnterInDesktopApp
 } from "./desktop-ipc.mjs";
@@ -1757,6 +1756,10 @@ function emptyDesktopResult(threadId, turnId, error) {
 }
 
 // Same result shape as runAppServerTurn, so render/status/result need no backend branch.
+// How long a new app chat gets to open before the one Enter. Measured: 3.3 s for a
+// 4.4 KB prompt with the app busy (docs/codex-desktop-ipc-audit.md, B12).
+export const NEW_CHAT_SETTLE_MS = 4_000;
+
 export async function runDesktopTurn(cwd, options = {}) {
   const deps = options.desktopDeps ?? {};
   let threadId = options.resumeThreadId ?? null;
@@ -1764,7 +1767,6 @@ export async function runDesktopTurn(cwd, options = {}) {
   // Set when the app itself started the first turn (new thread via the app's own
   // "new chat"); the follower then waits on that turn instead of starting one.
   let appStartedTurn = false;
-  const NEW_CHAT_ENTER_PRESSES = 3;
 
   if (!threadId && options.newThreadVia === "app") {
     if (!prompt) {
@@ -1776,39 +1778,19 @@ export async function runDesktopTurn(cwd, options = {}) {
       );
     }
     const since = Date.now() - 2_000;
-    const listRollouts = deps.listRollouts ?? listRolloutFiles;
-    const rolloutsBefore = listRollouts();
     emitProgress(
       options.onProgress,
       "Opening a new chat in the Codex desktop app with the prompt filled in, then pressing Enter in its window.",
       "starting"
     );
     await (deps.openUrl ?? openDesktopUrl)(buildNewThreadUrl({ prompt, projectPath: cwd }));
-    await new Promise((resolve) => setTimeout(resolve, deps.settleMs ?? 1_500));
-    const findNewThread = deps.findNewThread ?? findThreadStartedWithPrompt;
-    // A busy app can take seconds to open the chat, and an Enter before that falls on
-    // nothing. Press again only while nothing at all has been sent: once any new rollout
-    // exists, a further Enter could submit a draft the user typed in another chat, so
-    // from then on we only wait for our thread to be recognised.
-    let sent = false;
-    for (let press = 1; press <= NEW_CHAT_ENTER_PRESSES && !threadId; press += 1) {
-      if (press > 1) {
-        sent = [...listRollouts()].some((file) => !rolloutsBefore.has(file));
-        if (sent) {
-          threadId = await findNewThread(prompt, { since, timeoutMs: deps.findTimeoutMs ?? 30_000 });
-          break;
-        }
-        emitProgress(options.onProgress, `Nothing was sent yet; pressing Enter again (${press}/${NEW_CHAT_ENTER_PRESSES}).`, "starting");
-      }
-      await (deps.pressEnter ?? pressEnterInDesktopApp)();
-      const timeoutMs = press < NEW_CHAT_ENTER_PRESSES ? deps.enterRetryFindMs ?? 5_000 : deps.findTimeoutMs ?? 30_000;
-      threadId = await findNewThread(prompt, { since, timeoutMs });
-    }
-    if (!threadId && sent) {
-      throw new Error(
-        "A prompt was sent in the Codex desktop app, but no thread starting with this prompt appeared. Check the app before rerunning, so the prompt does not run twice."
-      );
-    }
+    // One Enter, after the chat has had time to open: a busy app took 3.3 s for a long
+    // prompt, and an Enter at ~1.9 s fell on nothing. A second, blind Enter is not safe:
+    // nothing tells us whether the first one sent, and a retry can submit a draft the
+    // user moved to. A missed Enter fails below with the prompt still in the composer.
+    await new Promise((resolve) => setTimeout(resolve, deps.settleMs ?? NEW_CHAT_SETTLE_MS));
+    await (deps.pressEnter ?? pressEnterInDesktopApp)();
+    threadId = await (deps.findNewThread ?? findThreadStartedWithPrompt)(prompt, { since, timeoutMs: deps.findTimeoutMs ?? 30_000 });
     if (!threadId) {
       throw new Error(
         "The prompt was filled into a new Codex desktop chat, but no new thread appeared — the Enter key did not reach it. Send it in the app yourself, or rerun with --new-thread-via cli."

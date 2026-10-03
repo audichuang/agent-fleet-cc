@@ -106,12 +106,6 @@ function resolveDefaultEffort() {
 }
 const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
 
-// Every verb's value options, so the help check skips a value an option consumes.
-const ALL_VALUE_OPTIONS = [
-  "base", "scope", "model", "effort", "cwd", "prompt-file", "backend", "thread", "new-thread-via", "job-id",
-  "timeout-ms", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"
-];
-
 function printUsage() {
   console.log(
     [
@@ -184,14 +178,26 @@ function normalizeArgv(argv) {
   return argv;
 }
 
+// Thrown by parseCommandInput so main prints usage instead of running the verb.
+class HelpRequested extends Error {}
+
 function parseCommandInput(argv, config = {}) {
-  return parseArgs(normalizeArgv(argv), {
+  const parsed = parseArgs(normalizeArgv(argv), {
     ...config,
     aliasMap: {
       C: "cwd",
       ...(config.aliasMap ?? {})
     }
   });
+  // Judged with this verb's own options and aliases: a value an option consumes, or a
+  // token after `--`, is data. `adversarial-review --help` used to launch a real review.
+  // A single argument is a raw string normalizeArgv split, i.e. a quoted prompt, so
+  // only a bare `--help` / `-h` there counts.
+  const fromQuotedPrompt = argv.length === 1 && !["--help", "-h"].includes(argv[0].trim());
+  if (parsed.helpRequested && !fromQuotedPrompt) {
+    throw new HelpRequested();
+  }
+  return parsed;
 }
 
 function resolveCommandCwd(options = {}) {
@@ -1645,54 +1651,55 @@ async function main() {
     printUsage();
     return;
   }
-  // `<verb> --help` is a help request, never focus text or a prompt:
-  // `adversarial-review --help` used to launch a real review about "--help".
-  if (subcommand !== "task-worker" && parseArgs(argv, { valueOptions: ALL_VALUE_OPTIONS }).helpRequested) {
-    printUsage();
-    return;
-  }
-
-  switch (subcommand) {
-    case "setup":
-      await handleSetup(argv);
-      break;
-    case "review":
-      await handleReview(argv);
-      break;
-    case "adversarial-review":
-      await handleReviewCommand(argv, {
-        reviewName: "Adversarial Review"
-      });
-      break;
-    case "task":
-      await handleTask(argv);
-      break;
-    case "task-worker":
-      await handleTaskWorker(argv);
-      break;
-    case "status":
-      await handleStatus(argv);
-      break;
-    case "wait":
-      await handleWait(argv);
-      break;
-    case "attach":
-      await handleAttach(argv);
-      break;
-    case "logs":
-      await handleLogs(argv);
-      break;
-    case "result":
-      handleResult(argv);
-      break;
-    case "task-resume-candidate":
-      handleTaskResumeCandidate(argv);
-      break;
-    case "cancel":
-      await handleCancel(argv);
-      break;
-    default:
-      throw new Error(`Unknown subcommand: ${subcommand}`);
+  try {
+    switch (subcommand) {
+      case "setup":
+        await handleSetup(argv);
+        break;
+      case "review":
+        await handleReview(argv);
+        break;
+      case "adversarial-review":
+        await handleReviewCommand(argv, {
+          reviewName: "Adversarial Review"
+        });
+        break;
+      case "task":
+        await handleTask(argv);
+        break;
+      case "task-worker":
+        await handleTaskWorker(argv);
+        break;
+      case "status":
+        await handleStatus(argv);
+        break;
+      case "wait":
+        await handleWait(argv);
+        break;
+      case "attach":
+        await handleAttach(argv);
+        break;
+      case "logs":
+        await handleLogs(argv);
+        break;
+      case "result":
+        handleResult(argv);
+        break;
+      case "task-resume-candidate":
+        handleTaskResumeCandidate(argv);
+        break;
+      case "cancel":
+        await handleCancel(argv);
+        break;
+      default:
+        throw new Error(`Unknown subcommand: ${subcommand}`);
+    }
+  } catch (error) {
+    if (error instanceof HelpRequested) {
+      printUsage();
+      return;
+    }
+    throw error;
   }
 }
 

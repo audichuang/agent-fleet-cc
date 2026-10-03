@@ -29,8 +29,8 @@ companion's `Thread ready` (CLI) or `Attaching to thread` (desktop) progress lin
   - `cli` (default): a one-line bootstrap turn on a throwaway app-server, then the real prompt goes
     to the app. No UI involved, so it is safe while the user is typing. It costs one tiny turn.
   - `app`: the app makes the thread itself. A new chat opens in the project with the prompt filled
-    in, and the companion presses Enter in the app's window. A busy app can take seconds to open the
-    chat, so it presses again, but only while nothing has been sent anywhere in the app. The thread is native to the app, with no extra turn, and
+    in, and the companion presses Enter once in the app's window, about 4 s later (a busy app can take
+    seconds to open the chat). The thread is native to the app, with no extra turn, and
     runs on the model selected in the app, not the companion's default. It takes window focus for a moment, and needs Accessibility permission for the
     terminal (macOS) or an X11 session (Linux). Use it when the user is watching and wants an
     app-native chat. `CODEX_COMPANION_NEW_THREAD_VIA=app` makes it the default.
