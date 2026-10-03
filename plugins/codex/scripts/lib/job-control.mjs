@@ -250,7 +250,7 @@ export function enrichJob(job, options = {}) {
 
 export function readStoredJob(workspaceRoot, jobId) {
   // jobFilePath, not resolveJobFile: this is a pure READ, and resolveJobFile mkdirs the
-  // per-job dir on the way there. A /codex:result racing a prune would otherwise
+  // per-job dir on the way there. A result racing a prune would otherwise
   // re-create an empty jobs/<id>/ with no terminal.lock — invisible to the orphan sweep
   // and to the job list, i.e. leaked forever (see state.mjs jobFilePath).
   const jobFile = jobFilePath(workspaceRoot, jobId);
@@ -306,13 +306,13 @@ function matchJobReference(jobs, reference, predicate = () => true) {
   // A reference that resolves against the UNFILTERED list is not unknown — the job
   // exists and is merely in the wrong state for this action. Return null so the
   // caller's own state-specific message runs ("already completed", "still running");
-  // claiming "no job found" sends the operator hunting for a job /codex:status shows
+  // claiming "no job found" sends the operator hunting for a job status shows
   // plainly. Only a genuinely unknown reference is an error.
   if (jobs.some((job) => job.id === reference || job.id.startsWith(reference))) {
     return null;
   }
 
-  throw new Error(`No job found for "${reference}". Run /codex:status to list known jobs.`);
+  throw new Error(`No job found for "${reference}". Run \`status\` to list known jobs.`);
 }
 
 export function buildStatusSnapshot(cwd, options = {}) {
@@ -379,7 +379,7 @@ export function buildSingleJobSnapshot(cwd, reference, options = {}) {
     throw error;
   }
   if (!selected) {
-    throw new Error(`No job found for "${reference}". Run /codex:status to inspect known jobs.`);
+    throw new Error(`No job found for "${reference}". Run \`status\` to inspect known jobs.`);
   }
 
   return {
@@ -413,11 +413,11 @@ export function resolveResultJob(cwd, reference, options = {}) {
 
   const active = matchJobReference(jobs, reference, (job) => job.status === "queued" || job.status === "running");
   if (active) {
-    throw new Error(`Job ${active.id} is still ${active.status}. Check /codex:status and try again once it finishes.`);
+    throw new Error(`Job ${active.id} is still ${active.status}. Check \`status\` and try again once it finishes.`);
   }
 
   if (reference) {
-    throw new Error(`No finished job found for "${reference}". Run /codex:status to inspect active jobs.`);
+    throw new Error(`No finished job found for "${reference}". Run \`status\` to inspect active jobs.`);
   }
 
   throw new Error("No finished Codex jobs found for this repository yet.");
@@ -452,7 +452,7 @@ export function resolveCancelableJob(cwd, reference, options = {}) {
     return { workspaceRoot, job: sessionScopedActiveJobs[0] };
   }
   if (sessionScopedActiveJobs.length > 1) {
-    throw new Error("Multiple Codex jobs are active. Pass a job id to /codex:cancel.");
+    throw new Error("Multiple Codex jobs are active. Pass a job id to `cancel`.");
   }
 
   if (getCurrentSessionId(options)) {

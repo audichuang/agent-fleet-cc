@@ -288,7 +288,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     );
   }
   if (!config.stopReviewGate) {
-    nextSteps.push("Optional: run `/codex:setup --enable-review-gate` to require a fresh review before stop.");
+    nextSteps.push("Optional: run `setup --enable-review-gate` to require a fresh review before stop.");
   }
 
   return {
@@ -376,7 +376,7 @@ export function buildAdversarialReviewPrompt(context, focusText) {
 function ensureCodexAvailable(cwd) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `/codex:setup`.");
+    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
   }
 }
 
@@ -395,13 +395,13 @@ function buildNativeReviewTarget(target) {
 function validateNativeReviewRequest(target, focusText) {
   if (focusText.trim()) {
     throw new Error(
-      `\`/codex:review\` now maps directly to the built-in reviewer and does not support custom focus text. Retry with \`/codex:adversarial-review ${focusText.trim()}\` for focused review instructions.`
+      `\`review\` now maps directly to the built-in reviewer and does not support custom focus text. Retry with \`adversarial-review ${focusText.trim()}\` for focused review instructions.`
     );
   }
 
   const nativeTarget = buildNativeReviewTarget(target);
   if (!nativeTarget) {
-    throw new Error("This `/codex:review` target is not supported by the built-in reviewer. Retry with `/codex:adversarial-review` for custom targeting.");
+    throw new Error("This `review` target is not supported by the built-in reviewer. Retry with `adversarial-review` for custom targeting.");
   }
 
   return nativeTarget;
@@ -480,7 +480,7 @@ async function resolveLatestTrackedTaskThread(cwd, options = {}) {
   const visibleJobs = filterJobsForCurrentClaudeSession(jobs);
   const activeTask = visibleJobs.find((job) => job.jobClass === "task" && (job.status === "queued" || job.status === "running"));
   if (activeTask) {
-    throw new Error(`Task ${activeTask.id} is still running. Use /codex:status before continuing it.`);
+    throw new Error(`Task ${activeTask.id} is still running. Use \`status\` before continuing it.`);
   }
 
   const trackedTask = findLatestResumableTaskJob(visibleJobs);
@@ -745,7 +745,7 @@ export function renderQueuedTaskLaunch(payload) {
   // Human line + a machine-readable sentinel so a consumer scanning stdout can
   // reliably detect the dispatch and capture the job id without parsing prose.
   return (
-    `${payload.title} started in the background as ${payload.jobId}. Check /codex:status ${payload.jobId} for progress.\n` +
+    `${payload.title} started in the background as ${payload.jobId}. Check \`status ${payload.jobId}\` for progress.\n` +
     `[[codex-task status=dispatched id=${payload.jobId}]]\n`
   );
 }
@@ -998,7 +998,7 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
 
   // Launch the detached liveness watchdog so a hung or dead background turn is
   // reconciled to a terminal state (and a .done signal written) even when no
-  // one polls /codex:status. Best effort: a watchdog spawn failure must never
+  // one polls status. Best effort: a watchdog spawn failure must never
   // block the actual task launch.
   try {
     launchWatchdog(cwd, job.id, logFile);
@@ -1277,7 +1277,7 @@ async function handleWait(argv) {
   assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query (see handleStatus)
   const reference = positionals[0] ?? "";
   if (!reference) {
-    throw new Error("`wait` requires a job id. Run `/codex:status` to list active jobs, then pass one (e.g. `/codex:wait <job-id>`).");
+    throw new Error("`wait` requires a job id. Run `status` to list active jobs, then pass one (e.g. `wait <job-id>`).");
   }
   if (positionals.length !== 1) {
     throw new Error("`wait` accepts exactly one job id.");
@@ -1446,7 +1446,7 @@ async function handleCancel(argv) {
 
 const TERMINAL_JOB_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
-// Poll-and-tail loop for /codex:attach: emit new log bytes, and once the job
+// Poll-and-tail loop for attach: emit new log bytes, and once the job
 // reaches a terminal status do one final flush and exit. Fully seam-injectable
 // (readChunk/readStatus/sleep/write) for deterministic tests; maxPolls is a
 // safety bound so a never-terminal job can't loop forever.
@@ -1568,7 +1568,7 @@ export async function handleAttach(argv, deps = {}) {
       (job) => job.status === "queued" || job.status === "running"
     );
     if (!active) {
-      throw new Error("No active Codex job to attach to. Run /codex:status to inspect known jobs.");
+      throw new Error("No active Codex job to attach to. Run `status` to inspect known jobs.");
     }
     jobId = active.id;
     logFile = active.logFile ?? pureJobLogPath(workspaceRoot, jobId);

@@ -34,6 +34,21 @@ the app has — computer use, its browser — and the user can watch it there.
   terminal, even about a UI, stays on the CLI. `codex-rescue` applies the same test and passes a
   user-typed `--backend` / `--thread` / `--new-thread-via` through as flags, not task text.
 - `setup` reports whether the desktop app is reachable.
+
+**Against codex-cli 0.160.0** (upstream `b741e480e2`):
+
+- A mid-turn message no longer ends the job. Codex's `send_message_to_user_async` and
+  `request_user_input_async` tools emit an `agentMessage` with `phase: "final_answer"` and
+  `delivery: "async"` while the turn keeps running; the inferred-completion timer took it as the
+  end and returned a half-finished answer as success. Only a non-async `final_answer` counts now.
+- `thread/resume` sends `excludeTurns: true`: the plugin reads only the thread id, and
+  full-history hydration is deprecated upstream for paginated threads.
+- `review/start` always uses `delivery: "inline"`; the unused option for the deprecated
+  `detached` mode is gone.
+- A turn blocked for misalignment shows the block's explanation in the error
+  (`TurnError.misalignment.detailedExplanation`).
+- Messages name the companion verb (`status`, `cancel <id>`, `setup`) instead of the `/codex:*`
+  slash commands removed in 1.6.4. A test keeps them out of `scripts/`.
 - New reference: `skills/codex/references/desktop-backend.md`.
 
 ## 1.6.4

@@ -55,7 +55,7 @@ function buildSetupNote(cwd) {
   }
 
   const detail = availability.detail ? ` ${availability.detail}.` : "";
-  return `Codex is not set up for the review gate.${detail} Run /codex:setup.`;
+  return `Codex is not set up for the review gate.${detail} Run the Codex companion's \`setup\`.`;
 }
 
 function parseStopReviewOutput(rawOutput) {
@@ -64,7 +64,7 @@ function parseStopReviewOutput(rawOutput) {
     return {
       ok: false,
       reason:
-        "The stop-time Codex review task returned no final output. Run /codex:review --wait manually or bypass the gate."
+        "The stop-time Codex review task returned no final output. Run the companion's `review --wait` manually or bypass the gate."
     };
   }
 
@@ -83,7 +83,7 @@ function parseStopReviewOutput(rawOutput) {
   return {
     ok: false,
     reason:
-      "The stop-time Codex review task returned an unexpected answer. Run /codex:review --wait manually or bypass the gate."
+      "The stop-time Codex review task returned an unexpected answer. Run the companion's `review --wait` manually or bypass the gate."
   };
 }
 
@@ -105,7 +105,7 @@ function runStopReview(cwd, input = {}) {
     return {
       ok: false,
       reason:
-        "The stop-time Codex review task timed out after 15 minutes. Run /codex:review --wait manually or bypass the gate."
+        "The stop-time Codex review task timed out after 15 minutes. Run the companion's `review --wait` manually or bypass the gate."
     };
   }
 
@@ -115,7 +115,7 @@ function runStopReview(cwd, input = {}) {
       ok: false,
       reason: detail
         ? `The stop-time Codex review task failed: ${detail}`
-        : "The stop-time Codex review task failed. Run /codex:review --wait manually or bypass the gate."
+        : "The stop-time Codex review task failed. Run the companion's `review --wait` manually or bypass the gate."
     };
   }
 
@@ -126,7 +126,7 @@ function runStopReview(cwd, input = {}) {
     return {
       ok: false,
       reason:
-        "The stop-time Codex review task returned invalid JSON. Run /codex:review --wait manually or bypass the gate."
+        "The stop-time Codex review task returned invalid JSON. Run the companion's `review --wait` manually or bypass the gate."
     };
   }
 }
@@ -140,7 +140,7 @@ function main() {
   const jobs = sortJobsNewestFirst(filterJobsForCurrentSession(listJobs(workspaceRoot), input));
   const runningJob = jobs.find((job) => job.status === "queued" || job.status === "running");
   const runningTaskNote = runningJob
-    ? `Codex task ${runningJob.id} is still running. Check /codex:status and use /codex:cancel ${runningJob.id} if you want to stop it before ending the session.`
+    ? `Codex task ${runningJob.id} is still running. Check the companion's \`status\` and use \`cancel ${runningJob.id}\` if you want to stop it before ending the session.`
     : null;
 
   if (!config.stopReviewGate) {

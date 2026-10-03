@@ -203,3 +203,22 @@ test("every markdown link in the skill resolves from the file that contains it",
     }
   }
 });
+
+test("no script points the user at a /codex:* slash command (removed in 1.6.4)", () => {
+  // Messages name the companion verb (`status`, `cancel <id>`); a slash command that
+  // does not exist sends the user and the host after nothing.
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".mjs")) {
+        fs.readFileSync(full, "utf8").split("\n").forEach((line, index) => {
+          if (/\/codex:[a-z]/.test(line)) offenders.push(`${path.relative(PLUGIN_ROOT, full)}:${index + 1}`);
+        });
+      }
+    }
+  };
+  walk(path.join(PLUGIN_ROOT, "scripts"));
+  assert.deepEqual(offenders, []);
+});

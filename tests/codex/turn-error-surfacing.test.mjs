@@ -96,6 +96,18 @@ test("describeTurnError appends additionalDetails without duplicating it", () =>
   );
 });
 
+test("describeTurnError appends a misalignment block's explanation, not its steer", () => {
+  // v2 TurnError.misalignment (upstream 2026-08-26): the explanation is the user-facing
+  // why; the steer is an instruction for the NEXT turn and stays out of the message.
+  const error = {
+    message: "This request was blocked.",
+    misalignment: { errorType: "policy", detailedExplanation: "The task asked to disable a safety check.", steer: { message: "Continue without X" } }
+  };
+  assert.equal(describeTurnError(error), "This request was blocked. — The task asked to disable a safety check.");
+  assert.equal(describeTurnError({ ...error, additionalDetails: "upstream 400" }), "This request was blocked. — upstream 400 — The task asked to disable a safety check.");
+  assert.equal(describeTurnError({ message: "blocked", misalignment: { detailedExplanation: null } }), "blocked");
+});
+
 test("describeTurnError annotates a stderr-only failure too, and ignores malformed error info", () => {
   assert.equal(describeTurnError({ codexErrorInfo: "unauthorized" }, "boom"), "boom [unauthorized]");
   for (const codexErrorInfo of [null, "", "   ", [], 7, {}]) {

@@ -6,7 +6,7 @@
 // the last logged event, and is the broker endpoint still reachable. It uses
 // the pure liveness logic in lib/liveness.mjs (escalate-not-kill) and, only
 // after repeated bad ticks, interrupts the turn, kills the process tree, marks
-// the job failed, and writes a .done signal so /codex:result returns a reason
+// the job failed, and writes a .done signal so result returns a reason
 // instead of hanging forever.
 
 import fs from "node:fs";

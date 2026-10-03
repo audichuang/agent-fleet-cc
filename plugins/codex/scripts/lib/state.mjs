@@ -422,7 +422,7 @@ export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
 
     // Dead-pid finalize: a worker that died without reporting a terminal status. A `queued`
     // record with a dead tracked pid would otherwise wedge forever and block future
-    // /codex:rescue runs (the active-job guard treats queued as active).
+    // rescue runs (the active-job guard treats queued as active).
     const pid = normalizeTrackedPid(job.pid);
     // Wall-clock backstop (mirrors the watchdog's missedOwnDeadline): a bare
     // isProcessAlive gate cannot finalize a job whose worker was SIGKILLed and
@@ -481,7 +481,7 @@ export function reconcileDeadPidJobs(cwd, jobs, deps = {}) {
       reason
     });
 
-    // Human-visible marker in the job log so the next /codex:status renders
+    // Human-visible marker in the job log so the next status renders
     // something explanatory in the progress preview instead of going silent.
     const logTarget = result.stored?.logFile ?? null;
     if (logTarget) {
@@ -648,7 +648,7 @@ export function findJobByIdAcrossWorkspaces(cwd, jobId, options = {}) {
       if (job && job.id === jobId) {
         // R2: overlay the authoritative terminal.lock (mirror listJobs) so a
         // cross-workspace reader never sees a stale-"running" record that a
-        // finalize already superseded — else /codex:wait <foreign-id> polls
+        // finalize already superseded — else wait <foreign-id> polls
         // until timeout on a job that actually finished.
         return { job: overlayTerminalLock(workspaceStateDir, job), workspaceStateDir };
       }
@@ -707,7 +707,7 @@ export function writeCompletionSignalFile(cwd, jobId, signal = {}) {
  *
  * ponytail: the existsSync→write is not atomic, so a healer can still overwrite a caller's
  * richer .done written in that window — but both carry the same terminal status from the
- * same record, and /codex:result reads the per-job record (not .done) for detail, so the
+ * same record, and result reads the per-job record (not .done) for detail, so the
  * lost nuance (e.g. a non-error completion summary that lives only in the index) is
  * cosmetic. A torn-write recovery with a slightly-less-rich signal beats a hung waiter.
  */

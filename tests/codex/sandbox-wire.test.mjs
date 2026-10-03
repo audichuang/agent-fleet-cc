@@ -102,5 +102,6 @@ test("thread/resume carries the same isolation as thread/start", () => {
   for (const thread of resumed) {
     assert.equal(thread.wireResume.sandbox, "danger-full-access");
     assert.equal(thread.wireResume.approvalPolicy, "never");
+    assert.equal(thread.wireResume.excludeTurns, true, "resume reads only the thread id; full-history hydration is deprecated upstream");
   }
 });

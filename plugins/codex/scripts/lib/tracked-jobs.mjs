@@ -447,7 +447,7 @@ export async function runTrackedJob(job, runner, options = {}) {
     const phase = completionStatus === "completed" ? "done" : "failed";
     // A runner that RETURNS a failed execution (e.g. a turn ended by an `error`
     // notification — HTTP 400, permanent auth) used to leave errorMessage unset,
-    // so the failure reason lived only in the log/rendered blob and /codex:status
+    // so the failure reason lived only in the log/rendered blob and status
     // + --json showed a bare "failed" (a silent death). Persist it here — the one
     // point every runner's failed RETURN converges — mirroring the throw/crash
     // paths below. Reads come from the per-job file, so it goes on the file patch.

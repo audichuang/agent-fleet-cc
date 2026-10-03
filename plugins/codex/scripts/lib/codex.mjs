@@ -115,7 +115,10 @@ function buildResumeParams(threadId, cwd, options = {}) {
     cwd,
     model: options.model ?? null,
     approvalPolicy: options.approvalPolicy ?? "never",
-    sandbox: resolveSandboxMode(options.sandbox)
+    sandbox: resolveSandboxMode(options.sandbox),
+    // Only the thread id is read back. Full-history hydration is deprecated upstream
+    // for paginated threads, and it ships the whole history for nothing.
+    excludeTurns: true
   };
 }
 
@@ -245,7 +248,7 @@ const MAX_NOTIFICATION_TEXT = 200;
 // item/commandExecution/outputDelta handler). A single long command (e.g. a
 // 15-min build/test) streams output continuously with no other handled
 // notification between item/started and item/completed; we surface at most one
-// liveness line per this window so /codex:logs and /codex:status are not dark
+// liveness line per this window so logs and status are not dark
 // for minutes while the command is actually alive.
 const COMMAND_HEARTBEAT_INTERVAL_MS = 20_000;
 
@@ -537,7 +540,9 @@ function recordItem(state, item, lifecycle, threadId = null) {
     if (item.text) {
       if (!threadId || threadId === state.threadId) {
         state.lastAgentMessage = item.text;
-        if (lifecycle === "completed" && item.phase === "final_answer") {
+        // delivery "async" (send_message_to_user_async, request_user_input_async) is a
+        // final_answer-phase message sent mid-turn; the turn keeps running after it.
+        if (lifecycle === "completed" && item.phase === "final_answer" && item.delivery !== "async") {
           state.finalAnswerSeen = true;
           scheduleInferredCompletion(state);
         }
@@ -657,8 +662,8 @@ function applyTurnNotification(state, message) {
       break;
     case "item/commandExecution/outputDelta": {
       // A single long command (e.g. a 15-min build/test) emits no other handled
-      // notification between item/started and item/completed, so /codex:logs and
-      // /codex:status would go dark for minutes even though output is streaming
+      // notification between item/started and item/completed, so logs and
+      // status would go dark for minutes even though output is streaming
       // live on the wire. Surface a THROTTLED liveness heartbeat — never the raw
       // chunks (up to ~10KB/call; they would flood the log), only a running byte
       // count, mirroring the turn/diff handler which signals "it changed + size".
@@ -1176,7 +1181,7 @@ export function resolveFinalMessage(turnState) {
 }
 
 // Best-effort human-readable failure reason for a FAILED turn — the value that
-// becomes the job's structured `errorMessage` so /codex:status, /codex:wait, and
+// becomes the job's structured `errorMessage` so status, wait, and
 // the --json projection show WHY it died instead of a bare "failed". The
 // app-server delivers a turn error in a few shapes: a nested envelope
 // `{ error: { message } }`, a plain `{ message }`, OR a `{ message }` whose value
@@ -1227,7 +1232,13 @@ export function describeTurnError(error, stderr = "") {
   // `errorMessage`: the details so a human sees WHY, the code so a delegating
   // commander can branch on a failed --json payload without parsing prose.
   const details = typeof error?.additionalDetails === "string" ? error.additionalDetails.trim() : "";
-  const prose = details && !message.includes(details) ? `${message} — ${details}` : message;
+  let prose = details && !message.includes(details) ? `${message} — ${details}` : message;
+  // A misalignment block carries its own user-facing explanation. Its `steer` is an
+  // instruction for a next turn the user has to confirm, so it stays out of this text.
+  const explanation = error?.misalignment?.detailedExplanation;
+  if (typeof explanation === "string" && explanation.trim() && !prose.includes(explanation.trim())) {
+    prose = `${prose} — ${explanation.trim()}`;
+  }
   const code = codexErrorCode(error);
   // Cap the prose, never the code: the tag is the machine-readable half and costs ~20 chars.
   return code ? `${cap(prose)} [${code}]` : cap(prose);
@@ -1594,7 +1605,7 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
 export async function runAppServerReview(cwd, options = {}) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `/codex:setup`.");
+    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
   }
 
   return withAppServer(cwd, async (client) => {
@@ -1610,7 +1621,6 @@ export async function runAppServerReview(cwd, options = {}) {
     emitProgress(options.onProgress, `Thread ready (${sourceThreadId}).`, "starting", {
       threadId: sourceThreadId
     });
-    const delivery = options.delivery ?? "inline";
 
     const turnState = await captureTurn(
       client,
@@ -1618,7 +1628,9 @@ export async function runAppServerReview(cwd, options = {}) {
       () =>
         client.request("review/start", {
           threadId: sourceThreadId,
-          delivery,
+          // Inline only: the review runs on this thread. Upstream deprecated "detached"
+          // (a separate review thread) and schedules it for removal.
+          delivery: "inline",
           target: options.target
         }),
       {
@@ -1626,9 +1638,6 @@ export async function runAppServerReview(cwd, options = {}) {
         onResponse(response, state) {
           if (response.reviewThreadId) {
             state.threadIds.add(response.reviewThreadId);
-            if (delivery === "detached") {
-              state.threadId = response.reviewThreadId;
-            }
           }
         }
       }
@@ -1652,7 +1661,7 @@ export async function runAppServerReview(cwd, options = {}) {
 export async function runAppServerTurn(cwd, options = {}) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `/codex:setup`.");
+    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
   }
 
   return withAppServer(cwd, async (client) => {
@@ -1980,7 +1989,7 @@ export async function interruptDesktopTurn({ threadId, turnId }, options = {}) {
 export async function findLatestTaskThread(cwd) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `/codex:setup`.");
+    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
   }
 
   return withAppServer(cwd, async (client) => {

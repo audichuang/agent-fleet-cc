@@ -75,7 +75,7 @@ function cleanupSessionJobs(cwd, sessionId, deps = {}) {
       // Background jobs are designed to outlive the session — do NOT terminate
       // them. They are still bounded by the liveness watchdog and the 1-hour
       // hard cap. They are retained in the index below so the parent session's
-      // later /codex:status can still find them.
+      // later status can still find them.
       continue;
     }
     // Source-of-truth guard against killing a reused pid: consult the per-job
@@ -129,7 +129,7 @@ function cleanupSessionJobs(cwd, sessionId, deps = {}) {
   }
 
   // Reload to pick up the failed transitions, then drop the terminal session
-  // jobs while retaining the ones we just marked failed (so /codex:result can
+  // jobs while retaining the ones we just marked failed (so result can
   // still surface them and their .done signal is not pruned).
   const fresh = loadState(workspaceRoot);
   const retained = fresh.jobs.filter(
