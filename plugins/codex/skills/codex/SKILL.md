@@ -1,6 +1,6 @@
 ---
 name: codex
-description: Runs Codex for a review, a check, a diagnosis, an implementation, or an image — on the Codex CLI or inside the Codex desktop app (computer use, a thread the user has open there) — and is consulted before any Codex payload is shown. The host runs the companion script; there is no slash command. Findings are never auto-fixed, a failed or never-invoked run is reported rather than replaced, and generated image files are shown. Default model is gpt-6.1-sol.
+description: Runs Codex for a review, a check, a diagnosis, an implementation, or an image, and is consulted before any Codex payload is shown. The host runs the companion script; there is no slash command. Findings are never auto-fixed, a failed or never-invoked run is reported rather than replaced, and generated image files are shown. Default model is gpt-6.1-sol.
 user-invocable: false
 ---
 
