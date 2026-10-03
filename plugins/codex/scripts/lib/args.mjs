@@ -5,6 +5,9 @@ export function parseArgs(argv, config = {}) {
   const options = {};
   const positionals = [];
   let passthrough = false;
+  // A bare --help / -h here is a help request. A value consumed by an option, or a
+  // token after `--`, never is: `--prompt-file --help` names a file called "--help".
+  let helpRequested = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -22,6 +25,10 @@ export function parseArgs(argv, config = {}) {
     if (!token.startsWith("-") || token === "-") {
       positionals.push(token);
       continue;
+    }
+
+    if (token === "--help" || token === "-h") {
+      helpRequested = true;
     }
 
     if (token.startsWith("--")) {
@@ -70,7 +77,7 @@ export function parseArgs(argv, config = {}) {
     positionals.push(token);
   }
 
-  return { options, positionals };
+  return { options, positionals, helpRequested };
 }
 
 export function splitRawArgumentString(raw) {

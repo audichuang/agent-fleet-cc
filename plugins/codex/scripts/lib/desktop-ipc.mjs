@@ -465,6 +465,25 @@ function sessionDirsToScan(codexHome, now) {
   return dirs;
 }
 
+// Every rollout file the app has written in the last two days. A send creates one
+// (the app writes nothing when the chat merely opens), so a name missing from an
+// earlier listing means some prompt went out.
+/** @param {{ env?: NodeJS.ProcessEnv, now?: () => number }} [options] */
+export function listRolloutFiles({ env = process.env, now = () => Date.now() } = {}) {
+  const codexHome = env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const files = new Set();
+  for (const dir of sessionDirsToScan(codexHome, now())) {
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        if (name.endsWith(".jsonl")) files.add(path.join(dir, name));
+      }
+    } catch {
+      continue;
+    }
+  }
+  return files;
+}
+
 // The app writes each thread's rollout to $CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<id>.jsonl
 // as soon as the first turn starts; the first user message identifies ours.
 /** @param {string} prompt @param {{ since?: number, env?: NodeJS.ProcessEnv, timeoutMs?: number, pollMs?: number, now?: () => number }} [options] */

@@ -46,6 +46,7 @@ import {
   MAX_PREFILL_PROMPT_CHARS,
   buildNewThreadUrl,
   findThreadStartedWithPrompt,
+  listRolloutFiles,
   openDesktopUrl,
   pressEnterInDesktopApp
 } from "./desktop-ipc.mjs";
@@ -1763,7 +1764,7 @@ export async function runDesktopTurn(cwd, options = {}) {
   // Set when the app itself started the first turn (new thread via the app's own
   // "new chat"); the follower then waits on that turn instead of starting one.
   let appStartedTurn = false;
-  const NEW_CHAT_ENTER_PRESSES = 4;
+  const NEW_CHAT_ENTER_PRESSES = 3;
 
   if (!threadId && options.newThreadVia === "app") {
     if (!prompt) {
@@ -1775,6 +1776,8 @@ export async function runDesktopTurn(cwd, options = {}) {
       );
     }
     const since = Date.now() - 2_000;
+    const listRollouts = deps.listRollouts ?? listRolloutFiles;
+    const rolloutsBefore = listRollouts();
     emitProgress(
       options.onProgress,
       "Opening a new chat in the Codex desktop app with the prompt filled in, then pressing Enter in its window.",
@@ -1782,16 +1785,29 @@ export async function runDesktopTurn(cwd, options = {}) {
     );
     await (deps.openUrl ?? openDesktopUrl)(buildNewThreadUrl({ prompt, projectPath: cwd }));
     await new Promise((resolve) => setTimeout(resolve, deps.settleMs ?? 1_500));
+    const findNewThread = deps.findNewThread ?? findThreadStartedWithPrompt;
     // A busy app can take seconds to open the chat, and an Enter before that falls on
-    // nothing. So press again while no thread appears: once the prompt is sent the
-    // composer is empty, and Enter on an empty composer sends nothing.
+    // nothing. Press again only while nothing at all has been sent: once any new rollout
+    // exists, a further Enter could submit a draft the user typed in another chat, so
+    // from then on we only wait for our thread to be recognised.
+    let sent = false;
     for (let press = 1; press <= NEW_CHAT_ENTER_PRESSES && !threadId; press += 1) {
       if (press > 1) {
-        emitProgress(options.onProgress, `No new thread yet; pressing Enter again (${press}/${NEW_CHAT_ENTER_PRESSES}).`, "starting");
+        sent = [...listRollouts()].some((file) => !rolloutsBefore.has(file));
+        if (sent) {
+          threadId = await findNewThread(prompt, { since, timeoutMs: deps.findTimeoutMs ?? 30_000 });
+          break;
+        }
+        emitProgress(options.onProgress, `Nothing was sent yet; pressing Enter again (${press}/${NEW_CHAT_ENTER_PRESSES}).`, "starting");
       }
       await (deps.pressEnter ?? pressEnterInDesktopApp)();
-      const timeoutMs = press < NEW_CHAT_ENTER_PRESSES ? deps.enterRetryFindMs ?? 3_000 : deps.findTimeoutMs ?? 30_000;
-      threadId = await (deps.findNewThread ?? findThreadStartedWithPrompt)(prompt, { since, timeoutMs });
+      const timeoutMs = press < NEW_CHAT_ENTER_PRESSES ? deps.enterRetryFindMs ?? 5_000 : deps.findTimeoutMs ?? 30_000;
+      threadId = await findNewThread(prompt, { since, timeoutMs });
+    }
+    if (!threadId && sent) {
+      throw new Error(
+        "A prompt was sent in the Codex desktop app, but no thread starting with this prompt appeared. Check the app before rerunning, so the prompt does not run twice."
+      );
     }
     if (!threadId) {
       throw new Error(

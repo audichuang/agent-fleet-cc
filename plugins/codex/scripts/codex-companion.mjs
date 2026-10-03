@@ -106,6 +106,12 @@ function resolveDefaultEffort() {
 }
 const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
 
+// Every verb's value options, so the help check skips a value an option consumes.
+const ALL_VALUE_OPTIONS = [
+  "base", "scope", "model", "effort", "cwd", "prompt-file", "backend", "thread", "new-thread-via", "job-id",
+  "timeout-ms", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"
+];
+
 function printUsage() {
   console.log(
     [
@@ -1639,9 +1645,9 @@ async function main() {
     printUsage();
     return;
   }
-  // A standalone --help after a verb is a help request, never focus text or a prompt:
+  // `<verb> --help` is a help request, never focus text or a prompt:
   // `adversarial-review --help` used to launch a real review about "--help".
-  if (subcommand !== "task-worker" && argv.some((arg) => arg === "--help" || arg === "-h")) {
+  if (subcommand !== "task-worker" && parseArgs(argv, { valueOptions: ALL_VALUE_OPTIONS }).helpRequested) {
     printUsage();
     return;
   }
