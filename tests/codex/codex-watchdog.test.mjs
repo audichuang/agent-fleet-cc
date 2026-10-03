@@ -509,3 +509,14 @@ test("terminateHungJob never reaps the broker for a desktop job and routes its i
   assert.deepEqual(calls.interrupt, [{ threadId: "th", turnId: "tn", backend: "desktop" }]);
   assert.deepEqual(calls.terminate, [999_999], "only the worker is killed; the shared broker must survive");
 });
+
+test("a desktop job's watchdog message points at the app, not at a CLI resume the app's lock would refuse", async () => {
+  const workspace = makeTempDir();
+  const jobId = "job-desktop-hint";
+  const logFile = seedHungJob(workspace, jobId);
+  const deps = { interrupt: async () => ({ attempted: true, interrupted: true }), terminate: () => {}, readBrokerPid: () => null };
+  const observation = { status: "running", pid: 999_999, threadId: "th-9", turnId: "tn", brokerOk: true, backend: "desktop", missedOwnDeadline: true, logFile };
+  const { reason } = await terminateHungJob(workspace, jobId, observation, deps, "HUNG");
+  assert.match(reason, /task --backend desktop --thread th-9/);
+  assert.doesNotMatch(reason, /codex resume/);
+});

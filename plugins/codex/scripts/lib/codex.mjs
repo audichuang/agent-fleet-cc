@@ -40,7 +40,7 @@
 import { readJsonFile } from "./fs.mjs";
 import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from "./app-server.mjs";
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
-import { DesktopThread } from "./desktop-ipc.mjs";
+import { DesktopIpcClient, DesktopThread } from "./desktop-ipc.mjs";
 import { binaryAvailable } from "./process.mjs";
 
 const SERVICE_NAME = "claude_code_codex_plugin";
@@ -1782,6 +1782,26 @@ export async function runDesktopTurn(cwd, options = {}) {
     const turnId = await thread.startTurn(prompt, { model: options.model ?? null, effort: options.effort ?? null });
     emitProgress(options.onProgress, `Turn started in the Codex desktop app (${turnId}).`, "running", { threadId, turnId });
 
+    // An approval the app settles on its own (auto-review, policy) is pending only
+    // briefly; fail fast only on one that stays. And if the app stops owning the thread
+    // mid-turn (window closed, thread unloaded) no more updates arrive at all — check
+    // ownership periodically so that fails in about a minute, not at the hard timeout.
+    const approvalGraceMs = options.approvalGraceMs ?? 3_000;
+    let pendingSince = null;
+    let graceTimer = null;
+    // An explicit "no owner" is strong evidence; silence is weak (a busy app mid computer
+    // use can miss the 2 s window), so it takes several silent checks in a row.
+    let ownerMisses = 0;
+    let ownerSilences = 0;
+    const heartbeat = setInterval(async () => {
+      const ownership = await thread.ownership().catch(() => "unknown");
+      ownerMisses = ownership === "not-owned" ? ownerMisses + 1 : 0;
+      ownerSilences = ownership === "unknown" ? ownerSilences + 1 : 0;
+      if (ownerMisses >= 2 || ownerSilences >= 6) {
+        thread.fail(new Error(`The Codex desktop app no longer has thread ${threadId} open; the turn's outcome is unknown. Check the thread in the app.`));
+      }
+    }, options.ownerHeartbeatMs ?? 30_000);
+    heartbeat.unref?.();
     const captureState = createTurnCaptureState(threadId, { onProgress: options.onProgress });
     const reported = new Set();
     /** @type {any} */
@@ -1811,15 +1831,26 @@ export async function runDesktopTurn(cwd, options = {}) {
         const turn = thread.turn(turnId);
         reportProgress(turn);
         if (turn && turn.status && turn.status !== "inProgress") return true;
-        if (thread.pendingRequests().length > 0) {
-          blockedOn = thread.pendingRequests()[0];
-          return true;
+        if (thread.pendingRequests().length === 0) {
+          pendingSince = null;
+          return false;
         }
-        return false;
+        if (pendingSince == null) {
+          pendingSince = Date.now();
+          graceTimer = setTimeout(() => thread.notify(), approvalGraceMs);
+          graceTimer.unref?.();
+          return false;
+        }
+        if (Date.now() - pendingSince < approvalGraceMs) return false;
+        blockedOn = thread.pendingRequests()[0];
+        return true;
       },
       options.turnTimeoutMs ?? 0,
       "turn"
-    );
+    ).finally(() => {
+      clearInterval(heartbeat);
+      if (graceTimer) clearTimeout(graceTimer);
+    });
 
     if (blockedOn) {
       const kind = blockedOn.method ?? blockedOn.type ?? "an approval";
@@ -1827,7 +1858,7 @@ export async function runDesktopTurn(cwd, options = {}) {
         threadId,
         turnId,
         new Error(
-          `The Codex desktop app is waiting for ${kind} on thread ${threadId}. Approve or deny it in the app; the turn is still running there. Follow up with task --backend desktop --thread ${threadId}.`
+          `The Codex desktop app is waiting for ${kind} on thread ${threadId}. Approve or deny it in the app; the turn is still running there, and this job no longer tracks it (cancel will not stop it — stop it in the app). Follow up with task --backend desktop --thread ${threadId}.`
         )
       );
     }
@@ -1863,9 +1894,20 @@ export async function interruptDesktopTurn({ threadId, turnId }, options = {}) {
   if (!threadId) {
     return { attempted: false, interrupted: false, transport: "desktop", detail: "missing threadId" };
   }
-  let thread = null;
+  // No follow / snapshot here: a cancel or watchdog must not wait on a slow snapshot
+  // before the interrupt goes out. Ownership check, then the interrupt itself.
+  let client = null;
   try {
-    thread = await DesktopThread.attach(threadId, { ...options, openIfNeeded: false });
+    client = await DesktopIpcClient.connect(options);
+    const thread = new DesktopThread(client, threadId, options);
+    if (!(await thread.isOwned())) {
+      return {
+        attempted: true,
+        interrupted: false,
+        transport: "desktop",
+        detail: `Thread ${threadId} is not open in the Codex desktop app; stop it there if it is still running.`
+      };
+    }
     const result = await thread.interrupt(turnId ?? null);
     return {
       attempted: true,
@@ -1876,7 +1918,7 @@ export async function interruptDesktopTurn({ threadId, turnId }, options = {}) {
   } catch (error) {
     return { attempted: true, interrupted: false, transport: "desktop", detail: error instanceof Error ? error.message : String(error) };
   } finally {
-    thread?.close();
+    client?.close();
   }
 }
 

@@ -253,3 +253,24 @@ test("runTrackedJob installs the crash net during the run and disposes it afterw
   assert.ok(events.includes("off:unhandledRejection"), "rejection net disposed after the run");
 });
 
+
+test("installJobCrashNet routes a desktop job's interrupt to the Codex desktop app", async () => {
+  const workspace = makeTempDir();
+  const jobId = "job-crash-desktop";
+  const running = writeRunningJob(workspace, jobId);
+  appendProgressEvent(resolveStateDir(workspace), jobId, { threadId: "th-d", turnId: "tn-d" });
+
+  const interrupts = [];
+  const proc = makeFakeProc();
+  installJobCrashNet(
+    { id: jobId, workspaceRoot: workspace, cwd: workspace, backend: "desktop" },
+    running,
+    { proc, interruptOnCrash: async (_cwd, ctx) => interrupts.push(ctx) }
+  );
+
+  await proc.fire("uncaughtException", new Error("crash-mid-desktop-turn"));
+
+  // Without the backend the interrupt takes the broker path, which cannot reach a turn
+  // running in the app: the job would read failed while the turn kept going.
+  assert.deepEqual(interrupts, [{ threadId: "th-d", turnId: "tn-d", backend: "desktop" }]);
+});

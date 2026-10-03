@@ -10,6 +10,7 @@ import {
   DesktopThread,
   METHOD_VERSIONS,
   applyPatch,
+  isThreadOwnedByDesktop,
   resolveDesktopOpenEnv
 } from "../../plugins/codex/scripts/lib/desktop-ipc.mjs";
 import { interruptAppServerTurn, runDesktopTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
@@ -88,10 +89,15 @@ async function startFakeDesktop(t, options = {}) {
         return;
       case "thread-owner-discovery":
         // An unowned thread: the real router can sit on this for its 10 s discovery
-        // timeout, so say nothing at all.
+        // timeout (macOS) or answer no-client-found at once (Linux).
         if (fake.owned) answer(socket, message, { supportsUntrustedAppInput: true });
+        else if (fake.ownerSilence === false) answer(socket, message, null, "no-client-found");
         return;
       case "thread-follower-load-complete-history":
+        if (fake.failReload) {
+          answer(socket, message, null, "no-client-found: thread stream owner became unavailable");
+          return;
+        }
         snapshot();
         answer(socket, message, { revision: fake.revision });
         return;
@@ -108,21 +114,53 @@ async function startFakeDesktop(t, options = {}) {
             fake.patch([{ op: "add", path: ["requests", "-"], value: { method: "item/commandExecution/requestApproval" } }]);
             return;
           }
+          if (fake.turnScript === "hang") {
+            return; // the turn never finishes; the test takes ownership away
+          }
+          if (fake.turnScript === "transient-approval") {
+            // Pending across several updates, then settled by the app itself inside the
+            // grace period: not a reason to fail.
+            fake.patch([{ op: "add", path: ["requests", "-"], value: { method: "item/commandExecution/requestApproval" } }]);
+            setTimeout(() => fake.patch([{ op: "replace", path: ["title"], value: "still pending" }]), 20);
+            setTimeout(() => fake.patch([{ op: "replace", path: ["title"], value: "still pending 2" }]), 40);
+            setTimeout(() => {
+              fake.patch([{ op: "remove", path: ["requests", 0] }]);
+              finish();
+            }, 80);
+            return;
+          }
+          if (fake.turnScript === "bad-patch") {
+            // Our snapshot lacks this path, and nothing else follows: only an immediate
+            // resync gets the follower the finished turn (it is in the next snapshot).
+            completeInState();
+            stateBroadcast({ type: "patches", baseRevision: fake.revision, revision: fake.revision + 1, patches: [{ op: "add", path: ["nowhere", "x"], value: 1 }] });
+            return;
+          }
+          if (fake.turnScript === "gap-reload-fails") {
+            fake.failReload = true;
+            fake.patch([{ op: "replace", path: ["title"], value: "drifted" }], { baseRevision: fake.revision + 5 });
+            return;
+          }
           if (fake.turnScript === "gap") {
             // A patch whose base revision skips one: the follower must resync, not apply.
             fake.patch([{ op: "replace", path: ["title"], value: "drifted" }], { baseRevision: fake.revision + 5 });
           }
-          fake.patch([
-            {
-              op: "add",
-              path: [...entitiesPath, key, "items", "-"],
-              value: { type: "commandExecution", id: "cmd-1", command: "echo hi", status: "completed", exitCode: 0 }
-            },
-            { op: "add", path: [...entitiesPath, key, "items", "-"], value: { type: "agentMessage", id: "msg-1", text: "DESKTOP-ANSWER" } },
-            { op: "replace", path: [...entitiesPath, key, "status"], value: "completed" },
-            { op: "replace", path: ["threadRuntimeStatus"], value: { type: "idle" } }
-          ]);
+          finish();
         });
+        const completion = () => [
+          {
+            op: "add",
+            path: [...entitiesPath, key, "items", "-"],
+            value: { type: "commandExecution", id: "cmd-1", command: "echo hi", status: "completed", exitCode: 0 }
+          },
+          { op: "add", path: [...entitiesPath, key, "items", "-"], value: { type: "agentMessage", id: "msg-1", text: "DESKTOP-ANSWER" } },
+          { op: "replace", path: [...entitiesPath, key, "status"], value: "completed" },
+          { op: "replace", path: ["threadRuntimeStatus"], value: { type: "idle" } }
+        ];
+        const finish = () => fake.patch(completion());
+        const completeInState = () => {
+          for (const p of completion()) applyPatch(fake.state, p);
+        };
         return;
       }
       case "thread-follower-interrupt-turn":
@@ -149,6 +187,7 @@ async function startFakeDesktop(t, options = {}) {
     });
     socket.on("error", () => {});
     socket.on("close", () => {
+      fake.closedSockets = (fake.closedSockets ?? 0) + 1;
       sockets.delete(socket);
       followers.delete(socket);
     });
@@ -159,7 +198,23 @@ async function startFakeDesktop(t, options = {}) {
     server.close();
   });
   fake.socketPath = socketPath;
-  fake.attachOptions = { socketPath, ownerDiscoveryTimeoutMs: 100, pollMs: 10, openTimeoutMs: 2_000 };
+  fake.attachOptions = {
+    socketPath,
+    ownerDiscoveryTimeoutMs: 100,
+    pollMs: 10,
+    openTimeoutMs: 2_000,
+    // Never let a test reach the real `open` / `xdg-open` and pop a thread in the user's app.
+    openThread: async () => {
+      throw new Error("test tried to open a real Codex desktop thread");
+    }
+  };
+  fake.until = async (predicate, timeoutMs = 2_000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error("fake desktop: condition not reached");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  };
   return fake;
 }
 
@@ -247,11 +302,13 @@ test("a turn blocked on an approval fails fast and leaves the turn running in th
   const result = await runDesktopTurn("/ws", {
     resumeThreadId: fake.threadId,
     prompt: "needs approval",
+    approvalGraceMs: 50,
     desktopDeps: { attachOptions: fake.attachOptions }
   });
   assert.equal(result.status, 1);
   assert.match(result.finalMessage, /waiting for item\/commandExecution\/requestApproval/);
   assert.match(result.finalMessage, /--thread 01a10058/);
+  assert.match(result.finalMessage, /cancel will not stop it/);
   assert.equal(fake.requests("thread-follower-interrupt-turn").length, 0, "the user approves in the app; we must not kill the turn");
 });
 
@@ -352,4 +409,117 @@ test("backend routing: cli stays cli, desktop needs the app, auto follows thread
     "a new task with no backend named keeps today's CLI path"
   );
   await assert.rejects(resolveTaskBackend("gui", null), /Unknown --backend gui/);
+});
+
+test("an approval the app settles within the grace period does not fail the run", async (t) => {
+  const fake = await startFakeDesktop(t, { turnScript: "transient-approval" });
+  const result = await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "x",
+    approvalGraceMs: 200,
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  assert.equal(result.status, 0, result.finalMessage);
+  assert.equal(result.finalMessage, "DESKTOP-ANSWER");
+});
+
+test("a patch our snapshot cannot take is resynced instead of crashing the worker", async (t) => {
+  const fake = await startFakeDesktop(t, { turnScript: "bad-patch" });
+  const result = await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "x",
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  assert.equal(result.finalMessage, "DESKTOP-ANSWER");
+  assert.ok(fake.requests("thread-follower-load-complete-history").length >= 2, "expected a reload after the unappliable patch");
+});
+
+test("a resync the app refuses fails the turn now, not at the job's hard timeout", async (t) => {
+  const fake = await startFakeDesktop(t, { turnScript: "gap-reload-fails" });
+  await assert.rejects(
+    runDesktopTurn("/ws", { resumeThreadId: fake.threadId, prompt: "x", turnTimeoutMs: 5_000, desktopDeps: { attachOptions: fake.attachOptions } }),
+    (error) => error.code === "RESYNC_FAILED"
+  );
+});
+
+test("losing the thread's owner mid-turn fails the run instead of waiting forever", async (t) => {
+  const fake = await startFakeDesktop(t, { turnScript: "hang" });
+  const run = runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "x",
+    ownerHeartbeatMs: 20,
+    turnTimeoutMs: 5_000,
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  setTimeout(() => {
+    fake.owned = false; // the user closed the thread's window
+    fake.ownerSilence = false; // and the router says so
+  }, 50);
+  await assert.rejects(run, /no longer has thread .* open/);
+});
+
+test("a busy app that is slow to answer ownership checks does not fail a healthy turn", async (t) => {
+  const fake = await startFakeDesktop(t, { turnScript: "hang" });
+  const run = runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "x",
+    ownerHeartbeatMs: 20,
+    desktopDeps: { attachOptions: { ...fake.attachOptions, ownerDiscoveryTimeoutMs: 10 } }
+  });
+  await fake.until(() => fake.requests("thread-follower-start-turn").length === 1 && fake.revision >= 2);
+  fake.owned = false; // silent, not "no-client-found": inconclusive
+  let settled = false;
+  run.then(() => (settled = true), () => (settled = true));
+  await new Promise((resolve) => setTimeout(resolve, 70)); // ~3 heartbeats, under the silence limit
+  assert.equal(settled, false, "silence alone must not fail the run this early");
+  fake.owned = true; // the app answers again and finishes the turn
+  fake.patch([
+    { op: "add", path: ["turnHistory", "history", "entitiesByKey", "tail:turn-1", "items", "-"], value: { type: "agentMessage", id: "m", text: "LATE" } },
+    { op: "replace", path: ["turnHistory", "history", "entitiesByKey", "tail:turn-1", "status"], value: "completed" }
+  ]);
+  const result = await run;
+  assert.equal(result.finalMessage, "LATE");
+});
+
+test("a router that rejects initialize leaves no socket open behind", async (t) => {
+  const fake = await startFakeDesktop(t, { mismatch: ["initialize"] });
+  await assert.rejects(DesktopIpcClient.connect({ socketPath: fake.socketPath }), (error) => error.code === "VERSION_MISMATCH");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(fake.closedSockets, 1, "the failed client must close its socket or the companion never exits");
+});
+
+test("following is switched off when the follower closes", async (t) => {
+  const fake = await startFakeDesktop(t);
+  const thread = await DesktopThread.attach(fake.threadId, fake.attachOptions);
+  thread.close();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(
+    fake.broadcasts("thread-stream-following-changed").map((m) => m.params.following),
+    [true, false]
+  );
+});
+
+test("auto routing never touches the IPC socket on an unsupported platform", async (t) => {
+  const fake = await startFakeDesktop(t); // owns the thread: any connection would say yes
+  assert.equal(await isThreadOwnedByDesktop(fake.threadId, { platform: "darwin", socketPath: fake.socketPath }), true);
+  const before = fake.wire.length;
+  assert.equal(await isThreadOwnedByDesktop(fake.threadId, { platform: "win32", socketPath: fake.socketPath }), false);
+  assert.equal(fake.wire.length, before, "no message may reach the socket on win32");
+});
+
+test("xdg-open borrows the Codex app's own display over another process's", () => {
+  const procDir = makeTempDir("fake-proc-");
+  const uid = process.getuid();
+  const proc = (pid, environ, cmdline) => {
+    fs.mkdirSync(path.join(procDir, pid));
+    fs.writeFileSync(path.join(procDir, pid, "environ"), environ);
+    fs.writeFileSync(path.join(procDir, pid, "cmdline"), cmdline);
+  };
+  // The harness even looks more like a desktop session (it has XDG_CURRENT_DESKTOP);
+  // the app's own process still wins.
+  proc("150", "DISPLAY=:99\0XDG_CURRENT_DESKTOP=harness\0", "Xvfb-harness\0");
+  proc("250", "DISPLAY=:1\0XAUTHORITY=/x\0", "/usr/lib/chatgpt/ChatGPT\0");
+  const env = resolveDesktopOpenEnv({}, { procDir, uid });
+  assert.equal(env.DISPLAY, ":1");
+  assert.equal(env.XAUTHORITY, "/x");
 });

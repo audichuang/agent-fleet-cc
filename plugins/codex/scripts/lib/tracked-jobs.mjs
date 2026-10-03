@@ -296,7 +296,9 @@ export function installJobCrashNet(job, runningRecord, options = {}) {
       let timer = null;
       try {
         await Promise.race([
-          Promise.resolve(interrupt(job.cwd ?? job.workspaceRoot, { threadId, turnId })),
+          Promise.resolve(
+            interrupt(job.cwd ?? job.workspaceRoot, { threadId, turnId, ...(job.backend ? { backend: job.backend } : {}) })
+          ),
           new Promise((resolve) => {
             timer = setTimeout(resolve, interruptTimeoutMs);
             timer?.unref?.();

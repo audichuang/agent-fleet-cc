@@ -102,9 +102,16 @@ export class DesktopIpcClient {
       throw new DesktopIpcError(`Codex desktop app is not reachable at ${target} (${error.code ?? error.message}).`, "UNAVAILABLE");
     });
     const client = new DesktopIpcClient(socket);
-    const response = await client.request("initialize", { clientType });
-    client.clientId = response.result?.clientId ?? client.clientId;
-    return client;
+    try {
+      const response = await client.call("initialize", { clientType }, { timeoutMs: 5_000 });
+      client.clientId = response.result?.clientId ?? client.clientId;
+      return client;
+    } catch (error) {
+      // A wedged router accepts the socket but never answers; a ref'd socket left open
+      // here would keep the whole companion process alive.
+      client.close();
+      throw error;
+    }
   }
 
   handleData(chunk) {
@@ -143,7 +150,12 @@ export class DesktopIpcClient {
       }
       case "broadcast":
         for (const handler of this.broadcastHandlers) {
-          handler(message);
+          try {
+            handler(message);
+          } catch {
+            // A handler bug must not become an uncaughtException inside the socket's
+            // data event; DesktopThread handles its own failures.
+          }
         }
         return;
       // The router asks every client whether it can serve other clients' requests.
@@ -270,7 +282,11 @@ export function applyPatch(document, patch) {
 }
 
 // Over SSH a Linux shell has no DISPLAY; xdg-open then cannot reach the running app.
-// Borrow the graphical session's variables from one of this user's own processes.
+// Borrow the graphical session's variables from one of this user's own processes,
+// preferring the Codex desktop app itself (an Xvfb harness or a stale tmux server can
+// carry a DISPLAY the app is not on).
+const BORROWED_DESKTOP_VARS = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "XDG_CURRENT_DESKTOP"];
+
 export function resolveDesktopOpenEnv(env = process.env, { procDir = "/proc", uid = process.getuid?.() } = {}) {
   const result = { ...env };
   if (!result.DISPLAY && !result.WAYLAND_DISPLAY) {
@@ -280,22 +296,37 @@ export function resolveDesktopOpenEnv(env = process.env, { procDir = "/proc", ui
     } catch {
       entries = [];
     }
+    let fallback = null;
+    let preferred = null;
     for (const pid of entries) {
       let environ;
+      let cmdline = "";
       try {
         if (uid != null && fs.statSync(path.join(procDir, pid)).uid !== uid) continue;
         environ = fs.readFileSync(path.join(procDir, pid, "environ"), "utf8");
+        try {
+          cmdline = fs.readFileSync(path.join(procDir, pid, "cmdline"), "utf8");
+        } catch {
+          cmdline = "";
+        }
       } catch {
         continue;
       }
       const vars = Object.fromEntries(
         environ.split("\0").filter((kv) => kv.includes("=")).map((kv) => [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)])
       );
-      if (vars.DISPLAY || vars.WAYLAND_DISPLAY) {
-        for (const key of ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR"]) {
-          if (vars[key]) result[key] = vars[key];
-        }
+      if (!vars.DISPLAY && !vars.WAYLAND_DISPLAY) continue;
+      if (/chatgpt/i.test(cmdline.split("\0")[0] ?? "")) {
+        preferred = vars;
         break;
+      }
+      // A desktop shell's environment is the next best thing to the app's own.
+      if (!fallback || (!fallback.XDG_CURRENT_DESKTOP && vars.XDG_CURRENT_DESKTOP)) fallback = vars;
+    }
+    const chosen = preferred ?? fallback;
+    if (chosen) {
+      for (const key of BORROWED_DESKTOP_VARS) {
+        if (chosen[key]) result[key] = chosen[key];
       }
     }
   }
@@ -305,6 +336,10 @@ export function resolveDesktopOpenEnv(env = process.env, { procDir = "/proc", ui
   return result;
 }
 
+// xdg-open can block when it launches the app instead of handing the link to a running
+// one; past this, treat it as launched and let the ownership poll decide.
+const OPEN_COMMAND_TIMEOUT_MS = 10_000;
+
 export function openDesktopThread(threadId, { platform = process.platform, env = process.env, spawnImpl = spawn } = {}) {
   const url = `codex://threads/${encodeURIComponent(threadId)}`;
   const [command, childEnv] =
@@ -313,11 +348,20 @@ export function openDesktopThread(threadId, { platform = process.platform, env =
     throw new DesktopIpcError(`Opening a Codex desktop thread is not supported on ${platform}.`, "UNSUPPORTED");
   }
   return new Promise((resolve, reject) => {
-    const child = spawnImpl(command, [url], { env: childEnv, stdio: "ignore" });
-    child.once("error", (error) => reject(new DesktopIpcError(`${command} ${url} failed: ${error.message}`, "OPEN_FAILED")));
-    child.once("exit", (code) =>
-      code === 0 ? resolve() : reject(new DesktopIpcError(`${command} ${url} exited with ${code}.`, "OPEN_FAILED"))
-    );
+    const child = spawnImpl(command, [url], { env: childEnv, stdio: "ignore", detached: true });
+    const timer = setTimeout(() => {
+      child.unref?.();
+      resolve();
+    }, OPEN_COMMAND_TIMEOUT_MS);
+    timer.unref?.();
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(new DesktopIpcError(`${command} ${url} failed: ${error.message}`, "OPEN_FAILED"));
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      code === 0 ? resolve() : reject(new DesktopIpcError(`${command} ${url} exited with ${code}.`, "OPEN_FAILED"));
+    });
   });
 }
 
@@ -386,15 +430,21 @@ export class DesktopThread {
   }
 
   async isOwned() {
+    return (await this.ownership()) === "owned";
+  }
+
+  // "owned", "not-owned" (the router said no-client-found), or "unknown" (no answer in
+  // time — on macOS that is also how an unloaded thread looks, but so is a busy app).
+  async ownership() {
     try {
       const response = await this.client.request(
         "thread-owner-discovery",
         { hostId: "local", conversationId: this.threadId },
         { timeoutMs: this.ownerDiscoveryTimeoutMs }
       );
-      return response.resultType === "success";
+      return response.resultType === "success" ? "owned" : "not-owned";
     } catch (error) {
-      if (error.code === "TIMEOUT") return false;
+      if (error.code === "TIMEOUT") return "unknown";
       throw error;
     }
   }
@@ -416,16 +466,40 @@ export class DesktopThread {
       } else if (change.type === "patches" && this.state != null) {
         if (change.baseRevision !== this.revision) {
           // We missed an update; ask for a fresh snapshot rather than apply onto drift.
-          this.state = null;
-          this.client.call("thread-follower-load-complete-history", { conversationId: this.threadId }).catch(() => {});
+          this.resync();
         } else {
-          for (const patch of change.patches ?? []) {
-            this.state = applyPatch(this.state, patch);
+          try {
+            for (const patch of change.patches ?? []) {
+              this.state = applyPatch(this.state, patch);
+            }
+            this.revision = change.revision;
+          } catch {
+            // Our copy drifted from the app's (a path the snapshot lacks). Discard the
+            // half-patched state and take a fresh snapshot instead of dying in the
+            // socket's data event.
+            this.resync();
           }
-          this.revision = change.revision;
         }
       }
     }
+    this.notify();
+  }
+
+  resync() {
+    this.state = null;
+    this.client.call("thread-follower-load-complete-history", { conversationId: this.threadId }).catch((error) => {
+      // With no snapshot coming, every later patch is dropped and a waiter would sit
+      // until the job's hard timeout. Fail it now instead.
+      this.fail(new DesktopIpcError(`Lost sync with the Codex desktop app and could not reload the thread: ${error.message}`, "RESYNC_FAILED"));
+    });
+  }
+
+  fail(error) {
+    if (!this.disconnect) this.disconnect = error;
+    this.notify();
+  }
+
+  notify() {
     for (const waiter of this.waiters) {
       waiter();
     }
@@ -513,6 +587,13 @@ export class DesktopThread {
 
   close() {
     this.unsubscribe?.();
+    try {
+      if (!this.client.closed) {
+        this.client.broadcast("thread-stream-following-changed", { conversationId: this.threadId, hostId: "local", following: false });
+      }
+    } catch {
+      // Best effort: the owner also drops followers whose socket closed.
+    }
     this.client.close();
   }
 }
@@ -537,7 +618,7 @@ export async function probeDesktop({ env = process.env, platform = process.platf
 
 // Does the desktop app currently own (have loaded) this thread? Never opens anything.
 export async function isThreadOwnedByDesktop(threadId, options = {}) {
-  if (!threadId) return false;
+  if (!threadId || !isDesktopSupportedPlatform(options.platform)) return false;
   let client = null;
   try {
     client = await DesktopIpcClient.connect(options);

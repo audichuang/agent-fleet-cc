@@ -11,7 +11,7 @@ the turn runs inside the user's Codex desktop app instead (ChatGPT.app on macOS,
 | The user wants… | Run |
 | --- | --- |
 | Codex to operate the screen (computer use), use the app's browser, or a run they can watch in the app | `task --backend desktop "<prompt>"` |
-| A follow-up on a thread they have open in the app | `task --thread <id> "<prompt>"` (auto routes it to the app) |
+| A follow-up in a conversation they have in the app (a `codex://threads/<id>` link) | `task --backend desktop --thread <id> "<prompt>"` — without `--backend desktop`, auto sends it to the app only while the app has the thread loaded |
 | A follow-up on the last companion task, which is now open in the app | `task --resume-last "<prompt>"` (auto routes it) |
 | A review, or anything else | the CLI default; review verbs have no desktop backend |
 
@@ -41,7 +41,8 @@ companion's `Thread ready` (CLI) or `Attaching to thread` (desktop) progress lin
 
 | Message contains | Meaning | Next step |
 | --- | --- | --- |
-| `is waiting for … on thread` | The turn stopped on an approval in the app. It is still running there. | The user approves or denies it in the app, then a follow-up with `--thread <id>` if more is needed. |
+| `is waiting for … on thread` | The turn stopped on an approval in the app. It is still running there, and the job no longer tracks it: `cancel` will not stop it. | The user approves or denies it (or stops it) in the app, then a follow-up with `--thread <id>` if more is needed. |
+| `no longer has thread … open` | The user closed the thread in the app mid-turn. The outcome is unknown. | Ask the user to check the thread in the app. |
 | `not reachable` / `not running` | The app is closed, or this OS has no app socket. | Ask the user to open the Codex desktop app, or run on the CLI with `--backend cli`. |
 | `version mismatch` | The installed app speaks a different IPC version than this plugin. | Use `--backend cli` and report it; the plugin needs an update for that app build. |
 | `did not load thread` | The app never took the thread, usually because a CLI process still holds it. | Wait for that run to end, then retry. |
@@ -55,5 +56,7 @@ the app for what only the app can do.
 - macOS and Linux only. Windows uses a named pipe and is not supported.
 - The IPC protocol is private to the desktop app. It can change with an app update; a change
   surfaces as the version-mismatch failure above, not as a wrong answer.
+- `--write` changes nothing on either backend: CLI threads already run with full access in this
+  plugin, and a desktop turn uses the app thread's own permissions.
 - Anything running as the user can talk to that socket. A desktop turn runs with the thread's
   own permissions in the app, which for most app threads means full access.

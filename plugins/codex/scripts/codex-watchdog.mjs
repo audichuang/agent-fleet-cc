@@ -132,7 +132,11 @@ export async function gatherObservation(cwd, jobId, deps, config) {
 }
 
 export async function terminateHungJob(cwd, jobId, observation, deps, verdict) {
-  const resumeHint = observation.threadId ? ` Resume with: codex resume ${observation.threadId}` : "";
+  const resumeHint = !observation.threadId
+    ? ""
+    : observation.backend === "desktop"
+      ? ` The turn may still be running in the Codex desktop app; follow up with task --backend desktop --thread ${observation.threadId}.`
+      : ` Resume with: codex resume ${observation.threadId}`;
   let reason;
   if (verdict === "DEAD") {
     reason = `Watchdog: worker process ${observation.pid ?? "?"} is no longer running but the job never reported a terminal status. Marked failed.`;
