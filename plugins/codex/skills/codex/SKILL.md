@@ -27,9 +27,9 @@ Before every `task`, you decide the backend. The user rarely says "computer use"
 - **Files and a terminal → leave `--backend` unset.** The work is code, commands or text, including work *about* a UI or a page: fix a component, write a Playwright or E2E test, fetch a URL or an API, run headless tests. A fix, diagnosis or implementation stays on the CLI even while the app is running.
 - **The user asks for the app → `--backend desktop`.** They want to watch the run there, or they name their conversation in the app.
 
-Torn between the first two? Ask whether a terminal alone could finish the job. If it could, it is the CLI.
+Torn between the first two? If a terminal alone could finish the job, it is the CLI.
 
-Passing `--backend desktop` is the whole decision. The companion creates the thread, opens it in the app where the user sees it, and tracks the turn to its end; checking the app first or adding flags is its job, not yours. In the prompt, name what Codex should operate and what to report back (what it saw, a screenshot). Two flags have their own triggers:
+Passing `--backend desktop` is the whole decision. The companion creates the thread, opens it in the app where the user sees it, and tracks the turn to its end; checking the app first is its job, not yours. In the prompt, name what Codex should operate and what to report back (what it saw, a screenshot). Two flags have their own triggers:
 
 - `--new-thread-via app` when the user wants the chat created by the app itself (it presses Enter in the app's window).
 - `--thread <id>` continues one named thread. Without `--backend` it goes to the app only if the app has that thread loaded right now; otherwise the CLI continues it. So when the user means their conversation *in the app* (a `codex://threads/<id>` link, "my Codex desktop chat"), pass `--backend desktop` too.
