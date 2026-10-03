@@ -51,7 +51,8 @@ the app has — computer use, its browser — and the user can watch it there.
 - Messages name the companion verb (`status`, `cancel <id>`, `setup`) instead of the `/codex:*`
   slash commands removed in 1.6.4. A test keeps them out of `scripts/`.
 - `<verb> --help` (or `-h`) prints usage, judged with that verb's own options: a value an option
-  takes, a token after `--`, and `--help` inside a quoted prompt stay data. It used to be taken as
+  takes, a token after `--`, and `--help` after prompt text in a quoted string stay data;
+  `task "--fresh --help"` is still a help request. It used to be taken as
   focus text or a prompt, so `adversarial-review --help` launched a real review about "--help".
 - New reference: `skills/codex/references/desktop-backend.md`.
 

@@ -191,10 +191,11 @@ function parseCommandInput(argv, config = {}) {
   });
   // Judged with this verb's own options and aliases: a value an option consumes, or a
   // token after `--`, is data. `adversarial-review --help` used to launch a real review.
-  // A single argument is a raw string normalizeArgv split, i.e. a quoted prompt, so
-  // only a bare `--help` / `-h` there counts.
-  const fromQuotedPrompt = argv.length === 1 && !["--help", "-h"].includes(argv[0].trim());
-  if (parsed.helpRequested && !fromQuotedPrompt) {
+  // A single argument is one raw string normalizeArgv split: options and prompt text
+  // together. There `--help` counts only before any prompt text ("--fresh --help"),
+  // so "why does foo --help crash" stays a prompt.
+  const fromRawString = argv.length === 1;
+  if (parsed.helpRequested && (!fromRawString || parsed.helpBeforeText)) {
     throw new HelpRequested();
   }
   return parsed;

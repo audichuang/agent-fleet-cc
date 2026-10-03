@@ -46,3 +46,14 @@ test("task -C --help names a cwd, not a help request", () => {
   const result = spawnSync(process.execPath, [SCRIPT, "task", "-C", "--help", "--fresh", "hello"], { encoding: "utf8", env: { ...process.env, PATH: "" } });
   assert.doesNotMatch(result.stdout, /^Usage:/);
 });
+
+// One raw string carries options and prompt together (normalizeArgv splits it).
+// Review finding: these used to start a turn / enable the review gate.
+for (const raw of ["--fresh --help", "--enable-review-gate --help"]) {
+  const verb = raw.startsWith("--enable") ? "setup" : "task";
+  test(`${verb} "${raw}" prints usage and changes nothing`, () => {
+    const result = spawnSync(process.execPath, [SCRIPT, verb, raw], { encoding: "utf8", env: { ...process.env, PATH: "" } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^Usage:/);
+  });
+}
