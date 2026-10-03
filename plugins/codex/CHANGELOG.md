@@ -49,6 +49,8 @@ the app has — computer use, its browser — and the user can watch it there.
   (`TurnError.misalignment.detailedExplanation`).
 - Messages name the companion verb (`status`, `cancel <id>`, `setup`) instead of the `/codex:*`
   slash commands removed in 1.6.4. A test keeps them out of `scripts/`.
+- `<verb> --help` (or `-h`) prints usage. It used to be taken as focus text or a prompt, so
+  `adversarial-review --help` launched a real review about "--help".
 - New reference: `skills/codex/references/desktop-backend.md`.
 
 ## 1.6.4

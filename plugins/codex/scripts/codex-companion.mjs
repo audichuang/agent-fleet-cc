@@ -1639,6 +1639,12 @@ async function main() {
     printUsage();
     return;
   }
+  // A standalone --help after a verb is a help request, never focus text or a prompt:
+  // `adversarial-review --help` used to launch a real review about "--help".
+  if (subcommand !== "task-worker" && argv.some((arg) => arg === "--help" || arg === "-h")) {
+    printUsage();
+    return;
+  }
 
   switch (subcommand) {
     case "setup":
