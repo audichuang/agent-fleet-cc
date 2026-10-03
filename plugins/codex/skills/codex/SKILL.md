@@ -21,12 +21,20 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" <verb> ...
 
 ## CLI or the Codex desktop app
 
-`task` runs on the Codex CLI unless the work belongs in the user's Codex desktop app (macOS or Linux):
+Before every `task`, you decide the backend. The user rarely says "computer use", so judge the work itself: **does Codex need hands on a live screen?** Only the Codex desktop app (macOS or Linux) has computer use and a browser wired in; the CLI has files and a terminal.
 
-- `--backend desktop` when the user wants it done in the app: computer use, its browser, or a run they want to watch there. The thread opens in the app, which the user sees. Add `--new-thread-via app` when they want the chat created by the app itself (it presses Enter in the app's window).
+- **Live screen → `--backend desktop`.** Codex must click, type or scroll in a GUI app or a web page, log in and act on a site, fill a form, click through a UI to reproduce or check a bug, read what a page shows once rendered, or screenshot an app.
+- **Files and a terminal → leave `--backend` unset.** The work is code, commands or text, including work *about* a UI or a page: fix a component, write a Playwright or E2E test, fetch a URL or an API, run headless tests. A fix, diagnosis or implementation stays on the CLI even while the app is running.
+- **The user asks for the app → `--backend desktop`.** They want to watch the run there, or they name their conversation in the app.
+
+Torn between the first two? Ask whether a terminal alone could finish the job. If it could, it is the CLI.
+
+Passing `--backend desktop` is the whole decision. The companion creates the thread, opens it in the app where the user sees it, and tracks the turn to its end; checking the app first or adding flags is its job, not yours. In the prompt, name what Codex should operate and what to report back (what it saw, a screenshot). Two flags have their own triggers:
+
+- `--new-thread-via app` when the user wants the chat created by the app itself (it presses Enter in the app's window).
 - `--thread <id>` continues one named thread. Without `--backend` it goes to the app only if the app has that thread loaded right now; otherwise the CLI continues it. So when the user means their conversation *in the app* (a `codex://threads/<id>` link, "my Codex desktop chat"), pass `--backend desktop` too.
-- A plain task (fix, diagnose, implement) stays on the CLI. Do not add `--backend desktop` because the app happens to be running.
-- A desktop run that stops on an approval fails with that reason; the turn is still waiting in the app. Tell the user to approve it there.
+
+A desktop run that stops on an approval fails with that reason; the turn is still waiting in the app. Tell the user to approve it there.
 
 `status`, `wait`, `logs`, `result` and `cancel` work the same for either backend. Routing, failures and limits: the `desktop-backend.md` row below.
 

@@ -10,7 +10,7 @@ the turn runs inside the user's Codex desktop app instead (ChatGPT.app on macOS,
 
 | The user wants… | Run |
 | --- | --- |
-| Codex to operate the screen (computer use), use the app's browser, or a run they can watch in the app | `task --backend desktop "<prompt>"` |
+| Work that needs hands on a live screen (the test in `SKILL.md`), or a run they can watch in the app | `task --backend desktop "<prompt>"` |
 | A follow-up in a conversation they have in the app (a `codex://threads/<id>` link) | `task --backend desktop --thread <id> "<prompt>"` — without `--backend desktop`, auto sends it to the app only while the app has the thread loaded |
 | A follow-up on the last companion task, which is now open in the app | `task --resume-last "<prompt>"` (auto routes it) |
 | A review, or anything else | the CLI default; review verbs have no desktop backend |

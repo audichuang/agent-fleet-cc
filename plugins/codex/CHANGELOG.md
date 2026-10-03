@@ -26,6 +26,11 @@ the app has — computer use, its browser — and the user can watch it there.
   in that project, the companion presses Enter in the app's window (System Events on macOS,
   `xdotool` on Linux), and finds the thread by its first message. The thread is app-native,
   with no extra turn, but the run takes window focus.
+- The skill has the agent pick the backend from the work itself, since users rarely say
+  "computer use": a task that needs hands on a live screen (drive a GUI app, act on a web page,
+  click through a UI, screenshot it) gets `--backend desktop`; work done with files and a
+  terminal, even about a UI, stays on the CLI. `codex-rescue` applies the same test and passes a
+  user-typed `--backend` / `--thread` / `--new-thread-via` through as flags, not task text.
 - `setup` reports whether the desktop app is reachable.
 - New reference: `skills/codex/references/desktop-backend.md`.
 

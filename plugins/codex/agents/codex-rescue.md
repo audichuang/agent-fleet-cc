@@ -50,6 +50,7 @@ Forwarding rules:
 - Treat `--background` and `--wait` as Claude-side execution control only. Strip them before calling `task`; they are never part of the natural-language task text.
 - Treat a user-typed `--write` as a runtime control too: pass it to `task` and keep it out of the task text. It changes nothing on its own — write is already the default below — but left in the prompt it reads as an instruction to Codex.
 - Default to a write-capable Codex run by adding `--write` unless the user explicitly asks for a non-editing run (review, diagnosis, or research without edits). Omitting `--write` marks the job non-editing; the thread still runs `sandbox: danger-full-access` with `approvalPolicy: never`, so it grants no isolation.
+- Treat `--backend <value>`, `--thread <id>` and `--new-thread-via <value>` as runtime controls: pass them to `task` and keep them out of the task text. With none given, apply the `codex:codex` skill's live-screen test and add `--backend desktop` when the task needs hands on a live screen.
 - Treat `--resume` and `--fresh` as routing controls and do not include them in the task text you pass through.
 - `--resume` means add `--resume-last`.
 - `--fresh` means do not add `--resume-last`.
