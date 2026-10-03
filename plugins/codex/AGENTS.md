@@ -56,6 +56,10 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   走共用 broker 的話 broker 的 app-server 會一直握著 thread 的單一寫入鎖,app 開不了它。
 - **thread 一次只有一個 writer。** app 開著的 thread,CLI `thread/resume` 回 `already has an active writer`
   —— 這不是 bug,是 `--backend auto` 把這種 follow-up 送去 app 的理由。
+- **`--new-thread-via app` 只按一次 Enter,別加重按。** App 開新對話要幾秒(忙時實測 3.3 s),所以是等
+  `NEW_CHAT_SETTLE_MS` 後按一次。看似加個「沒出現 thread 就再按」就好,但沒有任何訊號能判斷第一下有沒有送出
+  (送進既有對話只會 append 到既有 rollout),盲按會把使用者移過去的草稿送出;三輪 review 證實。找不到 thread
+  時結果是「未知」,訊息只叫人先看 App,不建議重跑。
 - **未被載入的 thread,owner discovery 在 macOS 可能等滿 router 的 10 s 才回否定**(Linux 立即回)。
   `OWNER_DISCOVERY_TIMEOUT_MS`(2 s)把沉默當「未載入」;別拿掉,不然每次開 thread 白等 20 s。
 - **IPC 的 method 版本是對某一版 app 的契約。** 改 `METHOD_VERSIONS` 前先從已安裝 app 的 `app.asar` 撈版本表

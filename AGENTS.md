@@ -86,7 +86,9 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   the second one.** Review-driven fixes keep introducing fresh defects: a wrong bucket, a doubled
   error string, an unref'd timer that left the job `running` forever. imagine 0.1.0 took four
   rounds; 2–4 each found a defect the previous fix introduced, round 4's inside the test round 3
-  added. Rounds cost real quota — agree a fifth with the user instead of looping.
+  added. Rounds cost real quota — agree a fifth with the user instead of looping. When a round
+  finds a hole in the previous fix itself, drop to a simpler design rather than patch the patch:
+  codex 1.7.0's Enter retry failed three rounds and ended as one Enter after a longer wait.
 - **Don't touch the worktree while a review runs against this repo.** A reviewer worth having
   mutates the source to check a test actually bites, then restores it — and that `git restore`
   reverts your uncommitted edits too.
