@@ -136,4 +136,5 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   `docs/codex-protocol-sync-audit.md` · `docs/grok-cli-contract-audit.md` ·
   `docs/antigravity-cli-contract-audit.md` · imagine has two, one per engine it renders on:
   `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`
-  (`cc` alone has none — its engine is Claude Code itself).
+  (`cc` alone has none — its engine is Claude Code itself). codex's desktop backend has its own:
+  `docs/codex-desktop-ipc-audit.md` (the Codex desktop app's private IPC router).

@@ -33,7 +33,8 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   → 套 JSON patch → `thread-follower-start-turn` / `interrupt-turn`。`lib/codex.mjs` 的 `runDesktopTurn` 回傳
   與 `runAppServerTurn` **同形**的結果,render/status/result 因此不分後端。`task --backend auto|cli|desktop`、
   `--thread <id>`;job 記錄帶 `backend: "desktop"`,cancel / hard timeout / watchdog 讀它改走 IPC 中斷、
-  **永不 reap broker**。macOS + Linux;Windows(named pipe)不支援。使用者文件在 `skills/codex/references/desktop-backend.md`。
+  **永不 reap broker**。macOS + Linux;Windows(named pipe)不支援。使用者文件在 `skills/codex/references/desktop-backend.md`;
+  協定契約、實測證據與 app 更新後的重驗步驟在 `docs/codex-desktop-ipc-audit.md`,為何這樣設計在 `docs/adr/0004`。
 - `scripts/lib/worktree-guard.mjs` — **條件式** expected-triplet 驗證(給齊 expected-worktree /
   branch / base 才 assert;現行 handoff/rescue/execute-plan 沒帶 → 實質 no-op)。
 
