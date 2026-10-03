@@ -219,6 +219,7 @@ export function renderSetupReport(report) {
     `- model: ${describeModelStatus(report.model)}`,
     `- session runtime: ${report.sessionRuntime.label}`,
     `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
+    ...(report.desktop ? [`- desktop app: ${report.desktop.detail}`] : []),
     ""
   ];
 

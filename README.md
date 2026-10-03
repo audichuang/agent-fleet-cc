@@ -4,7 +4,7 @@ Five Claude Code plugins, one marketplace:
 
 | Plugin | Commands | What it delegates to |
 |---|---|---|
-| `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server) |
+| `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server, or the Codex desktop app over IPC) |
 | `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
 | `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
 | `grok` | `/grok:*` (task, status, wait, logs, result, cancel, setup) | xAI Grok Build (`grok`), headless — default model grok-4.5; auth via `grok login` or `XAI_API_KEY` |

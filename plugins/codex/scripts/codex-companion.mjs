@@ -21,8 +21,10 @@ import {
     parseStructuredOutput,
     readOutputSchema,
     runAppServerReview,
-    runAppServerTurn
+    runAppServerTurn,
+    runDesktopTurn
   } from "./lib/codex.mjs";
+import { isThreadOwnedByDesktop, probeDesktop } from "./lib/desktop-ipc.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
 import { binaryAvailable, isProcessAlive, terminateProcessTree } from "./lib/process.mjs";
@@ -111,7 +113,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [--prompt-file <path> | prompt]",
+      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [--prompt-file <path> | prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
       "  node scripts/codex-companion.mjs logs [job-id]",
@@ -265,6 +267,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const authStatus = await getCodexAuthStatus(cwd);
   const config = getConfig(workspaceRoot);
   const modelStatus = await resolveDefaultModelSupport(cwd, resolveDefaultModel(), codexStatus, authStatus);
+  const desktopStatus = await probeDesktop();
 
   const nextSteps = [];
   if (!codexStatus.available) {
@@ -297,6 +300,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     model: modelStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
     reviewGateEnabled: Boolean(config.stopReviewGate),
+    desktop: desktopStatus,
     actionsTaken,
     nextSteps
   };
@@ -631,8 +635,8 @@ async function executeTaskRun(request) {
     resumeLast: request.resumeLast
   });
 
-  let resumeThreadId = null;
-  if (request.resumeLast) {
+  let resumeThreadId = request.threadId ?? null;
+  if (!resumeThreadId && request.resumeLast) {
     const latestThread = await resolveLatestTrackedTaskThread(workspaceRoot, {
       excludeJobId: request.jobId
     });
@@ -646,7 +650,8 @@ async function executeTaskRun(request) {
     throw new Error("Provide a prompt, a prompt file, piped stdin, or use --resume-last.");
   }
 
-  const result = await runAppServerTurn(workspaceRoot, {
+  const runTurn = request.backend === "desktop" ? runDesktopTurn : runAppServerTurn;
+  const result = await runTurn(workspaceRoot, {
     resumeThreadId,
     prompt: request.prompt,
     defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
@@ -684,6 +689,7 @@ async function executeTaskRun(request) {
   const payload = {
     status: result.status,
     threadId: result.threadId,
+    ...(request.backend === "desktop" ? { backend: "desktop" } : {}),
     rawOutput,
     touchedFiles: result.touchedFiles,
     reasoningSummary: result.reasoningSummary,
@@ -775,8 +781,8 @@ function createTrackedProgress(job, options = {}) {
   };
 }
 
-function buildTaskJob(workspaceRoot, taskMetadata, write) {
-  return createCompanionJob({
+function buildTaskJob(workspaceRoot, taskMetadata, write, backend = "cli") {
+  const job = createCompanionJob({
     prefix: "task",
     kind: "task",
     title: taskMetadata.title,
@@ -785,9 +791,12 @@ function buildTaskJob(workspaceRoot, taskMetadata, write) {
     summary: taskMetadata.summary,
     write
   });
+  // Cancel, the watchdog and the hard timeout read this to stop a desktop turn in the
+  // app instead of on the broker.
+  return backend === "desktop" ? { ...job, backend } : job;
 }
 
-function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId, expected }) {
+function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId, expected, backend = "cli", threadId = null }) {
   return {
     cwd,
     model,
@@ -796,8 +805,34 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
     write,
     resumeLast,
     jobId,
+    backend,
+    ...(threadId && { threadId }),
     ...(expected != null && { expected })
   };
+}
+
+const TASK_BACKENDS = new Set(["auto", "cli", "desktop"]);
+const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// auto keeps today's behaviour (the CLI) unless the target thread is already open in
+// the Codex desktop app — there the CLI cannot resume it anyway (the app holds the
+// thread's single-writer lock), so the follow-up goes to the app.
+export async function resolveTaskBackend(requested, threadId, deps = {}) {
+  const backend = requested ?? process.env.CODEX_COMPANION_BACKEND ?? "auto";
+  if (!TASK_BACKENDS.has(backend)) {
+    throw new Error(`Unknown --backend ${backend}. Use auto, cli, or desktop.`);
+  }
+  if (backend === "cli") {
+    return "cli";
+  }
+  if (backend === "desktop") {
+    const probe = await (deps.probeDesktop ?? probeDesktop)();
+    if (!probe.available) {
+      throw new Error(`${probe.detail} Start the Codex desktop app, or use --backend cli.`);
+    }
+    return "desktop";
+  }
+  return threadId && (await (deps.isThreadOwnedByDesktop ?? isThreadOwnedByDesktop)(threadId)) ? "desktop" : "cli";
 }
 
 function readTaskPrompt(cwd, options, positionals) {
@@ -1046,7 +1081,7 @@ async function handleReview(argv) {
 
 async function handleTask(argv) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["model", "effort", "cwd", "prompt-file", "expected-worktree", "expected-branch", "expected-base"],
+    valueOptions: ["model", "effort", "cwd", "prompt-file", "backend", "thread", "expected-worktree", "expected-branch", "expected-base"],
     // "wait" is accepted and discarded (as in handleReviewCommand): an unrecognised
     // --flag becomes a positional, and positionals ARE the prompt — so a forwarded
     // `--wait` would otherwise be sent to Codex as part of the prompt text.
@@ -1069,17 +1104,31 @@ async function handleTask(argv) {
   if (resumeLast && fresh) {
     throw new Error("Choose either --resume/--resume-last or --fresh.");
   }
+  const explicitThread = options.thread ? String(options.thread).trim() : null;
+  if (explicitThread && !THREAD_ID_PATTERN.test(explicitThread)) {
+    throw new Error(`--thread expects a Codex thread id (a UUID), got ${explicitThread}.`);
+  }
+  if (explicitThread && (resumeLast || fresh)) {
+    throw new Error("--thread already names the thread to continue; drop --resume-last/--resume/--fresh.");
+  }
   const write = Boolean(options.write);
   const taskMetadata = buildTaskRunMetadata({
     prompt,
-    resumeLast
+    resumeLast: resumeLast || Boolean(explicitThread)
   });
+  // Resolve the follow-up thread here, not in the worker, so the backend choice (and the
+  // job's backend field that cancel/watchdog read) is fixed before the job exists.
+  const threadId = explicitThread ?? (resumeLast ? (await resolveLatestTrackedTaskThread(workspaceRoot))?.id ?? null : null);
+  if (resumeLast && !threadId) {
+    throw new Error("No previous Codex task thread was found for this repository.");
+  }
+  const backend = await resolveTaskBackend(options.backend, threadId);
 
   if (options.background) {
     ensureCodexAvailable(cwd);
-    requireTaskRequest(prompt, resumeLast);
+    requireTaskRequest(prompt, resumeLast || Boolean(explicitThread));
 
-    const job = buildTaskJob(workspaceRoot, taskMetadata, write);
+    const job = buildTaskJob(workspaceRoot, taskMetadata, write, backend);
     const request = buildTaskRequest({
       cwd,
       model,
@@ -1088,14 +1137,16 @@ async function handleTask(argv) {
       write,
       resumeLast,
       jobId: job.id,
-      expected
+      expected,
+      backend,
+      threadId
     });
     const { payload } = enqueueBackgroundTask(cwd, job, request);
     outputCommandResult(payload, renderQueuedTaskLaunch(payload), options.json);
     return;
   }
 
-  const job = buildTaskJob(workspaceRoot, taskMetadata, write);
+  const job = buildTaskJob(workspaceRoot, taskMetadata, write, backend);
   await runForegroundCommand(
     job,
     (progress) =>
@@ -1107,6 +1158,8 @@ async function handleTask(argv) {
         write,
         resumeLast,
         jobId: job.id,
+        backend,
+        threadId,
         onProgress: progress
       }),
     { json: options.json }
@@ -1336,7 +1389,7 @@ async function handleCancel(argv) {
     // then signal the worker using the PER-JOB pid the CAS just read
     // (result.stored.pid) — authoritative over the index snapshot's job.pid, which can
     // be stale or absent. Only signal a pid still alive (never a recycled one).
-    interrupt = await interruptAppServerTurn(cwd, { threadId, turnId });
+    interrupt = await interruptAppServerTurn(cwd, { threadId, turnId, ...((existing.backend ?? job.backend) ? { backend: existing.backend ?? job.backend } : {}) });
     if (interrupt.interrupted) {
       appendLogLine(job.logFile, `Requested Codex turn interrupt for ${turnId} on ${threadId}.`);
     } else if (interrupt.attempted) {

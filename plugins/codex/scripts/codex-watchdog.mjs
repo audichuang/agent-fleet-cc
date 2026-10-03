@@ -107,7 +107,10 @@ export async function gatherObservation(cwd, jobId, deps, config) {
   const mtime = job.logFile ? deps.statLogMtimeMs(job.logFile) : null;
   const quietMs = mtime == null ? 0 : Math.max(0, deps.now() - mtime);
 
-  const brokerOk = Boolean(await deps.probeBroker(cwd));
+  // A desktop job's turn runs in the Codex desktop app; the broker plays no part, so its
+  // reachability must not feed the hang verdict (only a dead worker or a missed deadline do).
+  const desktop = job.backend === "desktop";
+  const brokerOk = desktop ? true : Boolean(await deps.probeBroker(cwd));
 
   const deadlineMs = job.timeoutAt ? Date.parse(job.timeoutAt) : NaN;
   const missedOwnDeadline = Number.isFinite(deadlineMs) && deps.now() > deadlineMs + DEADLINE_GRACE_MS;
@@ -119,6 +122,7 @@ export async function gatherObservation(cwd, jobId, deps, config) {
     quietMs,
     brokerOk,
     missedOwnDeadline,
+    backend: desktop ? "desktop" : null,
     thresholds: { hangQuietMs: config.hangQuietMs },
     ...(deps.readTurnIdentity
       ? deps.readTurnIdentity(cwd, jobId)
@@ -160,7 +164,11 @@ export async function terminateHungJob(cwd, jobId, observation, deps, verdict) {
   // Capture the result so we can tell whether the turn was actually stopped.
   let interruptResult = null;
   if (observation.threadId && observation.turnId) {
-    interruptResult = await deps.interrupt(cwd, { threadId: observation.threadId, turnId: observation.turnId });
+    interruptResult = await deps.interrupt(cwd, {
+      threadId: observation.threadId,
+      turnId: observation.turnId,
+      ...(observation.backend ? { backend: observation.backend } : {})
+    });
   }
   if (observation.pid) {
     deps.terminate(observation.pid);
@@ -178,6 +186,7 @@ export async function terminateHungJob(cwd, jobId, observation, deps, verdict) {
   const interruptConfirmed = Boolean(interruptResult && interruptResult.interrupted);
   const interruptBusyRefusal = /Shared Codex broker is busy/i.test(interruptResult?.detail ?? "");
   const shouldReapBroker =
+    observation.backend !== "desktop" &&
     verdict === "HUNG" &&
     Boolean(observation.threadId) &&
     Boolean(observation.turnId) &&

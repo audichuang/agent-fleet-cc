@@ -530,7 +530,7 @@ export async function runTrackedJob(job, runner, options = {}) {
         const threadId = current.threadId ?? error?.threadId ?? null;
         const turnId = current.turnId ?? error?.turnId ?? null;
         if (threadId && turnId) {
-          await interrupt(job.cwd ?? job.workspaceRoot, { threadId, turnId });
+          await interrupt(job.cwd ?? job.workspaceRoot, { threadId, turnId, ...(job.backend ? { backend: job.backend } : {}) });
         }
       } catch {
         // Best effort; never let interrupt failures mask the original error.

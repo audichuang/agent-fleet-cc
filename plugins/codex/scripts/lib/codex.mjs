@@ -40,6 +40,7 @@
 import { readJsonFile } from "./fs.mjs";
 import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from "./app-server.mjs";
 import { loadBrokerSession } from "./broker-lifecycle.mjs";
+import { DesktopThread } from "./desktop-ipc.mjs";
 import { binaryAvailable } from "./process.mjs";
 
 const SERVICE_NAME = "claude_code_codex_plugin";
@@ -1088,10 +1089,10 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
   }
 }
 
-async function withAppServer(cwd, fn) {
+async function withAppServer(cwd, fn, connectOptions = {}) {
   let client = null;
   try {
-    client = await CodexAppServerClient.connect(cwd);
+    client = await CodexAppServerClient.connect(cwd, connectOptions);
     const result = await fn(client);
     await client.close();
     return result;
@@ -1521,7 +1522,12 @@ export async function listSupportedModels(cwd, options = {}) {
   }
 }
 
-export async function interruptAppServerTurn(cwd, { threadId, turnId }) {
+export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = null }) {
+  // A desktop job's turn lives in the Codex desktop app, not on the broker: stop it
+  // there, and never let a caller fall through to reaping a broker for it.
+  if (backend === "desktop") {
+    return interruptDesktopTurn({ threadId, turnId });
+  }
   if (!threadId || !turnId) {
     return {
       attempted: false,
@@ -1704,7 +1710,174 @@ export async function runAppServerTurn(cwd, options = {}) {
       commandExecutions: turnState.commandExecutions,
       imageGenerations: turnState.imageGenerations
     };
+  }, options.disableBroker ? { disableBroker: true } : {});
+}
+
+// The desktop app can only take over a thread that already has a turn: a thread made
+// by `thread/start` alone is in the state DB but the app will not load it. So a fresh
+// desktop task first runs this one tiny turn on a throwaway (non-broker) app-server,
+// whose exit releases the thread's single-writer lock for the app.
+export const DESKTOP_BOOTSTRAP_PROMPT =
+  "This thread was opened by the Codex companion so the Codex desktop app can take it over. Do not run any command or read any file. Reply with exactly: READY";
+
+function emptyDesktopResult(threadId, turnId, error) {
+  return {
+    status: 1,
+    threadId,
+    turnId,
+    finalMessage: error.message,
+    reasoningSummary: [],
+    turn: null,
+    error,
+    stderr: "",
+    fileChanges: [],
+    touchedFiles: [],
+    commandExecutions: [],
+    imageGenerations: [],
+    backend: "desktop"
+  };
+}
+
+// Same result shape as runAppServerTurn, so render/status/result need no backend branch.
+export async function runDesktopTurn(cwd, options = {}) {
+  const deps = options.desktopDeps ?? {};
+  let threadId = options.resumeThreadId ?? null;
+
+  if (!threadId) {
+    emitProgress(
+      options.onProgress,
+      "Creating the Codex thread with a one-line CLI turn; the task itself runs in the Codex desktop app.",
+      "starting"
+    );
+    const bootstrap = await (deps.runBootstrapTurn ?? runAppServerTurn)(cwd, {
+      prompt: DESKTOP_BOOTSTRAP_PROMPT,
+      model: options.model,
+      effort: "low",
+      sandbox: options.sandbox,
+      persistThread: true,
+      threadName: options.threadName,
+      disableBroker: true
+    });
+    if (bootstrap.status !== 0 || !bootstrap.threadId) {
+      throw new Error(`Could not create a thread for the Codex desktop app: ${bootstrap.finalMessage || "the CLI bootstrap turn failed"}`);
+    }
+    threadId = bootstrap.threadId;
+  }
+
+  emitProgress(options.onProgress, `Attaching to thread ${threadId} in the Codex desktop app.`, "starting", { threadId });
+  const thread = await DesktopThread.attach(threadId, {
+    ...deps.attachOptions,
+    onOpen: () => emitProgress(options.onProgress, `Opening thread ${threadId} in the Codex desktop app.`, "starting", { threadId })
   });
+
+  try {
+    if (thread.runtimeStatus() && thread.runtimeStatus() !== "idle") {
+      throw new Error(`Thread ${threadId} is already running a turn in the Codex desktop app. Wait for it, or stop it there.`);
+    }
+    const prompt = options.prompt?.trim() || options.defaultPrompt || "";
+    if (!prompt) {
+      throw new Error("A prompt is required for this Codex run.");
+    }
+
+    const turnId = await thread.startTurn(prompt, { model: options.model ?? null, effort: options.effort ?? null });
+    emitProgress(options.onProgress, `Turn started in the Codex desktop app (${turnId}).`, "running", { threadId, turnId });
+
+    const captureState = createTurnCaptureState(threadId, { onProgress: options.onProgress });
+    const reported = new Set();
+    /** @type {any} */
+    let blockedOn = null;
+    const reportProgress = (turn) => {
+      for (const item of turn?.items ?? []) {
+        const finished = item.status == null || (item.status !== "inProgress" && item.status !== "in_progress");
+        if (!item.id || reported.has(item.id) || !finished) continue;
+        if (item.type === "agentMessage" && turn.status === "inProgress") continue; // still streaming
+        reported.add(item.id);
+        if (item.type === "agentMessage") {
+          emitLogEvent(options.onProgress, {
+            message: `Assistant message captured: ${shorten(item.text, 96)}`,
+            stderrMessage: null,
+            logTitle: "Assistant message",
+            logBody: item.text ?? ""
+          });
+          continue;
+        }
+        const described = describeCompletedItem(captureState, item);
+        if (described) emitProgress(options.onProgress, described.message, described.phase, { threadId, turnId });
+      }
+    };
+
+    await thread.waitFor(
+      () => {
+        const turn = thread.turn(turnId);
+        reportProgress(turn);
+        if (turn && turn.status && turn.status !== "inProgress") return true;
+        if (thread.pendingRequests().length > 0) {
+          blockedOn = thread.pendingRequests()[0];
+          return true;
+        }
+        return false;
+      },
+      options.turnTimeoutMs ?? 0,
+      "turn"
+    );
+
+    if (blockedOn) {
+      const kind = blockedOn.method ?? blockedOn.type ?? "an approval";
+      return emptyDesktopResult(
+        threadId,
+        turnId,
+        new Error(
+          `The Codex desktop app is waiting for ${kind} on thread ${threadId}. Approve or deny it in the app; the turn is still running there. Follow up with task --backend desktop --thread ${threadId}.`
+        )
+      );
+    }
+
+    const turn = thread.turn(turnId);
+    const items = turn?.items ?? [];
+    const fileChanges = items.filter((item) => item.type === "fileChange");
+    const reasoningSummary = items
+      .filter((item) => item.type === "reasoning")
+      .reduce((sections, item) => mergeReasoningSections(sections, extractReasoningSections(item.summary)), []);
+    const turnError = turn?.error ?? (turn?.status === "completed" ? null : { message: `Codex desktop turn ended ${turn?.status ?? "without a status"}.` });
+    return {
+      status: turn?.status === "completed" ? 0 : 1,
+      threadId,
+      turnId,
+      finalMessage: turn?.finalMessage || turnError?.message || "",
+      reasoningSummary,
+      turn: turn ? { id: turnId, status: turn.status, error: turn.error, items: [] } : null,
+      error: turnError,
+      stderr: "",
+      fileChanges,
+      touchedFiles: collectTouchedFiles(fileChanges),
+      commandExecutions: items.filter((item) => item.type === "commandExecution"),
+      imageGenerations: items.filter((item) => item.type === "imageGeneration").map(imageGenerationRecord),
+      backend: "desktop"
+    };
+  } finally {
+    thread.close();
+  }
+}
+
+export async function interruptDesktopTurn({ threadId, turnId }, options = {}) {
+  if (!threadId) {
+    return { attempted: false, interrupted: false, transport: "desktop", detail: "missing threadId" };
+  }
+  let thread = null;
+  try {
+    thread = await DesktopThread.attach(threadId, { ...options, openIfNeeded: false });
+    const result = await thread.interrupt(turnId ?? null);
+    return {
+      attempted: true,
+      interrupted: true,
+      transport: "desktop",
+      detail: `Interrupted ${result.interruptedTurnId ?? turnId ?? "the running turn"} on ${threadId} in the Codex desktop app.`
+    };
+  } catch (error) {
+    return { attempted: true, interrupted: false, transport: "desktop", detail: error instanceof Error ? error.message : String(error) };
+  } finally {
+    thread?.close();
+  }
 }
 
 export async function findLatestTaskThread(cwd) {

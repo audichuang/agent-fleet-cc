@@ -28,6 +28,12 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   「session-scoped vs durable」那條踩雷的底層機制就是它。
 - `scripts/lib/codex.mjs` — 高層編排(turn / review、auth·availability、model list、structured
   output);app-server **client 與 direct/broker transport 在 `lib/app-server.mjs`**。
+- `scripts/lib/desktop-ipc.mjs` — **桌面版後端**:經 Codex 桌面版私有 IPC router(`$CODEX_HOME/ipc/ipc.sock`,
+  u32 LE 長度 + JSON)當 thread follower:owner discovery → 廣播 following → `load-complete-history` 拿快照
+  → 套 JSON patch → `thread-follower-start-turn` / `interrupt-turn`。`lib/codex.mjs` 的 `runDesktopTurn` 回傳
+  與 `runAppServerTurn` **同形**的結果,render/status/result 因此不分後端。`task --backend auto|cli|desktop`、
+  `--thread <id>`;job 記錄帶 `backend: "desktop"`,cancel / hard timeout / watchdog 讀它改走 IPC 中斷、
+  **永不 reap broker**。macOS + Linux;Windows(named pipe)不支援。使用者文件在 `skills/codex/references/desktop-backend.md`。
 - `scripts/lib/worktree-guard.mjs` — **條件式** expected-triplet 驗證(給齊 expected-worktree /
   branch / base 才 assert;現行 handoff/rescue/execute-plan 沒帶 → 實質 no-op)。
 
@@ -43,6 +49,15 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 - **NOT dual-host**(無 `.codex-plugin/`)—— 不像 cc / agy;bump 只動 plugin.json ↔ marketplace。
 
 ## 踩雷
+- **桌面版只接得手「已有 turn」的 thread。** 只做 `thread/start` 的 thread 進了 state DB,但 app 不肯載入
+  (2026-10-03 實測)。所以新的 desktop task 先在**一次性**(`disableBroker`)app-server 跑一輪 bootstrap;
+  走共用 broker 的話 broker 的 app-server 會一直握著 thread 的單一寫入鎖,app 開不了它。
+- **thread 一次只有一個 writer。** app 開著的 thread,CLI `thread/resume` 回 `already has an active writer`
+  —— 這不是 bug,是 `--backend auto` 把這種 follow-up 送去 app 的理由。
+- **未被載入的 thread,owner discovery 在 macOS 可能等滿 router 的 10 s 才回否定**(Linux 立即回)。
+  `OWNER_DISCOVERY_TIMEOUT_MS`(2 s)把沉默當「未載入」;別拿掉,不然每次開 thread 白等 20 s。
+- **IPC 的 method 版本是對某一版 app 的契約。** 改 `METHOD_VERSIONS` 前先從已安裝 app 的 `app.asar` 撈版本表
+  (搜 `"thread-stream-state-changed":`);app 不認的版本回 `request-version-mismatch`,已轉成明確錯誤。
 - **Bash `run_in_background` 包住前景 companion,session 結束就結束。** 要活過 session,用
   companion 自己的 `--background`(detached worker + watchdog)。
 - broker 是持久共用的(一次一個 turn、idle 5s 自關),不是每次 spawn;改 broker / turn-ack / idle /

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.7.0
+
+**`task` can run inside the Codex desktop app.** The companion drives a thread in the user's
+Codex desktop app (macOS, Linux) over the app's local IPC socket, so a task can use what only
+the app has — computer use, its browser — and the user can watch it there.
+
+- `task --backend auto|cli|desktop` and `task --thread <id>`. `auto` (default) keeps the CLI
+  unless the follow-up's thread is already open in the app, where the CLI cannot resume it
+  (single-writer lock). A new task goes to the app only with `--backend desktop`.
+- A new desktop task first runs a one-line bootstrap turn on a throwaway app-server: the app
+  will not load a thread that has no turns.
+- The job record carries `backend: "desktop"`. `cancel`, the hard timeout and the watchdog stop
+  a desktop turn through the app and never reap the broker for it. `status`, `wait`, `logs` and
+  `result` are unchanged; the result shape is the same as a CLI run.
+- A desktop turn that stops on an approval fails fast with that reason and is left waiting in
+  the app. A protocol the installed app rejects fails as a version mismatch.
+- `setup` reports whether the desktop app is reachable. Windows is not supported.
+- New reference: `skills/codex/references/desktop-backend.md`.
+
 ## 1.6.4
 
 **Delegation stays on the stronger model.** A Codex check exists so a stronger model reviews

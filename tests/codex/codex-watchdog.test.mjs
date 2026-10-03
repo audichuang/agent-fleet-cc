@@ -472,3 +472,40 @@ test("runWatchdog heals a stranded .done when the job finalized but its signal t
   assert.equal(done.status, "failed");
   assert.equal(done.reason, "worker exited", "the reason is carried from the authoritative record");
 });
+
+test("gatherObservation does not let the broker decide a desktop job's liveness", async () => {
+  const deps = {
+    readJob: () => ({ status: "running", pid: 4242, logFile: "/tmp/x.log", backend: "desktop" }),
+    isProcessAlive: () => true,
+    statLogMtimeMs: () => 1_000_000,
+    probeBroker: async () => assert.fail("a desktop turn runs in the Codex app; the broker is irrelevant"),
+    now: () => 1_000_000 + 950_000
+  };
+  const obs = await gatherObservation("/ws", "job-desktop", deps, CONFIG);
+  assert.equal(obs.backend, "desktop");
+  assert.equal(obs.brokerOk, true);
+});
+
+test("terminateHungJob never reaps the broker for a desktop job and routes its interrupt to the app", async () => {
+  const workspace = makeTempDir();
+  const jobId = "job-desktop-noreap";
+  const logFile = seedHungJob(workspace, jobId);
+
+  const calls = { interrupt: [], terminate: [] };
+  const deps = {
+    interrupt: async (_cwd, ctx) => {
+      calls.interrupt.push(ctx);
+      return { attempted: true, interrupted: false, detail: "Codex desktop app not reachable" };
+    },
+    terminate: (pid) => calls.terminate.push(pid),
+    readBrokerPid: () => 54_321
+  };
+  // Every condition that reaps the broker for a CLI job holds here; the broker still has
+  // nothing to do with a turn that lives in the desktop app.
+  const observation = { status: "running", pid: 999_999, threadId: "th", turnId: "tn", brokerOk: false, backend: "desktop", logFile };
+
+  await terminateHungJob(workspace, jobId, observation, deps, "HUNG");
+
+  assert.deepEqual(calls.interrupt, [{ threadId: "th", turnId: "tn", backend: "desktop" }]);
+  assert.deepEqual(calls.terminate, [999_999], "only the worker is killed; the shared broker must survive");
+});
