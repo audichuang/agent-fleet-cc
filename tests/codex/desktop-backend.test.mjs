@@ -531,15 +531,21 @@ test("xdg-open borrows the Codex app's own display over another process's", () =
 
 // --- a new thread created by the app itself (deep link + Enter) --------------------------
 
-function appNewChatDeps(fake, calls, { found = true } = {}) {
+// `landsOn`: which Enter press reaches the chat (0 = none does).
+function appNewChatDeps(fake, calls, { found = true, landsOn = found ? 1 : 0 } = {}) {
+  let presses = 0;
+  let landed = false;
   return {
     attachOptions: fake.attachOptions,
     settleMs: 0,
     findTimeoutMs: 50,
+    enterRetryFindMs: 10,
     openUrl: async (url) => calls.push(["open", url]),
     pressEnter: async () => {
       calls.push(["enter"]);
-      if (!found) return;
+      presses += 1;
+      if (presses !== landsOn) return;
+      landed = true;
       // The app starts the turn itself; it is already in progress when we attach.
       const key = "tail:app-turn";
       fake.state.turnHistory.history.entitiesByKey[key] = {
@@ -556,7 +562,7 @@ function appNewChatDeps(fake, calls, { found = true } = {}) {
     },
     findNewThread: async (prompt) => {
       calls.push(["find", prompt]);
-      return found ? fake.threadId : null;
+      return landed ? fake.threadId : null;
     },
     runBootstrapTurn: async () => assert.fail("a thread made by the app needs no CLI bootstrap")
   };
@@ -587,6 +593,27 @@ test("when the Enter never lands, the run says so and points at the prefilled ch
     runDesktopTurn("/w", { prompt: "fix it", newThreadVia: "app", desktopDeps: appNewChatDeps(fake, [], { found: false }) }),
     /no new thread appeared.*Send it in the app yourself, or rerun with --new-thread-via cli/
   );
+});
+
+test("an Enter pressed before the new chat is ready is pressed again until the thread appears", async (t) => {
+  // Live on macOS: the app took 3.3 s to open the chat for a long prompt, and the one
+  // Enter at ~1.9 s fell on nothing. After a send the composer is empty, so a later
+  // Enter is a no-op there.
+  const fake = await startFakeDesktop(t);
+  const calls = [];
+  const result = await runDesktopTurn("/w", { prompt: "fix it", newThreadVia: "app", desktopDeps: appNewChatDeps(fake, calls, { landsOn: 2 }) });
+  assert.deepEqual(calls.map((c) => c[0]), ["open", "enter", "find", "enter", "find"]);
+  assert.equal(result.finalMessage, "APP-MADE");
+});
+
+test("Enter is pressed a bounded number of times before the run gives up", async (t) => {
+  const fake = await startFakeDesktop(t);
+  const calls = [];
+  await assert.rejects(
+    runDesktopTurn("/w", { prompt: "fix it", newThreadVia: "app", desktopDeps: appNewChatDeps(fake, calls, { found: false }) }),
+    /no new thread appeared/
+  );
+  assert.equal(calls.filter((c) => c[0] === "enter").length, 4);
 });
 
 test("a prompt too long for a deep link is refused before anything opens", async () => {

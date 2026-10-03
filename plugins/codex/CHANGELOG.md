@@ -24,8 +24,10 @@ the app has — computer use, its browser — and the user can watch it there.
   one-line bootstrap turn with no UI. `--new-thread-via app` (or `CODEX_COMPANION_NEW_THREAD_VIA=app`)
   has the app make it: the `codex://threads/new?prompt=…&path=<cwd>` deep link fills a new chat
   in that project, the companion presses Enter in the app's window (System Events on macOS,
-  `xdotool` on Linux), and finds the thread by its first message. The thread is app-native,
-  with no extra turn, but the run takes window focus.
+  `xdotool` on Linux), and finds the thread by its first message. Enter is pressed up to four
+  times while no thread appears: a busy app took 3.3 s to open the chat for a long prompt, and
+  one Enter at ~1.9 s fell on nothing. The thread is app-native, with no extra turn, and runs on
+  the model selected in the app; the run takes window focus.
 - The skill has the agent pick the backend from the work itself, since users rarely say
   "computer use": a task that needs hands on a live screen (drive a GUI app, act on a web page,
   click through a UI, screenshot it) gets `--backend desktop`; work done with files and a

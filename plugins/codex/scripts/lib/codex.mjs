@@ -1754,6 +1754,7 @@ export async function runDesktopTurn(cwd, options = {}) {
   // Set when the app itself started the first turn (new thread via the app's own
   // "new chat"); the follower then waits on that turn instead of starting one.
   let appStartedTurn = false;
+  const NEW_CHAT_ENTER_PRESSES = 4;
 
   if (!threadId && options.newThreadVia === "app") {
     if (!prompt) {
@@ -1772,8 +1773,17 @@ export async function runDesktopTurn(cwd, options = {}) {
     );
     await (deps.openUrl ?? openDesktopUrl)(buildNewThreadUrl({ prompt, projectPath: cwd }));
     await new Promise((resolve) => setTimeout(resolve, deps.settleMs ?? 1_500));
-    await (deps.pressEnter ?? pressEnterInDesktopApp)();
-    threadId = await (deps.findNewThread ?? findThreadStartedWithPrompt)(prompt, { since, timeoutMs: deps.findTimeoutMs ?? 30_000 });
+    // A busy app can take seconds to open the chat, and an Enter before that falls on
+    // nothing. So press again while no thread appears: once the prompt is sent the
+    // composer is empty, and Enter on an empty composer sends nothing.
+    for (let press = 1; press <= NEW_CHAT_ENTER_PRESSES && !threadId; press += 1) {
+      if (press > 1) {
+        emitProgress(options.onProgress, `No new thread yet; pressing Enter again (${press}/${NEW_CHAT_ENTER_PRESSES}).`, "starting");
+      }
+      await (deps.pressEnter ?? pressEnterInDesktopApp)();
+      const timeoutMs = press < NEW_CHAT_ENTER_PRESSES ? deps.enterRetryFindMs ?? 3_000 : deps.findTimeoutMs ?? 30_000;
+      threadId = await (deps.findNewThread ?? findThreadStartedWithPrompt)(prompt, { since, timeoutMs });
+    }
     if (!threadId) {
       throw new Error(
         "The prompt was filled into a new Codex desktop chat, but no new thread appeared — the Enter key did not reach it. Send it in the app yourself, or rerun with --new-thread-via cli."

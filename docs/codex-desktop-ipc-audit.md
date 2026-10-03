@@ -126,6 +126,7 @@ Every request also carries `requestId`, `sourceClientId`, `version` (per method,
 | B9 | Threads created outside the app (companion tasks, ACP extension) can be opened and driven by it | ✅ | ✅ | the auto-open test on two such threads |
 | B10 | The negative `thread-owner-discovery` answer is slow on macOS (~10 s) and immediate on Linux | ✅ | ✅ | timing probe |
 | B11 | The new-chat deep link plus one Enter creates an **app-native** thread (`originator: Codex Desktop`, `cwd` = the `path` param) that the companion then follows to completion | ✅ `VIA-APP-MAC` | ✅ `VIA-APP-LINUX` (over SSH) | companion `task --backend desktop --new-thread-via app` |
+| B12 | The new chat is not ready at a fixed delay: with a 4.4 KB prompt and a busy app, the thread id was minted 3.3 s after the deep link (rollout `session_meta.timestamp`), so the one Enter at ~1.9 s fell on nothing and the prompt sat unsent. Re-pressing Enter until a thread appears (up to 4) fixes it; Enter on the emptied composer after a send does nothing. The chat runs on the model selected in the app (`turn_context.model` was `gpt-6-astra`), not the companion default | ✅ 2026-10-03: first failed run reproduced, then `VIA-APP-RETRY` with the retry | not re-run | companion `task --backend desktop --new-thread-via app --prompt-file <4.4 KB>` |
 
 `ipc_e2e.py`, `autoopen.py` and the timing probe were throwaway Python scripts from the discovery
 session. They are not in the repo. Their checks are what the hermetic suite and the companion
