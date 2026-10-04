@@ -23,7 +23,7 @@ that code; read it, then follow step 3. The last `wait` report is in
 `${TMPDIR:-/tmp}/codex-wait.out`.
 
 ```bash
-while :; do node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" wait <jobId> --timeout-ms 100000 > "${TMPDIR:-/tmp}/codex-wait.out"; code=$?; [ "$code" -ne 10 ] && break; done; echo "wait exit: $code"
+while :; do code=0; node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" wait <jobId> --timeout-ms 100000 > "${TMPDIR:-/tmp}/codex-wait.out" || code=$?; [ "$code" -ne 10 ] && break; done; echo "wait exit: $code"
 ```
 
 ## Telling a finished job

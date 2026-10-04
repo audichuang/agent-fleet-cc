@@ -189,22 +189,19 @@ test("a reader that closes stderr early does not kill a foreground task mid-run 
   const binDir = makeTempDir();
   installFakeCodex(binDir);
   initGitRepo(repo);
-  // A foreground text-mode task reports progress on stderr (`--json` keeps it quiet), so
-  // close stderr after its first line: every later progress write hits a closed pipe.
-  const child = spawn("node", [SCRIPT, "task", "do the thing"], {
-    cwd: repo,
-    env: buildEnv(binDir),
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  let firstProgress = "";
-  child.stderr.once("data", (chunk) => {
-    firstProgress = String(chunk);
-    child.stderr.destroy();
-  });
+  const args = [SCRIPT, "task", "do the thing"];
+  // Text mode reports progress on stderr (`--json` keeps it quiet). Prove that with stderr open,
+  // so the closed-pipe run below cannot pass by never writing there.
+  const open = run("node", args, { cwd: repo, env: buildEnv(binDir) });
+  assert.equal(open.status, 0, open.stderr);
+  assert.match(open.stderr, /\[codex\]/);
+
+  // Close the read end before the child has started, so every stderr write hits a closed pipe.
+  const child = spawn("node", args, { cwd: repo, env: buildEnv(binDir), stdio: ["ignore", "pipe", "pipe"] });
+  child.stderr.destroy();
   let stdout = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   const [code] = await once(child, "close");
-  assert.match(firstProgress, /\[codex\]/, "the run must write progress to stderr, or this test proves nothing");
   assert.equal(code, 0, "an EPIPE crash on stderr fails the run");
   assert.match(stdout, /Handled the requested task\./);
 });
