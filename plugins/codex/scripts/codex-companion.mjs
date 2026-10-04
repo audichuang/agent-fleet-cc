@@ -1728,14 +1728,16 @@ export function buildMainErrorEnvelope(error) {
 const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
+// A reader that closes the pipe early (`... 2>&1 | head`) makes the next stdout or
+// stderr write emit an async EPIPE 'error'. Unhandled, it crashes a foreground run
+// mid-turn. Ignore EPIPE so the run finishes and records its result; rethrow the rest.
+export function rethrowUnlessEpipe(error) {
+  if (error?.code !== "EPIPE") throw error;
+}
+
 if (invokedDirectly) {
-  // A reader that closes the pipe early (`... 2>&1 | head`) makes the next stdout or
-  // stderr write emit an async EPIPE 'error'. Unhandled, it crashes a foreground run
-  // mid-turn. Ignore EPIPE so the run finishes and records its result; rethrow the rest.
   for (const stream of [process.stdout, process.stderr]) {
-    stream.on("error", (error) => {
-      if (error?.code !== "EPIPE") throw error;
-    });
+    stream.on("error", rethrowUnlessEpipe);
   }
   main().catch((error) => {
     const envelope = buildMainErrorEnvelope(error);

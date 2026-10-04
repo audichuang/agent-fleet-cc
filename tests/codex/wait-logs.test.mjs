@@ -6,7 +6,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { makeTempDir, run } from "./helpers.mjs";
+import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
+import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
+import { rethrowUnlessEpipe } from "../../plugins/codex/scripts/codex-companion.mjs";
 import { resolveJobLogFile, saveState, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
 import { appendLogLine } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
 
@@ -155,24 +157,63 @@ test("a timed-out wait says in words that the job is still running, not failed",
   assert.match(result.stdout, /Wait timed out after 0s; the job is still running, not failed\./);
   assert.match(result.stdout, new RegExp(`Run \`wait ${job.id}\` again`));
 
+  const json = run("node", [SCRIPT, "wait", `${job.id} --cwd ${workspace} --timeout-ms 0 --json`], { cwd: workspace });
+  assert.equal(json.status, 10, json.stderr);
+  assert.equal(JSON.parse(json.stdout).waitTimedOut, true, "--json stays one clean object");
+
+  const queued = writeTerminalJob(workspace, "codex-queued-words", "queued");
+  const viaStatus = run("node", [SCRIPT, "status", `${queued.id} --cwd ${workspace} --wait --timeout-ms 0`], { cwd: workspace });
+  assert.match(viaStatus.stdout, /Wait timed out after 0s; the job is still queued, not failed\./);
+
   const done = writeTerminalJob(workspace, "codex-done-words", "completed");
   const finished = run("node", [SCRIPT, "wait", `${done.id} --cwd ${workspace}`], { cwd: workspace });
   assert.equal(finished.status, 0, finished.stderr);
   assert.doesNotMatch(finished.stdout, /timed out/);
 });
 
-test("a reader that closes the pipe early does not crash the companion (EPIPE)", async () => {
+test("a reader that closes stdout early does not crash the companion (EPIPE)", async () => {
   const workspace = makeTempDir();
   const job = writeRunningJob(workspace, "codex-run-epipe");
-  // wait writes only after its timeout, so both pipes are closed before the first write.
+  // wait writes only stdout, and only after its timeout, so the pipe is closed first.
   const child = spawn("node", [SCRIPT, "wait", job.id, "--cwd", workspace, "--timeout-ms", "1500"], {
     cwd: workspace,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "ignore"]
   });
   child.stdout.destroy();
-  child.stderr.destroy();
   const [code] = await once(child, "exit");
   assert.equal(code, 10, "an EPIPE crash exits 1 instead of wait's timed-out 10");
+});
+
+test("a reader that closes stderr early does not kill a foreground task mid-run (EPIPE)", async () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  // A foreground text-mode task reports progress on stderr (`--json` keeps it quiet), so
+  // close stderr after its first line: every later progress write hits a closed pipe.
+  const child = spawn("node", [SCRIPT, "task", "do the thing"], {
+    cwd: repo,
+    env: buildEnv(binDir),
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let firstProgress = "";
+  child.stderr.once("data", (chunk) => {
+    firstProgress = String(chunk);
+    child.stderr.destroy();
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  const [code] = await once(child, "close");
+  assert.match(firstProgress, /\[codex\]/, "the run must write progress to stderr, or this test proves nothing");
+  assert.equal(code, 0, "an EPIPE crash on stderr fails the run");
+  assert.match(stdout, /Handled the requested task\./);
+});
+
+test("only EPIPE is ignored on stdout/stderr; any other stream error still throws", () => {
+  assert.doesNotThrow(() => rethrowUnlessEpipe(Object.assign(new Error("pipe"), { code: "EPIPE" })));
+  const other = Object.assign(new Error("no space"), { code: "ENOSPC" });
+  assert.throws(() => rethrowUnlessEpipe(other), (error) => error === other);
+  assert.throws(() => rethrowUnlessEpipe(new Error("no code")), /no code/);
 });
 
 // T2: --timeout-ms 0 returns immediately
