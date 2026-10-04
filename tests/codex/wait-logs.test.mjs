@@ -203,13 +203,15 @@ test("a reader that closes stderr early does not kill a foreground task mid-run 
     env: buildEnv(binDir),
     stdio: ["pipe", "pipe", "pipe"]
   });
+  // Subscribe before any await: a shell that dies early must fail the test, not hang it.
+  const finished = once(child, "close");
+  let stdout = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
   const closed = once(child.stderr, "close");
   child.stderr.destroy();
   await closed;
   child.stdin.end("go\n");
-  let stdout = "";
-  child.stdout.on("data", (chunk) => { stdout += chunk; });
-  const [code] = await once(child, "close");
+  const [code] = await finished;
   assert.equal(code, 0, "an EPIPE crash on stderr fails the run");
   assert.match(stdout, /Handled the requested task\./);
 });
