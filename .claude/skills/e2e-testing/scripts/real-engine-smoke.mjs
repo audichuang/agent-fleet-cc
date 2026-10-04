@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // real-engine-smoke.mjs — Layer-2 E2E: drive the REAL installed engines
-// (codex / agy / claude) through a live background job and assert the
+// (codex / claude) through a live background job and assert the
 // cross-engine `wait` exit-code contract. This is a MANUAL gate: it spends real
 // model tokens (jobs are cancelled within ~seconds to keep that minimal) and
 // needs the engines to be authed. It is intentionally NOT part of `npm test`.
@@ -36,7 +36,7 @@ function run(args, opts = {}) {
   });
 }
 
-// codex/antigravity `task --json` prints MULTI-LINE pretty JSON; never take the
+// codex `task --json` prints MULTI-LINE pretty JSON; never take the
 // last line — parse the whole payload.
 function parseJson(text) {
   try {
@@ -104,13 +104,6 @@ const ENGINES = {
     cancel: (ws, id) => ["cancel", id, "--cwd", ws, "--json"],
     waitFor: (ws, id, ms) => ["wait", id, "--cwd", ws, "--timeout-ms", String(ms), "--json"],
   },
-  antigravity: {
-    script: path.join(REPO, "plugins/antigravity/bin/antigravity.mjs"),
-    binary: "agy",
-    launch: (ws) => ["task", "smoke: reply with the single word ok", "--background", "--json"],
-    cancel: (ws, id) => ["cancel", id, "--json"],
-    waitFor: (ws, id, ms) => ["wait", id, "--timeout-ms", String(ms), "--json"],
-  },
   cc: {
     script: path.join(REPO, "plugins/cc/scripts/cc-companion.mjs"),
     binary: "claude",
@@ -177,7 +170,7 @@ function smokeEngine(name, cfg, roots) {
 function main() {
   const roots = dataRoots();
 
-  console.log("# Real-engine E2E smoke (live codex / agy / claude)\n");
+  console.log("# Real-engine E2E smoke (live codex / claude)\n");
   let failed = 0;
   let ran = 0;
   for (const [name, cfg] of Object.entries(ENGINES)) {

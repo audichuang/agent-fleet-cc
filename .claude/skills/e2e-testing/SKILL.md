@@ -2,12 +2,12 @@
 name: e2e-testing
 description: >-
   Complete end-to-end testing for the agent-fleet-cc plugin marketplace (codex /
-  antigravity / cc / grok). Use this whenever you need to verify engine
+  cc). Use this whenever you need to verify engine
   behavior end-to-end, run or write E2E tests, run the real-engine smoke check,
   confirm a control-plane fix actually works against the live CLIs, prove a test
   is a true regression, or answer "did you actually run it end-to-end?". Triggers
   on: e2e, end-to-end, smoke test, test:e2e, real engine test, "verify the fix
-  works", "test against real codex/agy/claude/grok", launch/wait/logs/cancel exit
+  works", "test against real codex/claude", launch/wait/logs/cancel exit
   codes, before-release verification, and any doubt about whether testing was
   hermetic (fake engine) vs real. Reach for this skill BEFORE claiming any
   end-to-end verification is done — there are two distinct layers and it is easy
@@ -25,7 +25,7 @@ get right is to never conflate them, and to be explicit about which one you ran.
 | Layer | What it drives | Engine | Auth/network | Determinism | Where it runs |
 |---|---|---|---|---|---|
 | **Hermetic E2E** (`npm run test:e2e`) | the REAL plugin CLIs as subprocesses | **fake shim / seeded on-disk state** | none | deterministic | CI + `npm test` |
-| **Real-engine smoke** (manual gate) | the REAL plugin CLIs as subprocesses | **real codex / agy / claude + real model** | required | non-deterministic, costs money | local, by hand, pre-release |
+| **Real-engine smoke** (manual gate) | the REAL plugin CLIs as subprocesses | **real codex / claude + real model** | required | non-deterministic, costs money | local, by hand, pre-release |
 
 Both are "end-to-end" at the **CLI/process boundary** (real `argv`, real spawn,
 real on-disk state machine). They differ only in whether a **live model engine**
@@ -40,21 +40,19 @@ not answer with the first and imply it was real.
 ## Layer 1 — Hermetic E2E suite
 
 ```bash
-npm run test:e2e     # the 4 black-box e2e files (cc + codex + antigravity + grok)
+npm run test:e2e     # the black-box e2e files (cc + codex)
 npm test             # full chain; test:e2e is the last && leg, so it gates the build
 ```
 
-`test:e2e` runs `tests/{cc,codex,antigravity,grok}/e2e-cli.test.mjs`.
-Each spawns the real plugin CLI (`cc-companion.mjs`, `codex-companion.mjs`,
-`antigravity/bin/antigravity.mjs`,
-`grok-companion.mjs`) as a subprocess against an isolated workspace with
+`test:e2e` runs `tests/{cc,codex}/e2e-cli.test.mjs`.
+Each spawns the real plugin CLI (`cc-companion.mjs`, `codex-companion.mjs`) as a subprocess against an isolated workspace with
 fake/seeded state. `tests/cc/e2e-cli.test.mjs` is
 the canonical template — read it before writing a new one.
 
 ## Layer 2 — Real-engine smoke (manual gate)
 
 **Step 1 — know what it will skip.** The smoke script probes each engine's
-binary itself (`codex`, `agy`, `claude`) and skips the ones that are not on
+binary itself (`codex`, `claude`) and skips the ones that are not on
 PATH, so you do not gate it by hand. Only ENOENT counts as missing — a binary
 that runs and exits non-zero is treated as present, because **auth is never
 checked**: an unauthed engine surfaces as its job failing, which is the point of
@@ -88,9 +86,8 @@ All three engines agree on this (verify any change against all three):
 | timeout before terminal | `10` |
 
 Reference implementations: cc `waitExitCode` (`cc-companion.mjs`),
-codex `waitExitCode` (`codex-companion.mjs`), antigravity `exitCodeFor`
-(`antigravity/scripts/commands/wait.mjs`). If you touch any one, grep the other
-two and keep them identical — a divergence here silently breaks orchestrators
+codex `waitExitCode` (`codex-companion.mjs`). If you touch one, grep the other
+and keep them identical — a divergence here silently breaks orchestrators
 that script `case $? in 2) ...`.
 
 ## Writing a new hermetic E2E test
@@ -122,7 +119,7 @@ Follow the shape in `tests/cc/e2e-cli.test.mjs`:
 These are the traps this repo's engines specifically set. Each one cost real
 debugging; internalize the *why* so you adapt rather than copy blindly.
 
-- **`task --json` is MULTI-LINE pretty JSON** for codex and antigravity. Parsing
+- **`task --json` is MULTI-LINE pretty JSON** for codex. Parsing
   `stdout.split("\n").pop()` gives you `}`, not the object. Parse the **whole**
   stdout: `JSON.parse(entireStdout).jobId`. (cc emits single-line JSON, so
   this bites only when you generalize a cc helper to the others.)
@@ -165,7 +162,7 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
 ## Reporting honestly
 
 When you claim E2E verification, say which layer: "hermetic e2e suite
-(`npm run test:e2e`, fake engines)" or "real-engine smoke (live codex/agy/claude)".
+(`npm run test:e2e`, fake engines)" or "real-engine smoke (live codex/claude)".
 If you only ran the hermetic layer, say so — do not imply the live engines were
 exercised. The `IRONCLAD` rule in `AGENTS.md` still applies to any test edits:
 don't touch sibling plugins' files unless the change is genuinely cross-cutting.

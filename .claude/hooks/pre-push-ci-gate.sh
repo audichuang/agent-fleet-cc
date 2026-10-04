@@ -23,13 +23,11 @@ esac
 
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}" 2>/dev/null || exit 0
 
-# The 4 vendored-runtime targets sync-shared regenerates. Scoped on purpose:
+# The 2 vendored-runtime targets sync-shared regenerates. Scoped on purpose:
 # a whole-tree `git diff` would false-block on any unrelated uncommitted work.
 VENDORED=(
   plugins/cc/scripts/lib/shared
   plugins/codex/scripts/lib/shared
-  plugins/antigravity/scripts/lib/shared
-  plugins/grok/scripts/lib/shared
 )
 
 deny() {
