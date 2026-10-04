@@ -15,9 +15,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" <verb> ...
 ```
 
 - `review` — built-in review of local git changes. Review-only. It does not take extra focus text; use `adversarial-review` when the user wants a focus or a stricter pass.
-- `adversarial-review` — same targets as `review`, plus optional focus text.
+- `adversarial-review` — same targets as `review`, plus optional focus text. Options come first and the focus text last: `adversarial-review --background --base main "focus on the retry path"`. Both review verbs pick the target themselves: uncommitted changes when the tree is dirty, otherwise the branch against the default branch. `--base <ref>` reviews the branch against that ref instead.
 - `task` — diagnosis, implementation, image generation, or any prompt that is not the built-in reviewer. Multi-line prompts go through `--prompt-file`; an inline multi-line string gets mangled or collapses to empty. A follow-up on the same Codex thread is `task --resume-last`.
 - `status`, `result`, `cancel`, `wait`, `logs`, `setup` — follow a job, or check auth.
+
+`<verb> --help` prints usage and launches nothing.
 
 ## CLI or the Codex desktop app
 
@@ -42,6 +44,8 @@ Leave `--model` unset. The companion uses `gpt-6.1-sol` at `xhigh`, the stronger
 
 A run that will not finish inside ten minutes uses the companion's own `--background` (and `--json` when you need the job id). That is the tracked job. A foreground call killed at that ceiling is a SIGTERM; the record is already on disk. Say so and run `status`. Do not treat the empty stdout as a failed review.
 
+Follow a background job with `wait`, as `background-jobs.md` below spells out. Do not pipe companion output into `head` or `tail`; redirect it to a file and read that.
+
 Return the companion stdout verbatim. If Codex generated images, show the user the saved files: non-JSON stdout has an `Images:` section, and `--json` carries `imageGenerations[].savedPath`.
 
 ## Result handling
@@ -65,4 +69,5 @@ Open one of these when the row matches. Each file is one hop from here.
 | [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md) | You need a complete template for a task type — diagnosis, narrow fix, review, research. |
 | [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md) | Checking a drafted prompt for lines that make GPT-6.1 worse. |
 | [references/delivery-paths.md](references/delivery-paths.md) | Choosing a direct `task`, `task --resume-last`, the `codex:codex-rescue` subagent, or a conversation fork. |
+| [references/background-jobs.md](references/background-jobs.md) | You launched with `--background`, or are waiting on a job — `wait`'s timeout and exit codes, and how to tell a finished job. |
 | [references/desktop-backend.md](references/desktop-backend.md) | A task should run in the Codex desktop app, continue a thread open there, or a desktop run failed. |

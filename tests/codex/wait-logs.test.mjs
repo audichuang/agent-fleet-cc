@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -143,6 +145,34 @@ test("wait exits 1 for a failed job and 2 for a cancelled job", () => {
   const r2 = run("node", [SCRIPT, "wait", `${cancelled.id} --cwd ${workspace} --json`], { cwd: workspace });
   assert.equal(r1.status, 1, r1.stderr);
   assert.equal(r2.status, 2, r2.stderr);
+});
+
+test("a timed-out wait says in words that the job is still running, not failed", () => {
+  const workspace = makeTempDir();
+  const job = writeRunningJob(workspace, "codex-run-words");
+  const result = run("node", [SCRIPT, "wait", `${job.id} --cwd ${workspace} --timeout-ms 0`], { cwd: workspace });
+  assert.equal(result.status, 10, result.stderr);
+  assert.match(result.stdout, /Wait timed out after 0s; the job is still running, not failed\./);
+  assert.match(result.stdout, new RegExp(`Run \`wait ${job.id}\` again`));
+
+  const done = writeTerminalJob(workspace, "codex-done-words", "completed");
+  const finished = run("node", [SCRIPT, "wait", `${done.id} --cwd ${workspace}`], { cwd: workspace });
+  assert.equal(finished.status, 0, finished.stderr);
+  assert.doesNotMatch(finished.stdout, /timed out/);
+});
+
+test("a reader that closes the pipe early does not crash the companion (EPIPE)", async () => {
+  const workspace = makeTempDir();
+  const job = writeRunningJob(workspace, "codex-run-epipe");
+  // wait writes only after its timeout, so both pipes are closed before the first write.
+  const child = spawn("node", [SCRIPT, "wait", job.id, "--cwd", workspace, "--timeout-ms", "1500"], {
+    cwd: workspace,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  child.stdout.destroy();
+  child.stderr.destroy();
+  const [code] = await once(child, "exit");
+  assert.equal(code, 10, "an EPIPE crash exits 1 instead of wait's timed-out 10");
 });
 
 // T2: --timeout-ms 0 returns immediately

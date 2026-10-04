@@ -467,6 +467,19 @@ function waitExitCode(snapshot) {
   return 1; // failed, or any non-completed terminal state
 }
 
+// A timed-out wait prints the same report as a finished one, so say in words that the
+// job is still going: `Status: running` plus a non-zero exit reads as a failure.
+function renderWaitTimeoutNotice(snapshot) {
+  if (!snapshot.waitTimedOut) {
+    return "";
+  }
+  const seconds = Math.round(snapshot.timeoutMs / 1000);
+  return (
+    `\nWait timed out after ${seconds}s; the job is still ${snapshot.job.status}, not failed. ` +
+    `Run \`wait ${snapshot.job.id}\` again to keep waiting.\n`
+  );
+}
+
 async function waitForSingleJobSnapshot(cwd, reference, options = {}) {
   const timeoutMs = coerceMs(options.timeoutMs, DEFAULT_STATUS_WAIT_TIMEOUT_MS, 0);
   const pollIntervalMs = coerceMs(options.pollIntervalMs, DEFAULT_STATUS_POLL_INTERVAL_MS, 100);
@@ -1267,7 +1280,7 @@ async function handleStatus(argv) {
           allowCrossWorkspace: !expected
         })
       : buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
-    outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
+    outputCommandResult(snapshot, renderJobStatusReport(snapshot.job) + renderWaitTimeoutNotice(snapshot), options.json);
     return;
   }
 
@@ -1301,7 +1314,7 @@ async function handleWait(argv) {
     pollIntervalMs: options["poll-interval-ms"],
     allowCrossWorkspace: !expected
   });
-  outputCommandResult(snapshot, renderJobStatusReport(snapshot.job), options.json);
+  outputCommandResult(snapshot, renderJobStatusReport(snapshot.job) + renderWaitTimeoutNotice(snapshot), options.json);
   process.exitCode = waitExitCode(snapshot);
 }
 
@@ -1716,6 +1729,14 @@ const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (invokedDirectly) {
+  // A reader that closes the pipe early (`... 2>&1 | head`) makes the next stdout or
+  // stderr write emit an async EPIPE 'error'. Unhandled, it crashes a foreground run
+  // mid-turn. Ignore EPIPE so the run finishes and records its result; rethrow the rest.
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (error) => {
+      if (error?.code !== "EPIPE") throw error;
+    });
+  }
   main().catch((error) => {
     const envelope = buildMainErrorEnvelope(error);
     // stdout: structured envelope for machine consumers (rescue subagent).
