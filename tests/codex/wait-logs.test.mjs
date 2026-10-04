@@ -196,9 +196,17 @@ test("a reader that closes stderr early does not kill a foreground task mid-run 
   assert.equal(open.status, 0, open.stderr);
   assert.match(open.stderr, /\[codex\]/);
 
-  // Close the read end before the child has started, so every stderr write hits a closed pipe.
-  const child = spawn("node", args, { cwd: repo, env: buildEnv(binDir), stdio: ["ignore", "pipe", "pipe"] });
+  // The companion starts only after the parent has closed stderr and seen it close, so every
+  // stderr write hits a closed pipe however the two processes are scheduled.
+  const child = spawn("sh", ["-c", 'read go; exec node "$@"', "sh", ...args], {
+    cwd: repo,
+    env: buildEnv(binDir),
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  const closed = once(child.stderr, "close");
   child.stderr.destroy();
+  await closed;
+  child.stdin.end("go\n");
   let stdout = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   const [code] = await once(child, "close");
