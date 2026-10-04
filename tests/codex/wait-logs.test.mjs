@@ -1,10 +1,14 @@
 import fs from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { makeTempDir, run } from "./helpers.mjs";
+import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
+import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
+import { rethrowUnlessEpipe } from "../../plugins/codex/scripts/codex-companion.mjs";
 import { resolveJobLogFile, saveState, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
 import { appendLogLine } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
 
@@ -143,6 +147,80 @@ test("wait exits 1 for a failed job and 2 for a cancelled job", () => {
   const r2 = run("node", [SCRIPT, "wait", `${cancelled.id} --cwd ${workspace} --json`], { cwd: workspace });
   assert.equal(r1.status, 1, r1.stderr);
   assert.equal(r2.status, 2, r2.stderr);
+});
+
+test("a timed-out wait says in words that the job is still running, not failed", () => {
+  const workspace = makeTempDir();
+  const job = writeRunningJob(workspace, "codex-run-words");
+  const result = run("node", [SCRIPT, "wait", `${job.id} --cwd ${workspace} --timeout-ms 0`], { cwd: workspace });
+  assert.equal(result.status, 10, result.stderr);
+  assert.match(result.stdout, /Wait timed out after 0s; the job is still running, not failed\./);
+  assert.match(result.stdout, new RegExp(`Run \`wait ${job.id}\` again`));
+
+  const json = run("node", [SCRIPT, "wait", `${job.id} --cwd ${workspace} --timeout-ms 0 --json`], { cwd: workspace });
+  assert.equal(json.status, 10, json.stderr);
+  assert.equal(JSON.parse(json.stdout).waitTimedOut, true, "--json stays one clean object");
+
+  const queued = writeTerminalJob(workspace, "codex-queued-words", "queued");
+  const viaStatus = run("node", [SCRIPT, "status", `${queued.id} --cwd ${workspace} --wait --timeout-ms 0`], { cwd: workspace });
+  assert.match(viaStatus.stdout, /Wait timed out after 0s; the job is still queued, not failed\./);
+
+  const done = writeTerminalJob(workspace, "codex-done-words", "completed");
+  const finished = run("node", [SCRIPT, "wait", `${done.id} --cwd ${workspace}`], { cwd: workspace });
+  assert.equal(finished.status, 0, finished.stderr);
+  assert.doesNotMatch(finished.stdout, /timed out/);
+});
+
+test("a reader that closes stdout early does not crash the companion (EPIPE)", async () => {
+  const workspace = makeTempDir();
+  const job = writeRunningJob(workspace, "codex-run-epipe");
+  // wait writes only stdout, and only after its timeout, so the pipe is closed first.
+  const child = spawn("node", [SCRIPT, "wait", job.id, "--cwd", workspace, "--timeout-ms", "1500"], {
+    cwd: workspace,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  child.stdout.destroy();
+  const [code] = await once(child, "exit");
+  assert.equal(code, 10, "an EPIPE crash exits 1 instead of wait's timed-out 10");
+});
+
+test("a reader that closes stderr early does not kill a foreground task mid-run (EPIPE)", async () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  const args = [SCRIPT, "task", "do the thing"];
+  // Text mode reports progress on stderr (`--json` keeps it quiet). Prove that with stderr open,
+  // so the closed-pipe run below cannot pass by never writing there.
+  const open = run("node", args, { cwd: repo, env: buildEnv(binDir) });
+  assert.equal(open.status, 0, open.stderr);
+  assert.match(open.stderr, /\[codex\]/);
+
+  // The companion starts only after the parent has closed stderr and seen it close, so every
+  // stderr write hits a closed pipe however the two processes are scheduled.
+  const child = spawn("sh", ["-c", 'read go; exec node "$@"', "sh", ...args], {
+    cwd: repo,
+    env: buildEnv(binDir),
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  // Subscribe before any await: a shell that dies early must fail the test, not hang it.
+  const finished = once(child, "close");
+  let stdout = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  const closed = once(child.stderr, "close");
+  child.stderr.destroy();
+  await closed;
+  child.stdin.end("go\n");
+  const [code] = await finished;
+  assert.equal(code, 0, "an EPIPE crash on stderr fails the run");
+  assert.match(stdout, /Handled the requested task\./);
+});
+
+test("only EPIPE is ignored on stdout/stderr; any other stream error still throws", () => {
+  assert.doesNotThrow(() => rethrowUnlessEpipe(Object.assign(new Error("pipe"), { code: "EPIPE" })));
+  const other = Object.assign(new Error("no space"), { code: "ENOSPC" });
+  assert.throws(() => rethrowUnlessEpipe(other), (error) => error === other);
+  assert.throws(() => rethrowUnlessEpipe(new Error("no code")), /no code/);
 });
 
 // T2: --timeout-ms 0 returns immediately

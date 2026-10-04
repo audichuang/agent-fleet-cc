@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.7.1
+
+**Following a background job is spelled out, and a closed pipe no longer kills a run.**
+
+- A reader that closes the pipe early (`... 2>&1 | head`) no longer crashes the companion with
+  an unhandled EPIPE mid-run; the run finishes and records its result.
+- A `wait` (or `status --wait`) that times out now says so in its text output: the job is still
+  running, not failed, and `wait <id>` again keeps waiting. Its exit code was already `10`, but
+  the report alone (`Status: running`) read as a failure.
+- A new reference, `skills/codex/references/background-jobs.md`, documents the background flow:
+  `--background --json` for the job id, `wait` with a `--timeout-ms` under the Bash call's own
+  timeout, exit codes `0`/`1`/`2`/`10`, then `result`. To be told when a job ends, it gives a
+  background loop that re-runs `wait` on `10`; a single background `wait` stops at its own timeout.
+  Completion is read from `Status`, never `Phase` (a progress label). `SKILL.md` gives the
+  `adversarial-review` argument order (options first, focus text last), `--base <ref>`, how the
+  review target is picked, `<verb> --help`, and not to pipe companion output into `head`/`tail`.
+- Ships the fixes folded into the 1.7.0 entry after 1.7.0 first went out (codex-cli 0.160.0
+  tracking, `<verb> --help`, the app new-chat Enter). Same version, different content left a
+  1.7.0 install from before them stale with nothing to signal it.
+
 ## 1.7.0
 
 **`task` can run inside the Codex desktop app.** The companion drives a thread in the user's
