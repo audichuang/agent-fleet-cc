@@ -31,16 +31,15 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `npm test` — the test chain only; `package.json` says what it is made of. Run on **Node 24**:
   codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says `>=22.3`, but CI
   pins 24 for this reason — see `.github/workflows/ci.yml`).
-- One plugin's suite: `node --test tests/<plugin>/*.test.mjs` (antigravity also needs
-  `--experimental-test-module-mocks`). The hermetic-vs-real-engine split is the `e2e-testing`
+- One plugin's suite: `node --test tests/<plugin>/*.test.mjs`. The hermetic-vs-real-engine split is the `e2e-testing`
   skill's job — ask it before claiming anything was verified end-to-end.
 - `npm run sync-shared` — after editing `shared/lib/`, re-vendor it into each migrated
-  plugin's `scripts/lib/shared/` (`cc`, `codex`, `antigravity`, `grok`). **Commit BOTH the source and
+  plugin's `scripts/lib/shared/` (`cc`, `codex`). **Commit BOTH the source and
   the vendored copy** — CI drift-checks them.
 - `npm run bump-version <plugin> <patch|minor|major>` — the one way to bump a version; locks
   `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
   check-version` verifies). **It syncs only those two.** A plugin may carry versions in other
-  manifests that drift silently — the dual-host ones (`cc`, `antigravity`) do, and both have
+  manifests that drift silently — the dual-host one (`cc`) does, and it has
   drifted before. So before bumping: `grep -rn '"version"' plugins/<name>` and hand-sync whatever
   else it finds. Don't trust a written-down inventory here; that list is exactly what rots. Same
   for the CHANGELOG: only some plugins keep one, so `ls plugins/<name>/CHANGELOG.md` before you
@@ -66,9 +65,9 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
   it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
 - **Never enumerate an engine's runtime catalog in shipped prose** — models, effort levels, tool
-  names. Point at the authority instead (grok: `grok models`; codex: the offline recipe in its
+  names. Point at the authority instead (codex: the offline recipe in its
   audit doc) and say the levels are per-model. A written-down list reads authoritative and rots
-  invisibly: grok's rotted inside 14 days, twice, and the second time it was actively telling
+  invisibly: the retired grok plugin's rotted inside 14 days, twice, and the second time it was actively telling
   users that `xhigh` would kill the job while it was the new default model's own top level. Same
   rule for the audit docs' prose — a pinned source anchor is a contract, an enumerated catalog is
   a liability.
@@ -117,11 +116,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   agent** — the agent list in a running session shows the *installed* description, and that is
   the authoritative tell. How to swap the installed copy for your edited one: the
   `local-install-test` skill.
-- `tests/codex/runtime.test.mjs`, `tests/shared/worker.test.mjs` and
-  `tests/antigravity/job-runtime.test.mjs` (`missing event finalized`) are occasionally flaky
+- `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.
-- `shared/lib/` is the source of truth. `cc`, `antigravity`, and `grok` run the full shared
+- `shared/lib/` is the source of truth. `cc` runs the full shared
   runtime (ProcessAdapter + runWorker); `codex` **uses** only the shared **state core**
   (state-store / events / job / reconcile), **not** the worker — note
   `sync-shared` still vendors the whole runtime (incl. `worker.mjs`) into codex, it just never
@@ -135,8 +133,10 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - **Engine ↔ CLI contract audits** — every flag/output field a plugin depends on, pinned to a
   source anchor (or, for a closed binary, an evidence class) + the recipe to re-run the check.
   Update the audit doc, not the plugin's `AGENTS.md`, when you learn something about an engine:
-  `docs/codex-protocol-sync-audit.md` · `docs/grok-cli-contract-audit.md` ·
-  `docs/antigravity-cli-contract-audit.md` · imagine has two, one per engine it renders on:
-  `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`
+  `docs/codex-protocol-sync-audit.md` · imagine has two, one per engine it renders on:
+  `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`. The retired
+  `antigravity` / `grok` plugins' audits (`docs/antigravity-cli-contract-audit.md`,
+  `docs/grok-cli-contract-audit.md`) stay because imagine's audits link into them — the `agy`
+  binary and grok's auth file are still imagine's engines
   (`cc` alone has none — its engine is Claude Code itself). codex's desktop backend has its own:
   `docs/codex-desktop-ipc-audit.md` (the Codex desktop app's private IPC router).

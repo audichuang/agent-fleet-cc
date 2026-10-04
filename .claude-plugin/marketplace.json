@@ -4,8 +4,8 @@
     "name": "audichuang"
   },
   "metadata": {
-    "description": "One marketplace for AI-agent delegation plugins — Codex, Antigravity (agy), Grok, and Claude Code (cc) via profiles — plus image generation.",
-    "version": "0.3.0"
+    "description": "One marketplace for AI-agent delegation plugins — Codex and Claude Code (cc) via profiles — plus image generation.",
+    "version": "0.4.0"
   },
   "plugins": [
     {
@@ -18,28 +18,10 @@
       }
     },
     {
-      "name": "antigravity",
-      "source": "./plugins/antigravity",
-      "description": "Use Google Antigravity (agy) from Claude Code to review code, delegate tasks, and hand off work — with cross-process-safe job state and dead-PID reconciliation.",
-      "version": "0.7.1",
-      "author": {
-        "name": "audichuang"
-      }
-    },
-    {
       "name": "cc",
       "source": "./plugins/cc",
       "description": "Run tasks on a headless Claude Code instance, selected by profile — usable from Claude Code or a Codex host via handoff",
       "version": "0.4.3"
-    },
-    {
-      "name": "grok",
-      "source": "./plugins/grok",
-      "description": "Use xAI Grok Build (grok) from Claude Code to delegate headless coding tasks — launch, wait, tail, cancel, resume.",
-      "version": "0.8.0",
-      "author": {
-        "name": "xAI"
-      }
     },
     {
       "name": "imagine",

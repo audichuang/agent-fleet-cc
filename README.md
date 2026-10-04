@@ -1,13 +1,11 @@
 # agent-fleet — one marketplace for AI-agent delegation plugins
 
-Five Claude Code plugins, one marketplace:
+Three Claude Code plugins, one marketplace:
 
 | Plugin | Commands | What it delegates to |
 |---|---|---|
 | `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server, or the Codex desktop app over IPC) |
-| `antigravity` | `/antigravity:*` (review, adversarial-review, rescue, task, handoff, status, wait, logs, result, cancel, setup) | Google Antigravity CLI (`agy`) |
 | `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
-| `grok` | `/grok:*` (task, status, wait, logs, result, cancel, setup) | xAI Grok Build (`grok`), headless — default model grok-4.5; auth via `grok login` or `XAI_API_KEY` |
 | `imagine` | `/imagine:image` | The marketplace's only image entry point, on either of two engines: xAI Grok Imagine over `POST /v1/images/generations` (reuses the grok CLI's OAuth login read-only, or `XAI_API_KEY`), or `--engine agy` through Antigravity's built-in `generate_image` (the user's Google login, no API key). Not a delegation engine: the file on disk is the receipt |
 
 > **`cc` v0.3.0** runs on the shared job runtime (`shared/lib/`). Its companion
@@ -23,15 +21,13 @@ Five Claude Code plugins, one marketplace:
 
 # Install the engines you want, then run each one's own setup:
 /plugin install codex@agent-fleet
-/plugin install antigravity@agent-fleet
 /plugin install cc@agent-fleet
-/plugin install grok@agent-fleet
 /plugin install imagine@agent-fleet
 /reload-plugins
 ```
 
-Install only the ones you use. Per-plugin requirements (codex CLI login, agy OAuth,
-Anthropic-compatible endpoint profiles) are documented in each plugin's directory
+Install only the ones you use. Per-plugin requirements (codex CLI login,
+Anthropic-compatible endpoint profiles, imagine's grok/agy login) are documented in each plugin's directory
 under `plugins/<name>/`.
 
 ### Lifecycle commands
@@ -43,18 +39,12 @@ The P0/P1 lifecycle surface is intentionally command-line oriented:
 /codex:wait <job-id>
 /codex:logs <job-id>
 
-/antigravity:task "..." --background
-/antigravity:wait <job-id>
-/antigravity:logs <job-id> [--follow]
-
 /cc:task "..." --background --profile <name>
 /cc:wait <job-id>
 /cc:logs <job-id> [--follow]
 ```
 
-Codex log streaming delegates to its native attach/live-log path. Antigravity logs
-come from persisted job logs; `agy --print` does not expose a tool-event stream, so
-the plugin does not invent one. cc logs expose the shared-runtime event log.
+Codex log streaming delegates to its native attach/live-log path. cc logs expose the shared-runtime event log.
 
 ### Quick start: `cc`
 
@@ -103,7 +93,7 @@ are read at spawn time and never written to job state.
 
 This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-plugin`
 (both archived) plus the local-only delegate plugin (since renamed to `cc`). The
-codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/cc:*`.
+codex prefix is unchanged (the antigravity plugin has since been retired); the old `/delegate:*` prefix is now `/cc:*`.
 
 1. Uninstall the old plugins and remove the old marketplaces
    (`openai-codex`, `antigravity`, `claude-delegate`) — prefixes would collide.
@@ -114,9 +104,9 @@ codex/antigravity prefixes are unchanged; the old `/delegate:*` prefix is now `/
 ## Development
 
 ```bash
-npm test               # structure + shared + cc + antigravity + codex + grok + imagine + e2e
-npm run test:cc        # one suite at a time (also test:codex, test:grok, test:imagine, …)
-npm run test:e2e       # black-box CLI end-to-end regression, the 5 plugins with a CLI to drive (real subprocess, fake engine, no API key)
+npm test               # structure + shared + cc + codex + imagine + e2e
+npm run test:cc        # one suite at a time (also test:codex, test:imagine, …)
+npm run test:e2e       # black-box CLI end-to-end regression, the plugins with a job CLI to drive (cc, codex) (real subprocess, fake engine, no API key)
 npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```
@@ -132,9 +122,9 @@ to bump a version, what CI checks beyond `npm test`, which plugin may touch whic
 **Shared foundation:** `shared/lib/` is a zero-dependency job runtime — a directory-per-job
 state store with O_EXCL CAS terminal transitions, a generic adapter-driven worker (process-group
 spawn/kill so engine grandchildren are reaped), mandatory env sanitization with a recursion
-guard, and a parameterized 10-scenario conformance suite. `cc`, `grok`, and `antigravity` run the
-full runtime — engine knowledge lives in a per-engine adapter (`makeClaudeAdapter`,
-`makeGrokAdapter`, `makeAntigravityAdapter`), the job lifecycle in the shared lib — while `codex`
-uses only the shared state core and drives its own app-server broker instead. Those four carry a
+guard, and a parameterized 10-scenario conformance suite. `cc` runs the
+full runtime — engine knowledge lives in a per-engine adapter (`makeClaudeAdapter`), the job
+lifecycle in the shared lib — while `codex` uses only the shared state core and drives its own
+app-server broker instead. Both carry a
 vendored copy under `scripts/lib/shared/`, kept in sync by `npm run sync-shared` and drift-checked
 in CI. Designs live in `docs/specs/`.

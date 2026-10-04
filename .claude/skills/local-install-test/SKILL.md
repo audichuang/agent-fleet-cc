@@ -1,8 +1,8 @@
 ---
 name: local-install-test
 description: >-
-  How to install a locally-developed agent-fleet-cc plugin (codex / antigravity /
-  cc / grok) into the real Claude Code and test it — including how to
+  How to install a locally-developed agent-fleet-cc plugin (codex / cc /
+  imagine) into the real Claude Code and test it — including how to
   REPLACE the currently-installed version with your edited copy. Use this whenever
   you edit a plugin in this repo and want to try it for real in Claude Code, or ask
   "how do I install this locally", "how do I test my plugin change", "how do I
@@ -194,7 +194,7 @@ Verifying plugin **agents** (subagents) has three extra traps (all hit for real 
   Verify in an interactive session: call the Agent tool with
   `subagent_type: "<plugin>:<agent>"`, then prove the run went through the real
   runtime by checking it left a job record (e.g.
-  `node plugins/antigravity/scripts/commands/status.mjs`).
+  `node plugins/codex/scripts/codex-companion.mjs status`).
 - `claude plugin details <plugin>@agent-fleet` reflects the **marketplace clone**,
   not the installed pin — after a Workflow-C install it still shows the old
   version/component inventory. Trust `claude plugin list` (reads the pin) plus the

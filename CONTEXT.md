@@ -8,8 +8,7 @@ whether Claude Code reaches for an engine on its own.
 ## Language
 
 **Engine**:
-One of the delegatable AI CLIs the marketplace wraps: `codex`, `antigravity`
-(agy), `grok`, `cc`. Each is a plugin under `plugins/<name>/`.
+One of the delegatable AI CLIs the marketplace wraps: `codex`, `cc`. Each is a plugin under `plugins/<name>/`.
 _Avoid_: provider, model, tool.
 
 **Commander**:

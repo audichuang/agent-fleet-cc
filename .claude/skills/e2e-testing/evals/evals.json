@@ -30,7 +30,7 @@
     {
       "id": 2,
       "name": "verify-two-layer",
-      "prompt": "I refactored grok's status output. How do I verify it end-to-end against the real engines, and how is that different from just running the test suite?",
+      "prompt": "I refactored codex's status output. How do I verify it end-to-end against the real engines, and how is that different from just running the test suite?",
       "expected_output": "A procedure that distinguishes the hermetic suite (npm run test:e2e, fake engines) from the real-engine smoke (manual gate), notes that the smoke skips engines whose binary is not on PATH, runs the bundled real-engine-smoke.mjs, and notes the cost/manual-gate caveat.",
       "files": [],
       "assertions": [
