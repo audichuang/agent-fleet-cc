@@ -15,6 +15,12 @@
   `Sleeping 30s.`). A hook that fails, blocks or takes 10 s or more, and an MCP tool's own
   progress message, are logged as well; they were dropped before. Without these lines `status`
   showed a working job as "process may be stuck" after two quiet minutes.
+- `status` leaves `Token usage`, `Rate limits updated` and `Command output streaming` lines out
+  of its `Progress` preview. A live run wrote the first two on every model call, every 5–30 s
+  while a command ran, so the 4-line preview showed only those. They still go to the log and
+  still count for `Last activity`.
+- `SKILL.md` says to leave `--effort` unset (the companion runs at `xhigh`) unless the user
+  names a level, matching the existing rule for `--model`.
 - `skills/codex/references/background-jobs.md`: the background wait loop also returns after 30
   minutes with the job still running. The host then runs `status`. Under 30 minutes of quiet
   means the job is working, and the 2-minute "may be stuck" mark alone is not a stall. After 30

@@ -62,6 +62,16 @@ function isProgressBlockTitle(line) {
   );
 }
 
+// Lines codex.mjs writes on a timer or on every model call (token usage and rate limits
+// arrive with each request, every few seconds while a command runs). They stay in the log
+// so Last activity reflects them, but they would fill the short Progress preview and hide
+// what Codex is doing.
+const HEARTBEAT_PROGRESS_PREFIXES = ["Token usage:", "Rate limits updated", "Command output streaming"];
+
+export function isHeartbeatProgressLine(line) {
+  return HEARTBEAT_PROGRESS_PREFIXES.some((prefix) => line.startsWith(prefix));
+}
+
 function formatRelativeAgo(ms) {
   if (!Number.isFinite(ms) || ms < 0) return null;
   const totalSeconds = Math.floor(ms / 1000);
@@ -86,7 +96,7 @@ export function readJobProgressPreview(logFile, maxLines = DEFAULT_MAX_PROGRESS_
     const trimmed = raw.trimEnd();
     if (!trimmed || !trimmed.startsWith("[")) continue;
     const parsed = parseLogLine(trimmed);
-    if (!parsed || !parsed.text || isProgressBlockTitle(parsed.text)) continue;
+    if (!parsed || !parsed.text || isProgressBlockTitle(parsed.text) || isHeartbeatProgressLine(parsed.text)) continue;
     const lineTime = Date.parse(parsed.timestamp);
     const ago = Number.isFinite(lineTime) ? formatRelativeAgo(now - lineTime) : null;
     result.push(ago ? `[${ago}] ${parsed.text}` : parsed.text);
