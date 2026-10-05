@@ -12,15 +12,36 @@ test("plugin manifest matches the directory it ships from", () => {
   assert.match(plugin.version, /^\d+\.\d+\.\d+$/);
 });
 
-test("image is model-invocable — the commander must be able to reach it", () => {
-  const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
-  assert.doesNotMatch(body, /disable-model-invocation/);
+const SKILL = path.join(ROOT, "skills/imagine/SKILL.md");
+const REFS = path.join(ROOT, "skills/imagine/references");
+
+// The body after the frontmatter, so a description cannot satisfy a body assertion.
+function skillBody() {
+  return fs.readFileSync(SKILL, "utf8").replace(/^---\n[\s\S]*?\n---\n/, "");
+}
+
+test("one skill is the whole surface — no slash command, no second skill", () => {
+  // Skill discovery is a directory scan, so adding a skill or a command is a mkdir; pin both.
+  assert.deepEqual(fs.readdirSync(path.join(ROOT, "skills")), ["imagine"]);
+  assert.ok(!fs.existsSync(path.join(ROOT, "commands")), "the /imagine:image command was folded into the skill");
 });
 
-test("the command launches the script from CLAUDE_PLUGIN_ROOT, never a cache path", () => {
-  const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
+test("the skill is model-invocable — the commander must be able to reach it on its own", () => {
+  const fm = fs.readFileSync(SKILL, "utf8").match(/^---\n([\s\S]*?)\n---/)[1];
+  assert.doesNotMatch(fm, /disable-model-invocation:\s*true/);
+});
+
+test("SKILL.md stays short and every reference it links exists, and vice versa", () => {
+  const body = skillBody();
+  assert.ok(body.split("\n").length <= 80, "the body loads on every use; detail belongs in references/");
+  const linked = [...body.matchAll(/\]\(references\/([\w.-]+\.md)\)/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(linked)].sort(), fs.readdirSync(REFS).sort());
+});
+
+test("the skill launches the script from CLAUDE_PLUGIN_ROOT, never a cache path", () => {
+  const body = skillBody();
   const launch = body.split("\n").find((l) => /imagine\.mjs/.test(l) && /--prompt-file/.test(l));
-  assert.ok(launch, "image.md must show the actual launch command");
+  assert.ok(launch, "SKILL.md must show the actual launch command");
   assert.match(launch, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/imagine\.mjs/);
   assert.doesNotMatch(launch, /cache\//, "the launch command must not hardcode a versioned cache path");
 });
@@ -64,7 +85,7 @@ test("the command carries the prompt in a file, never through the shell", () => 
       assert.doesNotMatch(block, /<the |<prompt|\$ARGUMENTS/, `${rel}: no prompt text may reach a command line:\n${block}`);
     }
   }
-  assert.ok(invocations >= 9, `expected the command plus the eight worked examples, saw ${invocations}`);
+  assert.ok(invocations >= 9, `expected the skill's launch plus the eight worked examples, saw ${invocations}`);
 });
 
 test("each worked example keeps its prompt in its own text fence, not in the shell fence", () => {
@@ -72,7 +93,7 @@ test("each worked example keeps its prompt in its own text fence, not in the she
   // one ```bash fence, where only the `# prompt.txt:` marker was a comment — pasted whole,
   // the prose ran as a command. Pairing the counts catches a body drifting back in without
   // any guessing about what a shell line looks like.
-  const ex = fs.readFileSync(path.join(ROOT, "skills/imagine-prompts/references/examples.md"), "utf8");
+  const ex = fs.readFileSync(path.join(REFS, "examples.md"), "utf8");
   const count = (re) => [...ex.matchAll(re)].length;
   const prompts = count(/^```text$/gm);
   const commands = count(/^```bash$/gm);
@@ -80,10 +101,10 @@ test("each worked example keeps its prompt in its own text fence, not in the she
   assert.ok(commands >= 8, `expected the eight worked examples, saw ${commands}`);
 });
 
-test("the command sends the user to the prompt skill before spending quota", () => {
-  const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
-  assert.match(body, /skills\/imagine-prompts\/SKILL\.md/);
-  assert.ok(fs.existsSync(path.join(ROOT, "skills/imagine-prompts/SKILL.md")), "the skill it points at must exist");
+test("the skill sends the agent to the prompt recipe before spending quota", () => {
+  const body = skillBody();
+  const step1 = body.slice(body.indexOf("## 1."), body.indexOf("## 2."));
+  assert.match(step1, /references\/prompt-craft\.md/);
 });
 
 test("this plugin does NOT vendor the shared runtime — it has no job lifecycle", () => {
@@ -94,29 +115,28 @@ test("no enumerated runtime catalog in shipped prose — defer to the live autho
   // Root AGENTS.md: a written-down catalog reads authoritative and rots invisibly.
   // For aspect ratios the authority is the server itself — a bad value returns 422
   // listing every accepted variant, which beats any list we could hold. So the
-  // command must NOT hardcode the enum in its argument-hint, and must say who owns it.
-  const body = fs.readFileSync(path.join(ROOT, "commands/image.md"), "utf8");
-  const hint = body.match(/^argument-hint:.*$/m)?.[0] ?? "";
-  assert.doesNotMatch(hint, /16:9|9:16|3:2|2:3/, "the aspect enum must not be frozen into the hint");
-  assert.match(body, /422/, "must name the server error that enumerates the legal ratios");
-  const skill = fs.readFileSync(path.join(ROOT, "skills/imagine-prompts/SKILL.md"), "utf8");
-  assert.match(skill, /image-generation-models/, "the skill must point at the live model catalog");
+  // skill must NOT hardcode the enum in its description, and must say who owns it.
+  const fm = fs.readFileSync(SKILL, "utf8").match(/^---\n([\s\S]*?)\n---/)[1];
+  assert.doesNotMatch(fm, /16:9|9:16|3:2|2:3/, "the aspect enum must not be frozen into the frontmatter");
+  assert.match(skillBody(), /422/, "must name the server error that enumerates the legal ratios");
+  const craft = fs.readFileSync(path.join(REFS, "prompt-craft.md"), "utf8");
+  assert.match(craft, /image-generation-models/, "the prompt recipe must point at the live model catalog");
 });
 
 test("the model reference that DOES enumerate the catalog is date-anchored and self-invalidating", () => {
   // grok's shipped catalog rotted twice in 14 days. This file is allowed to compare models —
   // that comparison is the whole point of it — but only behind a date and a re-check recipe,
   // so a reader can tell how old it is and refresh it in one command.
-  const ref = fs.readFileSync(path.join(ROOT, "skills/imagine-prompts/references/model-and-params.md"), "utf8");
+  const ref = fs.readFileSync(path.join(REFS, "model-and-params.md"), "utf8");
   assert.match(ref, /\b20\d\d-\d\d-\d\d\b/, "must state the date it was read");
   assert.match(ref, /image-generation-models/, "must carry the free live-catalog re-check");
   assert.match(ref, /rot|authority/i, "must say out loud that it goes stale");
 });
 
 test("the skill declares the frontmatter Claude Code loads it by", () => {
-  const skill = fs.readFileSync(path.join(ROOT, "skills/imagine-prompts/SKILL.md"), "utf8");
+  const skill = fs.readFileSync(SKILL, "utf8");
   const fm = skill.match(/^---\n([\s\S]*?)\n---/);
   assert.ok(fm, "SKILL.md must open with YAML frontmatter");
-  assert.match(fm[1], /^name:\s*imagine-prompts\s*$/m);
+  assert.match(fm[1], /^name:\s*imagine\s*$/m);
   assert.match(fm[1], /^description:\s*\S/m, "description is what decides whether the skill fires");
 });

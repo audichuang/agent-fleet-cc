@@ -5,7 +5,7 @@ Two Claude Code plugins, one marketplace:
 | Plugin | How Claude Code reaches it | What it does |
 |---|---|---|
 | `codex` | the `codex` skill (no slash commands): ask for a Codex review, check, diagnosis, implementation or image | Delegates to OpenAI Codex (app-server, or the Codex desktop app over IPC) |
-| `imagine` | `/imagine:image` | The marketplace's only image entry point, on either of two engines: xAI Grok Imagine over `POST /v1/images/generations` (reuses the grok CLI's OAuth login read-only, or `XAI_API_KEY`), or `--engine agy` through Antigravity's built-in `generate_image` (the user's Google login, no API key). Not a delegation engine: the file on disk is the receipt |
+| `imagine` | the `imagine` skill: ask for an image (also `/imagine:imagine`) | The marketplace's only image entry point, on either of two engines: xAI Grok Imagine over `POST /v1/images/generations` (reuses the grok CLI's OAuth login read-only, or `XAI_API_KEY`), or `--engine agy` through Antigravity's built-in `generate_image` (the user's Google login, no API key). Not a delegation engine: the file on disk is the receipt |
 
 ## Install
 

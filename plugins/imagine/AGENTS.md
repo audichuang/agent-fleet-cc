@@ -3,8 +3,8 @@
 # imagine plugin — 生圖(xAI Grok Imagine / Google Antigravity)
 
 ## 定位
-**不是 engine plugin。** marketplace 另外四顆(codex/antigravity/cc/grok)都是「把任務委派給另一個
-coding agent」;這顆是一個**能力**:生一張圖。所以它沒有 job 生命週期、沒有
+**不是 engine plugin。** marketplace 另一顆(codex)是「把任務委派給另一個 coding agent」;
+這顆是一個**能力**:生一張圖。所以它沒有 job 生命週期、沒有
 `launch/wait/logs/cancel`、**不用 shared runtime**(`scripts/lib/shared/` 不存在,
 `sync-shared.mjs` 也不該把它加進去)。
 
@@ -64,7 +64,7 @@ plugin 移除,不留重複入口。
   (hermes-agent #26942)。優先吃 `b64_json`,只有 URL 時當場抓 bytes,不要把 URL 傳出去。
 - **不要在 shipped prose 裡列舉 model 目錄**(root `AGENTS.md` 的規則)。預設寫死一個
   `grok-imagine-image` 可以,清單指向免費的 `GET /v1/image-generation-models`。
-  **唯一經 owner 核准的例外**是 `skills/imagine-prompts/references/model-and-params.md`:
+  **唯一經 owner 核准的例外**是 `skills/imagine/references/model-and-params.md`:
   它的三 model 比較是 36 次實測的結果,不是抄目錄,免費 GET 也拿不到,所以留著 ——
   代價是它有日期錨點和重驗指令,而且**已經腐爛過一次**(0.1.0 上線前,第 11 行還說預設是
   `-2.0`,程式和實測段是 `grok-imagine-image`)。改那份文件時,先確認每一句「plugin default」
@@ -79,5 +79,8 @@ plugin 移除,不留重複入口。
   假 agy 行程,不連網也不需要裝 agy。
 
 ## 細節指向
-- prompt 怎麼寫才生得出好圖(recipe / 範例 / 反模式 / 選 model):`skills/imagine-prompts/SKILL.md`。
-  `commands/image.md` 在花 quota 前會先叫你讀它。
+- **入口只有一個 skill**:`skills/imagine/SKILL.md`(0.3.0 起;`/imagine:image` command 已併入)。
+  它是 model-invocable,使用者說要一張圖時 Claude 會自己載入。body 保持 ≤80 行,細節放
+  `references/`(one-hop 連結,測試要求連結集合 = 檔案集合)。
+- prompt 怎麼寫才生得出好圖(recipe / 反模式):`references/prompt-craft.md`;範例:`references/examples.md`;
+  選 model:`references/model-and-params.md`;agy 引擎與各種失敗訊息:`references/running.md`。
