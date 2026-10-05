@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.8.0
+
+**A background job may run 3 hours, and a long one is checked on every 30 minutes.**
+
+- The default hard cap on a background job is 3 hours, up from 1. A long multi-stage task was
+  being stopped mid-run at the hour. A dead job is still reaped by the liveness watchdog in about
+  15 minutes; `CODEX_JOB_TIMEOUT_MS` still overrides the cap.
+- `logs --follow` keeps following until the job's own cap (plus headroom), read from the job
+  record. It used to stop after a fixed ~65 minutes, which with a longer cap would have dropped
+  a healthy job before it finished.
+- `skills/codex/references/background-jobs.md`: the background wait loop also returns after 30
+  minutes with the job still running. The host then runs `status`, keeps waiting while
+  `Progress` moves, and offers `cancel` when it stops moving, so a stuck job is not left running
+  until the cap. The reference now documents the cap and `CODEX_JOB_TIMEOUT_MS`.
+
 ## 1.7.1
 
 **Following a background job is spelled out, and a closed pipe no longer kills a run.**

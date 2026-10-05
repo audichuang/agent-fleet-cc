@@ -277,7 +277,7 @@ async function main() {
   // the broker Node parent survives, the broker can no longer serve any turn —
   // yet its listen socket and every client socket stay open and silent. An
   // in-flight worker blocked on `await state.completion` would then hang until
-  // the 1-hour job hard cap, because its transport watchdog only fires on a
+  // the job hard cap (DEFAULT_JOB_TIMEOUT_MS), because its transport watchdog only fires on a
   // socket close (a live-but-silent socket triggers neither 'error' nor
   // 'close'). Tear the broker down the moment the app-server exits: shutdown()
   // ends every client socket, so each worker's BrokerCodexAppServerClient sees

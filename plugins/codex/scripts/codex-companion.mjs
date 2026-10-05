@@ -1574,10 +1574,12 @@ export async function handleAttach(argv, deps = {}) {
   let jobId;
   let logFile;
   let statusStateDir;
+  let jobTimeoutMs;
   if (reference) {
     const snapshot = buildSingleJobSnapshot(cwd, reference, { allowCrossWorkspace: !expected });
     workspaceRoot = snapshot.workspaceRoot;
     jobId = snapshot.job.id;
+    jobTimeoutMs = snapshot.job.timeoutMs;
     // For a cross-workspace hit, read from the job's PHYSICAL state dir;
     // re-deriving from workspaceRoot can resolve to a different (missing) path.
     statusStateDir = snapshot.stateDir ?? resolveStateDir(workspaceRoot);
@@ -1597,6 +1599,7 @@ export async function handleAttach(argv, deps = {}) {
       throw new Error("No active Codex job to attach to. Run `status` to inspect known jobs.");
     }
     jobId = active.id;
+    jobTimeoutMs = active.timeoutMs;
     logFile = active.logFile ?? pureJobLogPath(workspaceRoot, jobId);
     statusStateDir = resolveStateDir(workspaceRoot);
   }
@@ -1610,7 +1613,7 @@ export async function handleAttach(argv, deps = {}) {
         // R1: read the AUTHORITATIVE status (terminal.lock over a stale-running
         // job.json), not raw job.json.status. A markJobRunning-vs-finalizeJob race
         // can leave job.json "running" after a finalize won the lock; reading raw
-        // status would tail a finished job until maxPolls (~65 min).
+        // status would tail a finished job until maxPolls (past the job hard cap).
         return resolveAuthoritativeStatus(statusStateDir, jobId) ?? null;
       } catch {
         return null;
@@ -1624,13 +1627,23 @@ export async function handleAttach(argv, deps = {}) {
     sleep: deps.sleep,
     write: deps.write,
     pollIntervalMs,
-    // Finite production ceiling (past the 1-hour job hard cap) so a job that
-    // never reaches a readable terminal state can't tail forever. 7800 polls ×
-    // 500ms ≈ 65 min, leaving headroom beyond DEFAULT_JOB_TIMEOUT_MS so a healthy
+    // Finite production ceiling (past the job's own hard cap) so a job that
+    // never reaches a readable terminal state can't tail forever, while a healthy
     // long job is still followed to its own terminal state, not cut off early.
-    maxPolls: deps.maxPolls ?? 7800,
+    maxPolls: deps.maxPolls ?? defaultFollowMaxPolls(pollIntervalMs, jobTimeoutMs),
     maxConsecutiveNullStatus: deps.maxConsecutiveNullStatus
   });
+}
+
+// Headroom past the job's hard cap before `logs --follow` gives up on a job whose
+// status never turns terminal; the hard-cap timer finalizes the record well within it.
+const FOLLOW_HEADROOM_MS = 5 * 60 * 1000;
+
+// Poll budget for `logs --follow`: covers the job's hard cap plus headroom, so the
+// ceiling tracks DEFAULT_JOB_TIMEOUT_MS and CODEX_JOB_TIMEOUT_MS instead of a fixed count.
+export function defaultFollowMaxPolls(pollIntervalMs, jobTimeoutMs) {
+  const capMs = Number.isFinite(jobTimeoutMs) && jobTimeoutMs > 0 ? jobTimeoutMs : resolveJobTimeoutMs();
+  return Math.ceil((capMs + FOLLOW_HEADROOM_MS) / pollIntervalMs);
 }
 
 export async function handleLogs(argv, deps = {}) {

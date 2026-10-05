@@ -7,16 +7,16 @@ import { resolveJobFile, resolveStateDir } from "../../plugins/codex/scripts/lib
 import { runTrackedJob, DEFAULT_JOB_TIMEOUT_MS } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
 import { appendProgressEvent } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
 
-test("the default background-job hard cap is one hour", () => {
-  // A single task call can legitimately run many TDD cycles (npm/vitest/tsc),
-  // so the unconditional wall-clock backstop is 1h — long enough not to cut a
-  // healthy long job, short enough that a wedged background job never runs all
-  // day. (The watchdog still reaps a confirmed-dead job — broker unreachable +
-  // silent past hangQuietMs — in ~15 min, independent of this cap.)
-  assert.equal(DEFAULT_JOB_TIMEOUT_MS, 60 * 60 * 1000);
+test("the default background-job hard cap is three hours", () => {
+  // A single task call can legitimately run many TDD cycles (npm/vitest/tsc) or
+  // a long multi-stage verification; 1h cut such healthy jobs mid-run, so the
+  // unconditional wall-clock backstop is 3h. (The watchdog still reaps a
+  // confirmed-dead job — broker unreachable + silent past hangQuietMs — in
+  // ~15 min, independent of this cap.)
+  assert.equal(DEFAULT_JOB_TIMEOUT_MS, 3 * 60 * 60 * 1000);
 });
 
-test("a tracked job with no explicit timeout records the one-hour deadline", async () => {
+test("a tracked job with no explicit timeout records the default deadline", async () => {
   // helpers.mjs drops ambient CODEX_*, so CODEX_JOB_TIMEOUT_MS is unset and the
   // default applies. The runner settles immediately, so the timer never fires —
   // we only assert the deadline the running record was stamped with.
@@ -26,7 +26,7 @@ test("a tracked job with no explicit timeout records the one-hour deadline", asy
   await runTrackedJob({ id: jobId, workspaceRoot: workspace }, async () => "ok", {});
 
   const record = JSON.parse(fs.readFileSync(resolveJobFile(workspace, jobId), "utf8"));
-  assert.equal(record.timeoutMs, 60 * 60 * 1000);
+  assert.equal(record.timeoutMs, 3 * 60 * 60 * 1000);
 });
 
 test("runTrackedJob interrupts the hung turn when the hard timeout fires", async () => {

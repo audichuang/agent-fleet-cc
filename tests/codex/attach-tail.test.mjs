@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
 import { writeJobFile, saveState, resolveJobLogFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { appendLogLine } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
-import { streamJobLog, handleAttach, makeUtf8LogReader } from "../../plugins/codex/scripts/codex-companion.mjs";
+import { appendLogLine, DEFAULT_JOB_TIMEOUT_MS, JOB_TIMEOUT_ENV } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { streamJobLog, handleAttach, makeUtf8LogReader, defaultFollowMaxPolls } from "../../plugins/codex/scripts/codex-companion.mjs";
 
 test("streamJobLog writes new chunks until terminal, then flushes the tail and exits", async () => {
   const out = [];
@@ -174,4 +174,22 @@ test("makeUtf8LogReader reassembles a multibyte char (é = C3 A9) split across t
   const combined = first + second;
   assert.equal(combined, "é");
   assert.ok(!combined.includes("�"), "combined output must not contain a replacement char");
+});
+
+test("logs --follow keeps polling past the job's own hard cap, whatever that cap is", () => {
+  // The follow ceiling was once a fixed poll count sized to a 1h cap; raising the
+  // cap left --follow giving up on healthy jobs before their terminal state.
+  const covers = (polls, intervalMs, capMs) => polls * intervalMs > capMs;
+  assert.ok(covers(defaultFollowMaxPolls(500), 500, DEFAULT_JOB_TIMEOUT_MS), "default cap");
+  assert.ok(covers(defaultFollowMaxPolls(2000), 2000, DEFAULT_JOB_TIMEOUT_MS), "slower poll interval");
+  const fourHours = 4 * 60 * 60 * 1000;
+  assert.ok(covers(defaultFollowMaxPolls(500, fourHours), 500, fourHours), "the job record's own timeoutMs");
+  const saved = process.env[JOB_TIMEOUT_ENV];
+  process.env[JOB_TIMEOUT_ENV] = String(fourHours);
+  try {
+    assert.ok(covers(defaultFollowMaxPolls(500), 500, fourHours), "CODEX_JOB_TIMEOUT_MS override");
+  } finally {
+    if (saved === undefined) delete process.env[JOB_TIMEOUT_ENV];
+    else process.env[JOB_TIMEOUT_ENV] = saved;
+  }
 });

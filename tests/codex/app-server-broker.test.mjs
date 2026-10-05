@@ -9,7 +9,7 @@ const other = Symbol("other");
 // When the underlying codex app-server dies but the broker Node parent survives,
 // the broker must tear down its client sockets so a worker blocked on an in-flight
 // turn unblocks (its transport watchdog only fires on a socket close) instead of
-// hanging to the 1-hour job hard cap.
+// hanging to the job hard cap (DEFAULT_JOB_TIMEOUT_MS).
 test("app-server death triggers exactly one broker teardown; a live app-server triggers none", async () => {
   let resolveExit;
   const appClient = { exitPromise: new Promise((r) => (resolveExit = r)) };
