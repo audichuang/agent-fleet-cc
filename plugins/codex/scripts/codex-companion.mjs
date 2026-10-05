@@ -1621,7 +1621,7 @@ export async function handleAttach(argv, deps = {}) {
     });
 
   const requestedIntervalMs = Number(options["poll-interval-ms"]);
-  const pollIntervalMs = deps.pollIntervalMs ?? (requestedIntervalMs > 0 ? requestedIntervalMs : 500);
+  const pollIntervalMs = deps.pollIntervalMs ?? (Number.isFinite(requestedIntervalMs) && requestedIntervalMs > 0 ? requestedIntervalMs : 500);
   return streamJobLog({
     readChunk,
     readStatus,

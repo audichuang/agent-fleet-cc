@@ -715,6 +715,9 @@ export class DesktopThread {
     // swapped: a Plan-mode thread stays in Plan and keeps its instructions. Its settings
     // need a model, and an effort left out would reset to the model's default.
     if (model && effort) {
+      // A resync clears the snapshot until the reload lands; reading the mode then would
+      // send Default and drop a Plan thread's instructions.
+      if (this.state == null) await this.waitFor(() => this.state != null, 10_000, "snapshot");
       // The same lookup the app makes for the mode it would inherit.
       const inherited = this.state?.latestThreadSettings?.collaborationMode ?? this.state?.latestCollaborationMode ?? null;
       request.collaborationMode = {

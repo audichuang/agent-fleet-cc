@@ -753,3 +753,27 @@ test("--new-thread-via: cli by default, app by flag or env, nothing else", () =>
   assert.throws(() => resolveNewThreadVia("ui", {}), /Use cli or app/);
   assert.equal(buildNewThreadUrl({ prompt: "a b&c" }), "codex://threads/new?prompt=a+b%26c");
 });
+
+test("a turn started while a resync has the snapshot cleared waits for it, so a Plan thread stays in Plan", async () => {
+  const calls = [];
+  const client = {
+    closed: false,
+    onBroadcast: () => () => {},
+    call: async (method, params) => {
+      calls.push({ method, params });
+      return { result: { result: { turn: { id: "turn-1" } } } };
+    }
+  };
+  const thread = new DesktopThread(client, "thread-x");
+  thread.state = null; // what resync() leaves until the reload lands
+  const started = thread.startTurn("go", { model: "gpt-6.1-sol", effort: "xhigh" });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(calls.length, 0, "the turn went out before the snapshot came back");
+  thread.state = { latestCollaborationMode: { mode: "plan", settings: { model: "x", reasoning_effort: "low", developer_instructions: "P" } } };
+  thread.notify();
+  assert.equal(await started, "turn-1");
+  assert.deepEqual(calls[0].params.turnStart.request.collaborationMode, {
+    mode: "plan",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "xhigh", developer_instructions: "P" }
+  });
+});
