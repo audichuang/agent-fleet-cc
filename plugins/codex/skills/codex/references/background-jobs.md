@@ -21,14 +21,17 @@ timeout under the Bash call's own (2 minutes by default). Bare `wait` waits 4 mi
 
 ## At `wait exit: 10` (30-minute check-in)
 
-Run `status <jobId>` and compare it with the previous check-in (at the first one, judge by
-`Last activity` alone).
+Run `status <jobId>`. Each `Progress` line says how long ago it was written; `Last activity`
+is the newest write to the log.
 
-- `Progress` moved, or `Last activity` is recent: it is working. Rerun the loop; a one-line
-  progress note to the user is enough.
-- No new `Progress`, `Last activity` marked `no log output; process may be stuck`, or the same
-  step repeating: tell the user what `status` shows and offer `cancel <jobId>`, and rerun the
-  loop while they decide. Never cancel unless the user says to.
+- `Last activity` under 30 minutes: it is working. Rerun the loop; a one-line progress note to
+  the user is enough. A `! … process may be stuck` mark alone is not a stall: it shows after
+  about 2 minutes of quiet, which a long think (`Thinking.`), `Compacting context.`,
+  `Sleeping …` or a running command all cause.
+- Quiet for 30 minutes or more, or looping (the log at `Log:` shows the same command failing
+  the same way over and over, with no file changes in between): tell the user what you saw
+  (the last line and how long ago) and offer `cancel <jobId>`, and rerun the loop while they
+  decide. Never cancel unless the user says to.
 
 ## Time cap
 

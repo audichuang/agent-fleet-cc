@@ -10,10 +10,17 @@
 - `logs --follow` keeps following until the job's own cap (plus headroom), read from the job
   record. It used to stop after a fixed ~65 minutes, which with a longer cap would have dropped
   a healthy job before it finished.
+- The job log no longer goes quiet while Codex is working. A long think, an automatic context
+  compaction and a deliberate sleep each write a line (`Thinking.`, `Compacting context.`,
+  `Sleeping 30s.`). A hook that fails, blocks or takes 10 s or more, and an MCP tool's own
+  progress message, are logged as well; they were dropped before. Without these lines `status`
+  showed a working job as "process may be stuck" after two quiet minutes.
 - `skills/codex/references/background-jobs.md`: the background wait loop also returns after 30
-  minutes with the job still running. The host then runs `status`, keeps waiting while
-  `Progress` moves, and offers `cancel` when it stops moving, so a stuck job is not left running
-  until the cap. The reference now documents the cap and `CODEX_JOB_TIMEOUT_MS`.
+  minutes with the job still running. The host then runs `status`. Under 30 minutes of quiet
+  means the job is working, and the 2-minute "may be stuck" mark alone is not a stall. After 30
+  quiet minutes, or a log showing the same command failing over and over, the host tells the
+  user and offers `cancel`, so a stuck job is not left running until the cap. The reference
+  documents the cap and `CODEX_JOB_TIMEOUT_MS`.
 
 ## 1.7.1
 
