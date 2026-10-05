@@ -106,7 +106,7 @@ test("the skill sends the agent to the prompt recipe before spending quota", () 
   // launched. The reference table below the launch cannot stand in for it.
   const body = skillBody();
   const recipe = body.indexOf("references/prompt-craft.md");
-  const launch = body.indexOf("scripts/imagine.mjs");
+  const launch = body.indexOf("imagine.mjs"); // any spelling of the path, e.g. scripts/./imagine.mjs
   assert.ok(launch > 0, "SKILL.md must show the launch command");
   assert.ok(recipe >= 0 && recipe < launch, "prompt-craft.md must be named before the script is launched");
 });
