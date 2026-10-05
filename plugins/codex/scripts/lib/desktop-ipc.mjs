@@ -708,6 +708,17 @@ export class DesktopThread {
     };
     if (model) request.model = model;
     if (effort) request.effort = effort;
+    // With inheritThreadSettings the app copies the thread's last collaborationMode into
+    // the turn, and codex lets a collaborationMode override model and effort (TurnStartParams
+    // `collaboration_mode`). A desktop task's thread starts with the CLI bootstrap's `low`,
+    // so every task ran at `low`. Our own mode wins over the inherited one. Its settings
+    // need a model, and an effort left out would reset to the model's default.
+    if (model && effort) {
+      request.collaborationMode = {
+        mode: "default",
+        settings: { model, reasoning_effort: effort, developer_instructions: null }
+      };
+    }
     const response = await this.client.call(
       "thread-follower-start-turn",
       { conversationId: this.threadId, turnStart: { request, context: { inheritThreadSettings: true } } },

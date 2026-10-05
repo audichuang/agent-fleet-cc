@@ -244,6 +244,13 @@ test("a desktop turn puts the prompt on the wire, inherits the thread's settings
   assert.deepEqual(request.input, [{ type: "text", text: "do the thing", text_elements: [] }]);
   assert.equal(request.model, "gpt-6.1-sol");
   assert.equal(request.effort, "xhigh");
+  // With inheritThreadSettings the app copies the thread's last collaborationMode into the
+  // turn, and codex lets that override model and effort: every desktop task ran at the CLI
+  // bootstrap's `low`. Sending our own mode is what makes the requested effort stick.
+  assert.deepEqual(request.collaborationMode, {
+    mode: "default",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "xhigh", developer_instructions: null }
+  });
 
   assert.equal(result.status, 0);
   assert.equal(result.backend, "desktop");
@@ -253,6 +260,19 @@ test("a desktop turn puts the prompt on the wire, inherits the thread's settings
   assert.deepEqual(result.commandExecutions.map((item) => item.command), ["echo hi"]);
   assert.ok(progress.some((line) => /Command completed: echo hi/.test(line)), progress.join("\n"));
   assert.equal(fake.broadcasts("thread-stream-following-changed")[0].params.following, true);
+});
+
+test("without a model the turn sends no collaborationMode, since codex requires one in it", async (t) => {
+  const fake = await startFakeDesktop(t);
+  await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "do the thing",
+    effort: "xhigh",
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  const request = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
+  assert.equal(request.effort, "xhigh");
+  assert.equal(request.collaborationMode, undefined);
 });
 
 test("a fresh desktop task makes its thread with a CLI bootstrap turn off the shared broker", async (t) => {

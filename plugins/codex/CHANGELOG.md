@@ -19,6 +19,11 @@
   of its `Progress` preview. A live run wrote the first two on every model call, every 5–30 s
   while a command ran, so the 4-line preview showed only those. They still go to the log and
   still count for `Last activity`.
+- A task in the Codex desktop app now runs at the effort it asked for. Every one ran at `low`:
+  the app copies the thread's last collaboration mode into each turn, codex lets that override
+  the turn's effort, and the thread's first turn is the companion's one-line `low` bootstrap.
+  The turn now carries its own collaboration mode with the requested model and effort.
+  Checked live: after a `low` bootstrap, the task turn ran at the `medium` it asked for.
 - `SKILL.md` says to leave `--effort` unset (the companion runs at `xhigh`) unless the user
   names a level, matching the existing rule for `--model`.
 - `skills/codex/references/background-jobs.md`: the background wait loop also returns after 30

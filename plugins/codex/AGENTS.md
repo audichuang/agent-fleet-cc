@@ -54,6 +54,10 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 - **桌面版只接得手「已有 turn」的 thread。** 只做 `thread/start` 的 thread 進了 state DB,但 app 不肯載入
   (2026-10-03 實測)。所以新的 desktop task 先在**一次性**(`disableBroker`)app-server 跑一輪 bootstrap;
   走共用 broker 的話 broker 的 app-server 會一直握著 thread 的單一寫入鎖,app 開不了它。
+- **桌面版的 effort 會被 thread 的協作模式蓋掉。** `inheritThreadSettings:true` 時 app 會把 thread 上一輪的
+  `collaborationMode` 帶進新 turn,而 codex 讓協作模式優先於 `model`/`effort`;thread 第一輪是 `low` 的 CLI
+  bootstrap,所以 1.8.0 以前桌面任務全跑 `low`。`startTurn` 因此自帶 `collaborationMode`,別拿掉。測試只看得到線上
+  送了什麼,實際用哪個 effort 要看 rollout 的 `turn_context`(見 `docs/codex-desktop-ipc-audit.md` B13)。
 - **thread 一次只有一個 writer。** app 開著的 thread,CLI `thread/resume` 回 `already has an active writer`
   —— 這不是 bug,是 `--backend auto` 把這種 follow-up 送去 app 的理由。
 - **`--new-thread-via app` 只按一次 Enter,別加重按。** App 開新對話要幾秒(忙時實測 3.3 s),所以是等
