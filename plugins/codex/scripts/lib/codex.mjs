@@ -252,6 +252,11 @@ const MAX_NOTIFICATION_TEXT = 200;
 // for minutes while the command is actually alive.
 const COMMAND_HEARTBEAT_INTERVAL_MS = 20_000;
 
+// A hook run is logged only when it matters: it did not complete cleanly, or it took
+// long enough to explain a quiet log. Fast successful hooks (one per tool call for a
+// preToolUse hook) would bury the progress preview.
+const SLOW_HOOK_MS = 10_000;
+
 function boundedNotificationText(value) {
   if (typeof value !== "string" || value.length === 0) {
     return null;
@@ -325,6 +330,18 @@ function describeStartedItem(state, item) {
       return { message: `Searching: ${shorten(item.query, 96)}`, phase: "investigating" };
     case "imageGeneration":
       return { message: "Generating an image.", phase: "investigating" };
+    // Quiet-but-healthy stretches: reasoning deltas are opted out and these items stream
+    // nothing else, so without a line here the log goes dark and `status` reads a long
+    // think, a compaction or a sleep as "process may be stuck".
+    case "reasoning":
+      return { message: "Thinking.", phase: null };
+    case "contextCompaction":
+      return { message: "Compacting context.", phase: null };
+    case "sleep": {
+      // Number(null) is 0, so a null duration would read as "Sleeping 0s."
+      const seconds = item.durationMs == null ? NaN : Math.round(Number(item.durationMs) / 1000);
+      return { message: Number.isFinite(seconds) ? `Sleeping ${seconds}s.` : "Sleeping.", phase: null };
+    }
     default:
       return null;
   }
@@ -356,6 +373,8 @@ function describeCompletedItem(state, item) {
     }
     case "exitedReviewMode":
       return { message: "Reviewer finished.", phase: "finalizing" };
+    case "contextCompaction":
+      return { message: "Context compacted.", phase: null };
     case "imageGeneration": {
       const saved = typeof item.savedPath === "string" && item.savedPath ? ` saved ${item.savedPath}` : "";
       const failed = item.failure?.type ? ` failed (${item.failure.type})` : "";
@@ -810,6 +829,29 @@ function applyTurnNotification(state, message) {
       emitProgress(state.onProgress, `Deprecation notice: ${boundedNotificationText(message.params?.summary) ?? "(no detail)"}`, null);
       break;
     }
+    case "hook/completed": {
+      const run = message.params?.run ?? {};
+      const durationMs = run.durationMs == null ? NaN : Number(run.durationMs);
+      const slow = Number.isFinite(durationMs) && durationMs >= SLOW_HOOK_MS;
+      if (run.status === "completed" && !slow) {
+        break;
+      }
+      const took = Number.isFinite(durationMs) ? ` after ${Math.round(durationMs / 1000)}s` : "";
+      const detail = boundedNotificationText(run.statusMessage);
+      emitProgress(
+        state.onProgress,
+        `Hook ${run.eventName ?? "?"} ${run.status ?? "finished"}${took}${detail ? `: ${detail}` : "."}`,
+        null
+      );
+      break;
+    }
+    case "item/mcpToolCall/progress": {
+      const text = boundedNotificationText(message.params?.message);
+      if (text) {
+        emitProgress(state.onProgress, `Tool progress: ${text}`, null);
+      }
+      break;
+    }
     case "model/safetyBuffering/updated": {
       const p = message.params ?? {};
       const reasons = Array.isArray(p.reasons) ? p.reasons.join(", ") : "";
@@ -840,7 +882,7 @@ export const TURN_IDLE_TIMEOUT_ENV = "CODEX_TURN_IDLE_TIMEOUT_MS";
 // a healthy turn can legitimately be silent for minutes inside a single long item,
 // so a non-zero default could abort healthy work. Operators bound a wedged turn by
 // setting CODEX_TURN_IDLE_TIMEOUT_MS (e.g. 600000); background jobs still have the
-// 1-hour hard cap in tracked-jobs (DEFAULT_JOB_TIMEOUT_MS).
+// hard cap in tracked-jobs (DEFAULT_JOB_TIMEOUT_MS).
 export const DEFAULT_TURN_IDLE_TIMEOUT_MS = 0;
 
 export function resolveTurnIdleTimeoutMs(options = {}) {
@@ -892,7 +934,8 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
   // (the transport watchdog only fires on disconnect). An idle timer — reset on
   // every inbound notification, fired only after a stretch of total silence —
   // bounds that and rejects with the thread/turn id so a caller can interrupt +
-  // reap. It is complementary to (not a replacement for) the 1-hour hard cap.
+  // reap. It is complementary to (not a replacement for) the job hard cap
+  // (DEFAULT_JOB_TIMEOUT_MS).
   const idleTimeoutMs = resolveTurnIdleTimeoutMs(options);
   const timers = options.timers ?? { setTimeout, clearTimeout };
   let idleTimer = null;

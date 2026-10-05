@@ -268,3 +268,60 @@ test("rapid command-output deltas within the throttle window collapse to a singl
   const heartbeats = progress.filter((m) => typeof m === "string" && /output streaming/i.test(m));
   assert.equal(heartbeats.length, 1, `5 deltas inside the 20s window should yield exactly one heartbeat, got ${JSON.stringify(heartbeats)}`);
 });
+
+// Quiet-but-healthy stretches: a long xhigh think, an automatic context compaction, a
+// deliberate sleep. Each arrives as an item/started the client used to drop, so the log
+// went silent and `status` read "process may be stuck" on a working turn. Each now
+// writes one line that says why it is quiet.
+const item = (value) => ({ threadId: "thread1", turnId: "turn1", item: value });
+
+test("a reasoning item starting surfaces a thinking line", async () => {
+  const lines = await progressFor("item/started", item({ type: "reasoning", id: "r1", summary: [], content: [] }));
+  assert.ok(lines.includes("Thinking."), lines.join("\n"));
+});
+
+test("a context compaction surfaces when it starts and when it ends", async () => {
+  const started = await progressFor("item/started", item({ type: "contextCompaction", id: "c1" }));
+  assert.ok(started.includes("Compacting context."), started.join("\n"));
+  const completed = await progressFor("item/completed", item({ type: "contextCompaction", id: "c1" }));
+  assert.ok(completed.includes("Context compacted."), completed.join("\n"));
+});
+
+test("a sleep item surfaces with its duration", async () => {
+  const lines = await progressFor("item/started", item({ type: "sleep", id: "s1", durationMs: 30000 }));
+  assert.ok(lines.includes("Sleeping 30s."), lines.join("\n"));
+});
+
+const hookRun = (overrides) => ({
+  threadId: "thread1",
+  turnId: "turn1",
+  run: { id: "h1", eventName: "preToolUse", status: "completed", statusMessage: null, durationMs: 120, ...overrides }
+});
+
+test("a hook that fails, blocks or runs slow surfaces; a fast successful one stays out of the log", async () => {
+  const failed = await progressFor("hook/completed", hookRun({ status: "blocked", statusMessage: "denied by policy" }));
+  assert.ok(failed.some((l) => l.startsWith("Hook preToolUse blocked") && l.includes("denied by policy")), failed.join("\n"));
+  const slow = await progressFor("hook/completed", hookRun({ durationMs: 45000 }));
+  assert.ok(slow.some((l) => l.startsWith("Hook preToolUse completed") && l.includes("45s")), slow.join("\n"));
+  const fast = await progressFor("hook/completed", hookRun({}));
+  assert.equal(fast.filter((l) => l.startsWith("Hook ")).length, 0, fast.join("\n"));
+});
+
+test("item/mcpToolCall/progress surfaces the tool's own progress message, bounded", async () => {
+  const lines = await progressFor("item/mcpToolCall/progress", {
+    threadId: "thread1",
+    turnId: "turn1",
+    itemId: "m1",
+    message: `indexing ${"x".repeat(400)}`
+  });
+  const line = lines.find((l) => l.startsWith("Tool progress: indexing"));
+  assert.ok(line, lines.join("\n"));
+  assert.ok(line.length < 260, `unbounded: ${line.length}`);
+});
+
+test("a null durationMs is not reported as zero seconds", async () => {
+  const hook = await progressFor("hook/completed", hookRun({ status: "failed", durationMs: null }));
+  assert.ok(hook.includes("Hook preToolUse failed."), hook.join("\n"));
+  const sleep = await progressFor("item/started", item({ type: "sleep", id: "s1", durationMs: null }));
+  assert.ok(sleep.includes("Sleeping."), sleep.join("\n"));
+});

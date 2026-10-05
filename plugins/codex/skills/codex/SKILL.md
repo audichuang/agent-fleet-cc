@@ -40,7 +40,7 @@ A desktop run that stops on an approval fails with that reason; the turn is stil
 
 `status`, `wait`, `logs`, `result` and `cancel` work the same for either backend. Routing, failures and limits: the `desktop-backend.md` row below.
 
-Leave `--model` unset. The companion uses `gpt-6.1-sol` at `xhigh`, the stronger model this delegation is for. Pass `--model` only when the user names a model. Do not pass `gpt-6-sol` or `gpt-6-luna`. Do not pass a service tier. `gpt-6-astra` only when the user asks for the frontier model.
+Leave `--model` unset. The companion uses `gpt-6.1-sol` at `xhigh`, the stronger model this delegation is for. Pass `--model` only when the user names a model. Do not pass `gpt-6-sol` or `gpt-6-luna`. Do not pass a service tier. `gpt-6-astra` only when the user asks for the frontier model. Leave `--effort` unset as well: the companion runs at `xhigh`. Pass `--effort` only when the user names a level, which is per-model (`prompting.md` says where the catalog lists them).
 
 A run that will not finish inside ten minutes uses the companion's own `--background` (and `--json` when you need the job id). That is the tracked job. A foreground call killed at that ceiling is a SIGTERM; the record is already on disk. Say so and run `status`. Do not treat the empty stdout as a failed review.
 
@@ -69,5 +69,5 @@ Open one of these when the row matches. Each file is one hop from here.
 | [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md) | You need a complete template for a task type — diagnosis, narrow fix, review, research. |
 | [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md) | Checking a drafted prompt for lines that make GPT-6.1 worse. |
 | [references/delivery-paths.md](references/delivery-paths.md) | Choosing a direct `task`, `task --resume-last`, the `codex:codex-rescue` subagent, or a conversation fork. |
-| [references/background-jobs.md](references/background-jobs.md) | You launched with `--background`, or are waiting on a job — `wait`'s timeout and exit codes, and how to tell a finished job. |
+| [references/background-jobs.md](references/background-jobs.md) | You launched with `--background`, or are waiting on a job — `wait`'s timeout and exit codes, the 30-minute check-in on a long job, the job's time cap, and how to tell a finished job. |
 | [references/desktop-backend.md](references/desktop-backend.md) | A task should run in the Codex desktop app, continue a thread open there, or a desktop run failed. |

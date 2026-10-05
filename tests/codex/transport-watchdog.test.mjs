@@ -6,7 +6,7 @@ import { captureTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
 
 // captureTurn's transport watchdog is the backstop that turns a mid-turn app-server /
 // broker death (crash / OOM before turn/completed) into a PROMPT terminal state, so a
-// ~20-min background job never sits stuck "running" until the 1-hour hard cap. Every
+// ~20-min background job never sits stuck "running" until the job hard cap. Every
 // OTHER captureTurn test deliberately stubs `exitPromise: new Promise(() => {})` to keep
 // this watchdog OUT — so the watchdog itself had no regression test and could silently
 // break. These two tests exercise it directly by RESOLVING exitPromise.

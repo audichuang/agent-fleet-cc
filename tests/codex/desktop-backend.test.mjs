@@ -40,7 +40,8 @@ async function startFakeDesktop(t, options = {}) {
       title: "fake",
       threadRuntimeStatus: { type: "idle" },
       requests: [],
-      turnHistory: { history: { entitiesByKey: {} } }
+      turnHistory: { history: { entitiesByKey: {} } },
+      ...options.state
     },
     requests: (method) => wire.filter((m) => m.type === "request" && m.method === method),
     broadcasts: (method) => wire.filter((m) => m.type === "broadcast" && m.method === method)
@@ -244,6 +245,13 @@ test("a desktop turn puts the prompt on the wire, inherits the thread's settings
   assert.deepEqual(request.input, [{ type: "text", text: "do the thing", text_elements: [] }]);
   assert.equal(request.model, "gpt-6.1-sol");
   assert.equal(request.effort, "xhigh");
+  // With inheritThreadSettings the app copies the thread's last collaborationMode into the
+  // turn, and codex lets that override model and effort: every desktop task ran at the CLI
+  // bootstrap's `low`. Sending our own mode is what makes the requested effort stick.
+  assert.deepEqual(request.collaborationMode, {
+    mode: "default",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "xhigh", developer_instructions: null }
+  });
 
   assert.equal(result.status, 0);
   assert.equal(result.backend, "desktop");
@@ -253,6 +261,62 @@ test("a desktop turn puts the prompt on the wire, inherits the thread's settings
   assert.deepEqual(result.commandExecutions.map((item) => item.command), ["echo hi"]);
   assert.ok(progress.some((line) => /Command completed: echo hi/.test(line)), progress.join("\n"));
   assert.equal(fake.broadcasts("thread-stream-following-changed")[0].params.following, true);
+});
+
+test("the turn keeps the thread's own collaboration mode and instructions, and swaps in only model and effort", async (t) => {
+  // A thread the user left in Plan mode, with its instructions. Sending a bare Default mode
+  // would switch it out of Plan and drop the instructions on every follow-up.
+  const fake = await startFakeDesktop(t, {
+    state: {
+      latestThreadSettings: {
+        collaborationMode: { mode: "plan", settings: { model: "gpt-6-astra", reasoning_effort: "low", developer_instructions: "PLAN RULES" } }
+      },
+      latestCollaborationMode: { mode: "default", settings: { model: "x", reasoning_effort: "low", developer_instructions: null } }
+    }
+  });
+  await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "do the thing",
+    model: "gpt-6.1-sol",
+    effort: "xhigh",
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  const request = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
+  assert.deepEqual(request.collaborationMode, {
+    mode: "plan",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "xhigh", developer_instructions: "PLAN RULES" }
+  });
+});
+
+test("with no thread settings the inherited mode comes from latestCollaborationMode, as in the app", async (t) => {
+  const fake = await startFakeDesktop(t, {
+    state: { latestCollaborationMode: { mode: "plan", settings: { model: "x", reasoning_effort: "low", developer_instructions: "P" } } }
+  });
+  await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "do the thing",
+    model: "gpt-6.1-sol",
+    effort: "medium",
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  const request = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
+  assert.deepEqual(request.collaborationMode, {
+    mode: "plan",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "medium", developer_instructions: "P" }
+  });
+});
+
+test("without a model the turn sends no collaborationMode, since codex requires one in it", async (t) => {
+  const fake = await startFakeDesktop(t);
+  await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "do the thing",
+    effort: "xhigh",
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  const request = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
+  assert.equal(request.effort, "xhigh");
+  assert.equal(request.collaborationMode, undefined);
 });
 
 test("a fresh desktop task makes its thread with a CLI bootstrap turn off the shared broker", async (t) => {
@@ -688,4 +752,28 @@ test("--new-thread-via: cli by default, app by flag or env, nothing else", () =>
   assert.equal(resolveNewThreadVia("cli", { CODEX_COMPANION_NEW_THREAD_VIA: "app" }), "cli");
   assert.throws(() => resolveNewThreadVia("ui", {}), /Use cli or app/);
   assert.equal(buildNewThreadUrl({ prompt: "a b&c" }), "codex://threads/new?prompt=a+b%26c");
+});
+
+test("a turn started while a resync has the snapshot cleared waits for it, so a Plan thread stays in Plan", async () => {
+  const calls = [];
+  const client = {
+    closed: false,
+    onBroadcast: () => () => {},
+    call: async (method, params) => {
+      calls.push({ method, params });
+      return { result: { result: { turn: { id: "turn-1" } } } };
+    }
+  };
+  const thread = new DesktopThread(client, "thread-x");
+  thread.state = null; // what resync() leaves until the reload lands
+  const started = thread.startTurn("go", { model: "gpt-6.1-sol", effort: "xhigh" });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(calls.length, 0, "the turn went out before the snapshot came back");
+  thread.state = { latestCollaborationMode: { mode: "plan", settings: { model: "x", reasoning_effort: "low", developer_instructions: "P" } } };
+  thread.notify();
+  assert.equal(await started, "turn-1");
+  assert.deepEqual(calls[0].params.turnStart.request.collaborationMode, {
+    mode: "plan",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "xhigh", developer_instructions: "P" }
+  });
 });

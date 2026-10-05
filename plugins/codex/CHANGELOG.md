@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.8.0
+
+**A background job may run 3 hours, and a long one is checked on every 30 minutes.**
+
+- The default hard cap on a background job is 3 hours, up from 1. A long multi-stage task was
+  being stopped mid-run at the hour. A dead job is still reaped by the liveness watchdog in about
+  15 minutes; `CODEX_JOB_TIMEOUT_MS` still overrides the cap.
+- `logs --follow` keeps following until the job's own cap (plus headroom), read from the job
+  record. It used to stop after a fixed ~65 minutes, which with a longer cap would have dropped
+  a healthy job before it finished.
+- The job log no longer goes quiet while Codex is working. A long think, an automatic context
+  compaction and a deliberate sleep each write a line (`Thinking.`, `Compacting context.`,
+  `Sleeping 30s.`). A hook that fails, blocks or takes 10 s or more, and an MCP tool's own
+  progress message, are logged as well; they were dropped before. Without these lines `status`
+  showed a working job as "process may be stuck" after two quiet minutes.
+- `status` leaves `Token usage`, `Rate limits updated` and `Command output streaming` lines out
+  of its `Progress` preview. A live run wrote the first two on every model call, every 5–30 s
+  while a command ran, so the 4-line preview showed only those. They still go to the log and
+  still count for `Last activity`.
+- A task in the Codex desktop app now runs at the effort it asked for. Every one ran at `low`:
+  the app copies the thread's last collaboration mode into each turn, codex lets that override
+  the turn's effort, and the thread's first turn is the companion's one-line `low` bootstrap.
+  The turn now carries the thread's own collaboration mode with only the model and effort
+  swapped, so a thread left in Plan mode stays in Plan and keeps its instructions. Checked live:
+  after a `low` bootstrap the task turn ran at the `medium` it asked for, and a `--thread`
+  follow-up ran at the `low` it asked for with the mode and instructions unchanged.
+- `SKILL.md` says to leave `--effort` unset (the companion runs at `xhigh`) unless the user
+  names a level, matching the existing rule for `--model`.
+- `skills/codex/references/background-jobs.md`: the background wait loop also returns after 30
+  minutes with the job still running. The host then runs `status`. Under 30 minutes of quiet
+  means the job is working, and the 2-minute "may be stuck" mark alone is not a stall. After 30
+  quiet minutes, or a log showing the same command failing over and over, the host tells the
+  user and offers `cancel`, so a stuck job is not left running until the cap. The reference
+  documents the cap and `CODEX_JOB_TIMEOUT_MS`.
+
 ## 1.7.1
 
 **Following a background job is spelled out, and a closed pipe no longer kills a run.**

@@ -1,37 +1,47 @@
 # Following a background job
 
-1. Launch with `--background --json`. The payload's `jobId` is the handle.
-2. Run `wait <jobId> --timeout-ms 100000`. Keep the timeout under the Bash call's own
-   (2 minutes by default); `wait` alone waits 4 minutes.
-3. Read `wait`'s exit code:
-
-   | Exit | Meaning |
-   | --- | --- |
-   | `0` | completed |
-   | `1` | failed |
-   | `2` | cancelled |
-   | `10` | still running: the wait timed out, the job did not fail. Run `wait` again. |
-
-4. After `0`, `result <jobId>` prints the answer to relay.
-
-## Being told when it ends
-
-One `wait` ends at its own timeout, so a single background `wait` is not a completion
-notification: a job that outlives it leaves no one waiting. To be told instead of polling, run
-the loop below as one background Bash command. It ends only on a terminal exit code and prints
-that code; read it, then follow step 3. The last `wait` report is in
-`${TMPDIR:-/tmp}/codex-wait.out`.
+Launch with `--background --json`; the payload's `jobId` is the handle. Then run this loop as
+**one background Bash command** (a single `wait` ends at its own timeout and leaves nobody
+waiting). It returns on a terminal exit code, or after 30 minutes with the job still running,
+and prints the last code. The last `wait` report is in `${TMPDIR:-/tmp}/codex-wait.out`.
 
 ```bash
-while :; do code=0; node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" wait <jobId> --timeout-ms 100000 > "${TMPDIR:-/tmp}/codex-wait.out" || code=$?; [ "$code" -ne 10 ] && break; done; echo "wait exit: $code"
+start=$SECONDS; while :; do code=0; node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" wait <jobId> --timeout-ms 100000 > "${TMPDIR:-/tmp}/codex-wait.out" || code=$?; [ "$code" -ne 10 ] && break; [ $((SECONDS - start)) -ge 1800 ] && break; done; echo "wait exit: $code"
 ```
 
-## Telling a finished job
+| Exit | Meaning |
+| --- | --- |
+| `0` | completed: `result <jobId>` prints the answer to relay |
+| `1` | failed (including the time cap below) |
+| `2` | cancelled |
+| `10` | still running: the wait timed out, the job did not fail |
 
-A job is finished when its `Status` (`--json`: `job.status`) leaves `queued` or `running`.
-`Phase` is a progress label, not an end state: never decide completion from it.
-`wait`'s exit code already says all of this, so prefer it to parsing `status` output.
+A one-off foreground `wait <jobId> --timeout-ms 100000` returns the same codes; keep the
+timeout under the Bash call's own (2 minutes by default). Bare `wait` waits 4 minutes.
 
-## Output
+## At `wait exit: 10` (30-minute check-in)
 
-Do not pipe companion output into `head` or `tail`. Redirect it to a file and read the file.
+Run `status <jobId>`. Each `Progress` line says how long ago it was written; `Last activity`
+is the newest write to the log.
+
+- `Last activity` under 30 minutes: it is working. Rerun the loop; a one-line progress note to
+  the user is enough. A `! … process may be stuck` mark alone is not a stall: it shows after
+  about 2 minutes of quiet, which a long think (`Thinking.`), `Compacting context.`,
+  `Sleeping …` or a running command all cause.
+- Quiet for 30 minutes or more, or looping (the log at `Log:` shows the same command failing
+  the same way over and over, with no file changes in between): tell the user what you saw
+  (the last line and how long ago) and offer `cancel <jobId>`, and rerun the loop while they
+  decide. Never cancel unless the user says to.
+
+## Time cap
+
+A job still running after 3 hours is stopped and recorded as failed. Only a dead job is reaped
+sooner, so a stuck-but-alive one runs to the cap; that is why you check in. To allow longer (or
+a tighter cap), set `CODEX_JOB_TIMEOUT_MS` (milliseconds) in the environment you launch the job
+from.
+
+## Rules
+
+- Finished means `Status` (`--json`: `job.status`) is no longer `queued` or `running`. `Phase`
+  is a progress label: never decide completion from it. Prefer `wait`'s exit code.
+- Do not pipe companion output into `head` or `tail`; redirect it to a file and read the file.
