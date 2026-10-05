@@ -102,9 +102,11 @@ test("each worked example keeps its prompt in its own text fence, not in the she
 });
 
 test("the skill sends the agent to the prompt recipe before spending quota", () => {
-  const body = skillBody();
-  const step1 = body.slice(body.indexOf("## 1."), body.indexOf("## 2."));
-  assert.match(step1, /references\/prompt-craft\.md/);
+  // Both headings must be found; a missing one fails here instead of widening the slice to
+  // the reference table, which also links prompt-craft.md.
+  const step1 = skillBody().match(/^## 1\..*\n([\s\S]*?)^## 2\./m);
+  assert.ok(step1, "SKILL.md must keep its `## 1.` and `## 2.` steps, in that order");
+  assert.match(step1[1], /references\/prompt-craft\.md/);
 });
 
 test("this plugin does NOT vendor the shared runtime — it has no job lifecycle", () => {
