@@ -102,13 +102,13 @@ test("each worked example keeps its prompt in its own text fence, not in the she
 });
 
 test("the skill sends the agent to the prompt recipe before spending quota", () => {
-  // Split on every level-two heading: step 1 is exactly its own section, so neither the
-  // reference table nor an inserted section can supply the link on its behalf.
-  const sections = skillBody().split(/^## /m);
-  const i = sections.findIndex((s) => s.startsWith("1."));
-  assert.ok(i > 0, "SKILL.md must keep a `## 1.` step");
-  assert.ok(sections[i + 1]?.startsWith("2."), "the section after step 1 must be `## 2.`");
-  assert.match(sections[i], /references\/prompt-craft\.md/);
+  // No heading grammar to get wrong: the recipe must be named before the script is first
+  // launched. The reference table below the launch cannot stand in for it.
+  const body = skillBody();
+  const recipe = body.indexOf("references/prompt-craft.md");
+  const launch = body.indexOf("scripts/imagine.mjs");
+  assert.ok(launch > 0, "SKILL.md must show the launch command");
+  assert.ok(recipe >= 0 && recipe < launch, "prompt-craft.md must be named before the script is launched");
 });
 
 test("this plugin does NOT vendor the shared runtime — it has no job lifecycle", () => {
