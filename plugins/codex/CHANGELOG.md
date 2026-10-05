@@ -22,8 +22,10 @@
 - A task in the Codex desktop app now runs at the effort it asked for. Every one ran at `low`:
   the app copies the thread's last collaboration mode into each turn, codex lets that override
   the turn's effort, and the thread's first turn is the companion's one-line `low` bootstrap.
-  The turn now carries its own collaboration mode with the requested model and effort.
-  Checked live: after a `low` bootstrap, the task turn ran at the `medium` it asked for.
+  The turn now carries the thread's own collaboration mode with only the model and effort
+  swapped, so a thread left in Plan mode stays in Plan and keeps its instructions. Checked live:
+  after a `low` bootstrap the task turn ran at the `medium` it asked for, and a `--thread`
+  follow-up ran at the `low` it asked for with the mode and instructions unchanged.
 - `SKILL.md` says to leave `--effort` unset (the companion runs at `xhigh`) unless the user
   names a level, matching the existing rule for `--model`.
 - `skills/codex/references/background-jobs.md`: the background wait loop also returns after 30

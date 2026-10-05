@@ -318,3 +318,10 @@ test("item/mcpToolCall/progress surfaces the tool's own progress message, bounde
   assert.ok(line, lines.join("\n"));
   assert.ok(line.length < 260, `unbounded: ${line.length}`);
 });
+
+test("a null durationMs is not reported as zero seconds", async () => {
+  const hook = await progressFor("hook/completed", hookRun({ status: "failed", durationMs: null }));
+  assert.ok(hook.includes("Hook preToolUse failed."), hook.join("\n"));
+  const sleep = await progressFor("item/started", item({ type: "sleep", id: "s1", durationMs: null }));
+  assert.ok(sleep.includes("Sleeping."), sleep.join("\n"));
+});

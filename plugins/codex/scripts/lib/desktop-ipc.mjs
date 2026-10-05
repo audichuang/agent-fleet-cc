@@ -711,12 +711,19 @@ export class DesktopThread {
     // With inheritThreadSettings the app copies the thread's last collaborationMode into
     // the turn, and codex lets a collaborationMode override model and effort (TurnStartParams
     // `collaboration_mode`). A desktop task's thread starts with the CLI bootstrap's `low`,
-    // so every task ran at `low`. Our own mode wins over the inherited one. Its settings
+    // so every task ran at `low`. Send the thread's own mode with only model and effort
+    // swapped: a Plan-mode thread stays in Plan and keeps its instructions. Its settings
     // need a model, and an effort left out would reset to the model's default.
     if (model && effort) {
+      // The same lookup the app makes for the mode it would inherit.
+      const inherited = this.state?.latestThreadSettings?.collaborationMode ?? this.state?.latestCollaborationMode ?? null;
       request.collaborationMode = {
-        mode: "default",
-        settings: { model, reasoning_effort: effort, developer_instructions: null }
+        mode: inherited?.mode ?? "default",
+        settings: {
+          model,
+          reasoning_effort: effort,
+          developer_instructions: inherited?.settings?.developer_instructions ?? null
+        }
       };
     }
     const response = await this.client.call(

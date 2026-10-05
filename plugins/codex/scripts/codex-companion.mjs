@@ -1620,7 +1620,8 @@ export async function handleAttach(argv, deps = {}) {
       }
     });
 
-  const pollIntervalMs = deps.pollIntervalMs ?? (Number(options["poll-interval-ms"]) || 500);
+  const requestedIntervalMs = Number(options["poll-interval-ms"]);
+  const pollIntervalMs = deps.pollIntervalMs ?? (requestedIntervalMs > 0 ? requestedIntervalMs : 500);
   return streamJobLog({
     readChunk,
     readStatus,
@@ -1643,7 +1644,10 @@ const FOLLOW_HEADROOM_MS = 5 * 60 * 1000;
 // ceiling tracks DEFAULT_JOB_TIMEOUT_MS and CODEX_JOB_TIMEOUT_MS instead of a fixed count.
 export function defaultFollowMaxPolls(pollIntervalMs, jobTimeoutMs) {
   const capMs = Number.isFinite(jobTimeoutMs) && jobTimeoutMs > 0 ? jobTimeoutMs : resolveJobTimeoutMs();
-  return Math.ceil((capMs + FOLLOW_HEADROOM_MS) / pollIntervalMs);
+  // `--poll-interval-ms -5` gets past the caller's `|| 500`; a non-positive interval would
+  // make this negative (give up at once) or Infinity.
+  const intervalMs = Number.isFinite(pollIntervalMs) && pollIntervalMs > 0 ? pollIntervalMs : 500;
+  return Math.ceil((capMs + FOLLOW_HEADROOM_MS) / intervalMs);
 }
 
 export async function handleLogs(argv, deps = {}) {

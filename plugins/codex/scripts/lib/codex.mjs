@@ -338,7 +338,8 @@ function describeStartedItem(state, item) {
     case "contextCompaction":
       return { message: "Compacting context.", phase: null };
     case "sleep": {
-      const seconds = Math.round(Number(item.durationMs) / 1000);
+      // Number(null) is 0, so a null duration would read as "Sleeping 0s."
+      const seconds = item.durationMs == null ? NaN : Math.round(Number(item.durationMs) / 1000);
       return { message: Number.isFinite(seconds) ? `Sleeping ${seconds}s.` : "Sleeping.", phase: null };
     }
     default:
@@ -830,7 +831,7 @@ function applyTurnNotification(state, message) {
     }
     case "hook/completed": {
       const run = message.params?.run ?? {};
-      const durationMs = Number(run.durationMs);
+      const durationMs = run.durationMs == null ? NaN : Number(run.durationMs);
       const slow = Number.isFinite(durationMs) && durationMs >= SLOW_HOOK_MS;
       if (run.status === "completed" && !slow) {
         break;

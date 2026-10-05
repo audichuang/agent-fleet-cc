@@ -40,7 +40,8 @@ async function startFakeDesktop(t, options = {}) {
       title: "fake",
       threadRuntimeStatus: { type: "idle" },
       requests: [],
-      turnHistory: { history: { entitiesByKey: {} } }
+      turnHistory: { history: { entitiesByKey: {} } },
+      ...options.state
     },
     requests: (method) => wire.filter((m) => m.type === "request" && m.method === method),
     broadcasts: (method) => wire.filter((m) => m.type === "broadcast" && m.method === method)
@@ -260,6 +261,49 @@ test("a desktop turn puts the prompt on the wire, inherits the thread's settings
   assert.deepEqual(result.commandExecutions.map((item) => item.command), ["echo hi"]);
   assert.ok(progress.some((line) => /Command completed: echo hi/.test(line)), progress.join("\n"));
   assert.equal(fake.broadcasts("thread-stream-following-changed")[0].params.following, true);
+});
+
+test("the turn keeps the thread's own collaboration mode and instructions, and swaps in only model and effort", async (t) => {
+  // A thread the user left in Plan mode, with its instructions. Sending a bare Default mode
+  // would switch it out of Plan and drop the instructions on every follow-up.
+  const fake = await startFakeDesktop(t, {
+    state: {
+      latestThreadSettings: {
+        collaborationMode: { mode: "plan", settings: { model: "gpt-6-astra", reasoning_effort: "low", developer_instructions: "PLAN RULES" } }
+      },
+      latestCollaborationMode: { mode: "default", settings: { model: "x", reasoning_effort: "low", developer_instructions: null } }
+    }
+  });
+  await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "do the thing",
+    model: "gpt-6.1-sol",
+    effort: "xhigh",
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  const request = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
+  assert.deepEqual(request.collaborationMode, {
+    mode: "plan",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "xhigh", developer_instructions: "PLAN RULES" }
+  });
+});
+
+test("with no thread settings the inherited mode comes from latestCollaborationMode, as in the app", async (t) => {
+  const fake = await startFakeDesktop(t, {
+    state: { latestCollaborationMode: { mode: "plan", settings: { model: "x", reasoning_effort: "low", developer_instructions: "P" } } }
+  });
+  await runDesktopTurn("/ws", {
+    resumeThreadId: fake.threadId,
+    prompt: "do the thing",
+    model: "gpt-6.1-sol",
+    effort: "medium",
+    desktopDeps: { attachOptions: fake.attachOptions }
+  });
+  const request = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
+  assert.deepEqual(request.collaborationMode, {
+    mode: "plan",
+    settings: { model: "gpt-6.1-sol", reasoning_effort: "medium", developer_instructions: "P" }
+  });
 });
 
 test("without a model the turn sends no collaborationMode, since codex requires one in it", async (t) => {

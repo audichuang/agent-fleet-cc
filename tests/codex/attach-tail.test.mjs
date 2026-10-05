@@ -193,3 +193,10 @@ test("logs --follow keeps polling past the job's own hard cap, whatever that cap
     else process.env[JOB_TIMEOUT_ENV] = saved;
   }
 });
+
+test("a non-positive poll interval cannot make logs --follow give up at once", () => {
+  for (const interval of [-5, 0]) {
+    const polls = defaultFollowMaxPolls(interval);
+    assert.ok(Number.isFinite(polls) && polls > 0, `interval ${interval} gave ${polls}`);
+  }
+});
