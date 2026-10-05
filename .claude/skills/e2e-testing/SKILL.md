@@ -1,13 +1,12 @@
 ---
 name: e2e-testing
 description: >-
-  Complete end-to-end testing for the agent-fleet-cc plugin marketplace (codex /
-  cc). Use this whenever you need to verify engine
+  Complete end-to-end testing for the agent-fleet-cc plugin marketplace (codex). Use this whenever you need to verify engine
   behavior end-to-end, run or write E2E tests, run the real-engine smoke check,
   confirm a control-plane fix actually works against the live CLIs, prove a test
   is a true regression, or answer "did you actually run it end-to-end?". Triggers
   on: e2e, end-to-end, smoke test, test:e2e, real engine test, "verify the fix
-  works", "test against real codex/claude", launch/wait/logs/cancel exit
+  works", "test against real codex", launch/wait/logs/cancel exit
   codes, before-release verification, and any doubt about whether testing was
   hermetic (fake engine) vs real. Reach for this skill BEFORE claiming any
   end-to-end verification is done — there are two distinct layers and it is easy
@@ -25,7 +24,7 @@ get right is to never conflate them, and to be explicit about which one you ran.
 | Layer | What it drives | Engine | Auth/network | Determinism | Where it runs |
 |---|---|---|---|---|---|
 | **Hermetic E2E** (`npm run test:e2e`) | the REAL plugin CLIs as subprocesses | **fake shim / seeded on-disk state** | none | deterministic | CI + `npm test` |
-| **Real-engine smoke** (manual gate) | the REAL plugin CLIs as subprocesses | **real codex / claude + real model** | required | non-deterministic, costs money | local, by hand, pre-release |
+| **Real-engine smoke** (manual gate) | the REAL plugin CLIs as subprocesses | **real codex + real model** | required | non-deterministic, costs money | local, by hand, pre-release |
 
 Both are "end-to-end" at the **CLI/process boundary** (real `argv`, real spawn,
 real on-disk state machine). They differ only in whether a **live model engine**
@@ -40,19 +39,18 @@ not answer with the first and imply it was real.
 ## Layer 1 — Hermetic E2E suite
 
 ```bash
-npm run test:e2e     # the black-box e2e files (cc + codex)
+npm run test:e2e     # the black-box e2e file (codex)
 npm test             # full chain; test:e2e is the last && leg, so it gates the build
 ```
 
-`test:e2e` runs `tests/{cc,codex}/e2e-cli.test.mjs`.
-Each spawns the real plugin CLI (`cc-companion.mjs`, `codex-companion.mjs`) as a subprocess against an isolated workspace with
-fake/seeded state. `tests/cc/e2e-cli.test.mjs` is
-the canonical template — read it before writing a new one.
+`test:e2e` runs `tests/codex/e2e-cli.test.mjs`. It spawns the real plugin CLI
+(`codex-companion.mjs`) as a subprocess against an isolated workspace with
+fake/seeded state — the canonical template; read it before writing a new one.
 
 ## Layer 2 — Real-engine smoke (manual gate)
 
 **Step 1 — know what it will skip.** The smoke script probes each engine's
-binary itself (`codex`, `claude`) and skips the ones that are not on
+binary itself (`codex`) and skips it when it is not on
 PATH, so you do not gate it by hand. Only ENOENT counts as missing — a binary
 that runs and exits non-zero is treated as present, because **auth is never
 checked**: an unauthed engine surfaces as its job failing, which is the point of
@@ -74,9 +72,7 @@ It costs real model tokens (it cancels jobs fast to keep that minimal). Run it
 before a release or after a change to the shared control plane — not on every
 edit.
 
-## The cross-engine `wait` exit-code contract
-
-All three engines agree on this (verify any change against all three):
+## The `wait` exit-code contract
 
 | Outcome | exit |
 |---|---|
@@ -85,21 +81,19 @@ All three engines agree on this (verify any change against all three):
 | job `failed` / missing | `1` |
 | timeout before terminal | `10` |
 
-Reference implementations: cc `waitExitCode` (`cc-companion.mjs`),
-codex `waitExitCode` (`codex-companion.mjs`). If you touch one, grep the other
-and keep them identical — a divergence here silently breaks orchestrators
-that script `case $? in 2) ...`.
+Reference implementation: `waitExitCode` (`codex-companion.mjs`). Changing it
+silently breaks orchestrators that script `case $? in 2) ...`.
 
 ## Writing a new hermetic E2E test
 
-Follow the shape in `tests/cc/e2e-cli.test.mjs`:
+Follow the shape in `tests/codex/e2e-cli.test.mjs`:
 
 1. **Isolated workspace per test** — `fs.mkdtempSync`; redirect the engine's data
-   dir env (`CC_PLUGIN_DATA`, `CLAUDE_PLUGIN_DATA`, …) so nothing leaks.
+   dir env (`CLAUDE_PLUGIN_DATA`; `tests/codex/helpers.mjs` does it on import) so nothing leaks.
 2. **Drive the real CLI** via `spawnSync(process.execPath, [COMPANION, ...args])`
    — this exercises the genuine `argv`/entry path, not an in-process helper.
-3. **Seed state, not a live model** — either a fake engine shim (cc's
-   `fake-claude.mjs`) or write `job.json` + log files directly with the plugin's
+3. **Seed state, not a live model** — either a fake engine shim
+   (`tests/codex/fake-codex-fixture.mjs`) or write `job.json` + log files directly with the plugin's
    own state writers, so `wait`/`logs`/`cancel`/`status` have something to read.
 4. **Assert the contract** — exit codes (`res.status`) AND the `--json`
    projection a real orchestrator consumes (assert exactly one clean JSON line;
@@ -121,8 +115,7 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
 
 - **`task --json` is MULTI-LINE pretty JSON** for codex. Parsing
   `stdout.split("\n").pop()` gives you `}`, not the object. Parse the **whole**
-  stdout: `JSON.parse(entireStdout).jobId`. (cc emits single-line JSON, so
-  this bites only when you generalize a cc helper to the others.)
+  stdout: `JSON.parse(entireStdout).jobId`.
 
 - **Seed an *active* ("running"/"queued") job with NO `pid`.** `wait`/`logs`/`status`
   call `listJobs → reconcileDeadPidJobs`, which auto-marks an **active** job
@@ -143,8 +136,7 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
   carried across polls) emits the intact character.
 
 - **Clean up real jobs.** A real background job spawns a detached worker AND a
-  watchdog. `cancel` reaps the worker (cc's two-stage cancel is asserted to
-  kill the engine PID), but: prune the leftover `state/<slug>/` records, and don't
+  watchdog. `cancel` reaps the worker, but: prune the leftover `state/<slug>/` records, and don't
   orphan watchdogs. The smoke script does this; if you run engines by hand, end
   with a readiness/status check showing `0` running.
 
@@ -162,7 +154,7 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
 ## Reporting honestly
 
 When you claim E2E verification, say which layer: "hermetic e2e suite
-(`npm run test:e2e`, fake engines)" or "real-engine smoke (live codex/claude)".
+(`npm run test:e2e`, fake engines)" or "real-engine smoke (live codex)".
 If you only ran the hermetic layer, say so — do not imply the live engines were
 exercised. The `IRONCLAD` rule in `AGENTS.md` still applies to any test edits:
 don't touch sibling plugins' files unless the change is genuinely cross-cutting.

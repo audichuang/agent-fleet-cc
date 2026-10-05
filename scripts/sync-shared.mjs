@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SOURCE = path.join(root, "shared", "lib");
-// cc + codex migrated onto shared/lib.
-const TARGETS = ["cc", "codex"].map((p) =>
+// codex uses shared/lib (its state core).
+const TARGETS = ["codex"].map((p) =>
   path.join(root, "plugins", p, "scripts", "lib", "shared"),
 );
 

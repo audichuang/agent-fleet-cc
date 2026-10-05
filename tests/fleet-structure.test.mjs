@@ -26,6 +26,6 @@ test("marketplace lists exactly the engine plugins plus imagine", () => {
   const marketplace = readJson(path.join(ROOT, ".claude-plugin/marketplace.json"));
   assert.deepEqual(
     marketplace.plugins.map((p) => p.name).sort(),
-    ["cc", "codex", "imagine"],
+    ["codex", "imagine"],
   );
 });

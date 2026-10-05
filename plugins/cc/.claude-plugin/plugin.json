@@ -1,5 +1,0 @@
-{
-  "name": "cc",
-  "version": "0.4.3",
-  "description": "Run tasks on a headless Claude Code instance, selected by profile (native Claude, a cheap endpoint, or any model)"
-}

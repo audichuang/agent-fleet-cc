@@ -4,8 +4,8 @@
     "name": "audichuang"
   },
   "metadata": {
-    "description": "One marketplace for AI-agent delegation plugins — Codex and Claude Code (cc) via profiles — plus image generation.",
-    "version": "0.4.0"
+    "description": "Codex delegation from Claude Code, plus image generation.",
+    "version": "0.5.0"
   },
   "plugins": [
     {
@@ -16,12 +16,6 @@
       "author": {
         "name": "OpenAI"
       }
-    },
-    {
-      "name": "cc",
-      "source": "./plugins/cc",
-      "description": "Run tasks on a headless Claude Code instance, selected by profile — usable from Claude Code or a Codex host via handoff",
-      "version": "0.4.3"
     },
     {
       "name": "imagine",

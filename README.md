@@ -1,113 +1,39 @@
-# agent-fleet — one marketplace for AI-agent delegation plugins
+# agent-fleet — Codex delegation and image generation for Claude Code
 
-Three Claude Code plugins, one marketplace:
+Two Claude Code plugins, one marketplace:
 
-| Plugin | Commands | What it delegates to |
+| Plugin | How Claude Code reaches it | What it does |
 |---|---|---|
-| `codex` | `/codex:*` (review, adversarial-review, task, execute-plan, rescue, handoff, status, wait, logs, result, attach, cancel, setup) | OpenAI Codex (app-server, or the Codex desktop app over IPC) |
-| `cc` | `/cc:*` (task, status, wait, logs, result, cancel, setup) | A headless Claude Code instance; profile picks the engine (native Claude / cheap endpoint / any model) |
+| `codex` | the `codex` skill (no slash commands): ask for a Codex review, check, diagnosis, implementation or image | Delegates to OpenAI Codex (app-server, or the Codex desktop app over IPC) |
 | `imagine` | `/imagine:image` | The marketplace's only image entry point, on either of two engines: xAI Grok Imagine over `POST /v1/images/generations` (reuses the grok CLI's OAuth login read-only, or `XAI_API_KEY`), or `--engine agy` through Antigravity's built-in `generate_image` (the user's Google login, no API key). Not a delegation engine: the file on disk is the receipt |
-
-> **`cc` v0.3.0** runs on the shared job runtime (`shared/lib/`). Its companion
-> CLI also exposes machine-layer re-entry verbs `wait` and `logs` (with `--json`
-> projections) for editors/orchestrators, and the same verbs are now exposed as
-> `/cc:wait` and `/cc:logs`. `execute-plan` was removed in v0.2.0;
-> hand a plan to `task` directly (or via `--prompt-file <path>`).
 
 ## Install
 
 ```bash
 /plugin marketplace add audichuang/agent-fleet-cc
 
-# Install the engines you want, then run each one's own setup:
 /plugin install codex@agent-fleet
-/plugin install cc@agent-fleet
 /plugin install imagine@agent-fleet
 /reload-plugins
 ```
 
-Install only the ones you use. Per-plugin requirements (codex CLI login,
-Anthropic-compatible endpoint profiles, imagine's grok/agy login) are documented in each plugin's directory
-under `plugins/<name>/`.
-
-### Lifecycle commands
-
-The P0/P1 lifecycle surface is intentionally command-line oriented:
-
-```text
-/codex:task "..." --background
-/codex:wait <job-id>
-/codex:logs <job-id>
-
-/cc:task "..." --background --profile <name>
-/cc:wait <job-id>
-/cc:logs <job-id> [--follow]
-```
-
-Codex log streaming delegates to its native attach/live-log path. cc logs expose the shared-runtime event log.
-
-### Quick start: `cc`
-
-```text
-/cc:setup        # checks the `claude` CLI + auto-creates a `native` profile on first run
-```
-
-`cc:setup` auto-creates a `native` profile (empty settings `{}` = your native
-Claude login + default model), so `/cc:task "..."` works immediately. To run a
-*different* engine, add another profile (a standard Claude Code settings JSON) at
-`~/.claude/plugins/data/cc/profiles/<name>.json` with an `env` block pointing at
-that endpoint (e.g. a cheaper model):
-
-```json
-{ "env": { "ANTHROPIC_BASE_URL": "https://...", "ANTHROPIC_AUTH_TOKEN": "sk-...", "ANTHROPIC_MODEL": "..." } }
-```
-
-Then run work:
-
-```text
-/cc:task "a complete, self-contained instruction" --profile <name>
-/cc:status              # list jobs in this workspace
-/cc:wait <job-id>       # block until a job reaches a terminal state
-/cc:logs <job-id>       # print job events; add --follow to stream
-/cc:result <job-id>     # fetch a job's result
-/cc:cancel <job-id>     # cancel a running job
-```
-
-Long tasks: add `--background`, then poll `/cc:status`, block with
-`/cc:wait <id>`, or inspect events with `/cc:logs <id> --follow`. Flags:
-`--prompt-file <path>`, `--json`, `--model <id>`, `--read-only`,
-`--resume-job <id>|--resume-last`, `--timeout-ms <n>`. Secrets in a profile's `env`
-are read at spawn time and never written to job state.
-
-### codex → cc handoff (Phase 2)
-
-`cc` 是雙宿主 plugin:除了在 Claude Code 用 `/cc:*`,也能在 **Codex 當 host** 時把明確指派的子任務交給 headless Claude。
-
-**安裝到 codex(使用者操作)**:將本 repo 註冊為 codex marketplace 後 `codex plugin add cc@<marketplace>`,確認 `~/.codex/config.toml` 出現 `[plugins."cc@<marketplace>"] enabled = true`。
-
-**用法**:在給 codex 的 prompt 裡明確指派,例如「這段翻譯交給 Claude 跑」。codex 會載入 `cc-handoff` skill → 定位 `cc-companion`(PATH launcher 或搜尋)→ 設 `CC_PLUGIN_DATA` → 在專案根以 `cc-companion task --prompt-file <abs> --json` 前景同步跑 → 回報結果與「claude 改了哪些檔」。
-
-**注意**:handoff 預設可寫(`bypassPermissions`);要唯讀加 `--read-only`。codex 端需先有 cc profile(`cc-companion setup` 會自動建 native)。
+Install only the ones you use. Per-plugin requirements (the codex CLI login; for imagine, a grok
+login, `XAI_API_KEY`, or the `agy` CLI) are documented under `plugins/<name>/`.
 
 ## Migrating from the standalone repos
 
-This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-plugin`
-(both archived) plus the local-only delegate plugin (since renamed to `cc`). The
-codex prefix is unchanged (the antigravity plugin has since been retired); the old `/delegate:*` prefix is now `/cc:*`.
-
-1. Uninstall the old plugins and remove the old marketplaces
-   (`openai-codex`, `antigravity`, `claude-delegate`) — prefixes would collide.
-2. Add this marketplace and install (commands above).
-3. Done. Job state and profiles live under `~/.claude/plugins/data/<plugin>/`,
-   keyed by plugin name — they survive unchanged (your `profiles/*.json` included).
+This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-plugin` (both
+archived). The antigravity, grok and cc plugins it once carried have since been retired; an
+installed copy keeps working but receives no updates — uninstall it with `/plugin uninstall`.
 
 ## Development
 
 ```bash
-npm test               # structure + shared + cc + codex + imagine + e2e
-npm run test:cc        # one suite at a time (also test:codex, test:imagine, …)
-npm run test:e2e       # black-box CLI end-to-end regression, the plugins with a job CLI to drive (cc, codex) (real subprocess, fake engine, no API key)
-npm run sync-shared    # re-vendor shared/lib into each plugin's scripts/lib/shared/ (CI drift-checks this)
+npm run verify         # the whole CI chain: check-version, sync-shared drift, npm test, build:codex
+npm test               # structure + shared + codex + imagine + e2e
+npm run test:codex     # one suite at a time (also test:imagine, test:shared, …)
+npm run test:e2e       # black-box CLI end-to-end regression for codex (real subprocess, fake engine, no API key)
+npm run sync-shared    # re-vendor shared/lib into plugins/codex/scripts/lib/shared/ (CI drift-checks this)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```
 
@@ -120,11 +46,8 @@ to bump a version, what CI checks beyond `npm test`, which plugin may touch whic
 [`AGENTS.md`](AGENTS.md).
 
 **Shared foundation:** `shared/lib/` is a zero-dependency job runtime — a directory-per-job
-state store with O_EXCL CAS terminal transitions, a generic adapter-driven worker (process-group
-spawn/kill so engine grandchildren are reaped), mandatory env sanitization with a recursion
-guard, and a parameterized 10-scenario conformance suite. `cc` runs the
-full runtime — engine knowledge lives in a per-engine adapter (`makeClaudeAdapter`), the job
-lifecycle in the shared lib — while `codex` uses only the shared state core and drives its own
-app-server broker instead. Both carry a
-vendored copy under `scripts/lib/shared/`, kept in sync by `npm run sync-shared` and drift-checked
-in CI. Designs live in `docs/specs/`.
+state store with O_EXCL CAS terminal transitions, a generic adapter-driven worker, mandatory env
+sanitization with a recursion guard, and a parameterized conformance suite. `codex` uses only its
+state core and drives its own app-server broker; it carries a vendored copy under
+`scripts/lib/shared/`, kept in sync by `npm run sync-shared` and drift-checked in CI. Designs live
+in `docs/specs/`.
