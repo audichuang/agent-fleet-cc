@@ -1,8 +1,3 @@
----
-name: imagine-prompts
-description: Craft the prompt for a still-image render on either engine the imagine plugin ships — xAI Grok Imagine, or Google Antigravity (agy, `--engine agy`) — and choose the aspect, model and resolution to pair with it. Use this skill BEFORE any call to /imagine:image or scripts/imagine.mjs — each render costs quota and there are no free re-rolls, so the prompt is the whole job. Reach for it whenever the user wants a picture MADE rather than found or edited — a poster, hero image, banner, thumbnail, album or book cover, product shot, portrait, mascot, avatar, icon, key visual, illustration, technical diagram, UI mockup, or plainly "a photo of X" — including when they hand over a one-line idea and expect it expanded, and even if they never say the word "prompt". Also use to diagnose a render that came back generic, mushy, badly lit, or carrying invented text nobody asked for.
----
-
 # Writing prompts for a still-image render
 
 There are no free re-rolls and no `seed` — every call spends quota and a re-run will not
@@ -53,7 +48,7 @@ picks for you.
 | 10 | **Style anchor** | The closing clause. One named anchor beats a stack of adjectives. |
 | 11 | **One scoped exclusion** | Optional, and weaker than it looks — see below. |
 
-Worked examples for eight common jobs are in `references/examples.md`. Copying a whole example
+Worked examples for eight common jobs are in `examples.md`. Copying a whole example
 and swapping the subject beats assembling from the table.
 
 ### When a slot is ignored, change model — not wording
@@ -66,7 +61,7 @@ Slot compliance differs **by model**, measured on one identical prompt:
 - `grok-imagine-image-quality` **inverted** the light and invented two legible signs.
 
 So a slot the model overrides is not a prompt bug you can word your way out of. Re-render on a
-different model before rewriting. `references/model-and-params.md` has the measured profiles.
+different model before rewriting. `model-and-params.md` has the measured profiles.
 
 ### On-image text
 
@@ -144,7 +139,7 @@ escalating the wording.
   wooden needle that is mush at 1k) — not just more pixels. It also changes the format to PNG
   and the file to ~7 MB.
 - **Model**: they differ in *aesthetic and in which slots they obey*, not just price — up to 3×.
-  The measured profiles and the price grid are in `references/model-and-params.md`. Prompt cap is
+  The measured profiles and the price grid are in `model-and-params.md`. Prompt cap is
   8000 characters (from the catalog, all three models).
 
 The live catalog is free and is the authority on what exists:
@@ -170,7 +165,7 @@ shipped as imperatives.
 **Standing of the advice:** xAI publishes **no image prompting guide at all**. Every corpus
 prompt was written for the **video** model or the grok.com app, never for this endpoint. Where a
 claim is measured, it says so and gives the n; everything else is a transferable observation.
-`references/model-and-params.md` ends with what is still unverified — add to it rather than
+`model-and-params.md` ends with what is still unverified — add to it rather than
 quietly promoting a guess.
 
 ## What changes on agy

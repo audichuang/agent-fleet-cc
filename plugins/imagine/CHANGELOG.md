@@ -1,5 +1,20 @@
 # imagine — changelog
 
+## 0.3.0
+
+**One `imagine` skill replaces the `/imagine:image` command.** Claude Code now reaches for it on
+its own whenever the user wants an image made — no slash command to remember. It is still
+user-invocable, as `/imagine:imagine`.
+
+- `skills/imagine/SKILL.md` is the entry point: write the prompt first, run `scripts/imagine.mjs`
+  with `--prompt-file`, report the path the script printed, ask before a second render. Its
+  description carries the triggers the old `imagine-prompts` skill had.
+- The detail moved one hop down into `skills/imagine/references/`: `prompt-craft.md` (the old
+  `imagine-prompts` skill body), `examples.md`, `model-and-params.md`, and `running.md` (the
+  old command's flags, agy engine, failure messages and cost).
+- **Removed:** `commands/image.md` and the separate `imagine-prompts` skill. The script, its
+  flags and its output line are unchanged.
+
 ## 0.2.2
 
 Closes the second review round. 0.2.1's fixes were right about *what* to check and wrong about

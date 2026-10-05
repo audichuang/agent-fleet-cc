@@ -33,14 +33,13 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   pins 24 for this reason — see `.github/workflows/ci.yml`).
 - One plugin's suite: `node --test tests/<plugin>/*.test.mjs`. The hermetic-vs-real-engine split is the `e2e-testing`
   skill's job — ask it before claiming anything was verified end-to-end.
-- `npm run sync-shared` — after editing `shared/lib/`, re-vendor it into each migrated
-  plugin's `scripts/lib/shared/` (`cc`, `codex`). **Commit BOTH the source and
+- `npm run sync-shared` — after editing `shared/lib/`, re-vendor it into
+  `plugins/codex/scripts/lib/shared/`. **Commit BOTH the source and
   the vendored copy** — CI drift-checks them.
 - `npm run bump-version <plugin> <patch|minor|major>` — the one way to bump a version; locks
   `plugins/<name>/.claude-plugin/plugin.json` ↔ its `marketplace.json` entry (`npm run
   check-version` verifies). **It syncs only those two.** A plugin may carry versions in other
-  manifests that drift silently — the dual-host one (`cc`) does, and it has
-  drifted before. So before bumping: `grep -rn '"version"' plugins/<name>` and hand-sync whatever
+  manifests that drift silently — the retired dual-host plugins did. So before bumping: `grep -rn '"version"' plugins/<name>` and hand-sync whatever
   else it finds. Don't trust a written-down inventory here; that list is exactly what rots. Same
   for the CHANGELOG: only some plugins keep one, so `ls plugins/<name>/CHANGELOG.md` before you
   assume — that asymmetry is why a bump lands with no entry describing it.
@@ -119,8 +118,9 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.
-- `shared/lib/` is the source of truth. `cc` runs the full shared
-  runtime (ProcessAdapter + runWorker); `codex` **uses** only the shared **state core**
+- `shared/lib/` is the source of truth. Its full runtime (ProcessAdapter + runWorker) has no
+  shipped adopter since cc, grok and antigravity were retired — `tests/shared/` still covers
+  it. `codex` **uses** only the shared **state core**
   (state-store / events / job / reconcile), **not** the worker — note
   `sync-shared` still vendors the whole runtime (incl. `worker.mjs`) into codex, it just never
   calls `runWorker` (its app-server broker stays engine-specific). Don't assume a plugin uses the
@@ -137,6 +137,5 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
   `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`. The retired
   `antigravity` / `grok` plugins' audits (`docs/antigravity-cli-contract-audit.md`,
   `docs/grok-cli-contract-audit.md`) stay because imagine's audits link into them — the `agy`
-  binary and grok's auth file are still imagine's engines
-  (`cc` alone has none — its engine is Claude Code itself). codex's desktop backend has its own:
+  binary and grok's auth file are still imagine's engines. codex's desktop backend has its own:
   `docs/codex-desktop-ipc-audit.md` (the Codex desktop app's private IPC router).

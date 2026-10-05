@@ -1,10 +1,4 @@
----
-description: generate an image with xAI Grok Imagine or Google Antigravity (agy) and return the verified saved path
-argument-hint: "<description> [--engine grok|agy] [--out <path>] [--aspect <ratio|auto>] [--resolution 1k|2k] [--model <id>] [--quality low|medium]"
----
-
-Generate ONE image and report the path of the file that actually landed on disk. Parse
-`$ARGUMENTS` yourself and pass the pieces through as flags.
+# Running a render: flags, the agy engine, results, failures, cost
 
 Two engines, one contract — **the file on disk is the receipt**, and a failure always exits
 non-zero:
@@ -18,15 +12,7 @@ Pick `grok` unless the user asks for agy, has no xAI credential, or wants to spe
 quota instead. `--model`, `--resolution` and `--quality` belong to the xAI endpoint and are
 refused (exit 2) with `--engine agy`, rather than silently dropped.
 
-## 1. Write the prompt before you spend the quota
-
-**Read `skills/imagine-prompts/SKILL.md` first** unless the user handed you a fully-formed
-prompt they want sent verbatim. A one-line description generates a one-line-quality image,
-there are no free re-rolls, and **a re-run does not reproduce the first image** — there is no
-`seed`. Build the prompt up per the recipe there, and **show the user the expanded prompt** in
-your reply so they can see what was actually sent and edit it for the next run.
-
-## 2. Run it, with the prompt in a **file**
+## Run it, with the prompt in a **file**
 
 `Write` the expanded prompt to a file in your scratchpad, then point the script at it:
 
@@ -50,7 +36,7 @@ derived from it, into a `command` string.
 **Omit `--out` unless the user named a path.** The script then mkdtemps its own directory and
 prints where the image landed — one less path to compute in a shell and paste into the next
 call. Pass `--out` only for a path the user actually asked for; the extension there is a
-request, not a promise (see step 3).
+request, not a promise (see "Read the result").
 
 Copy the `node "…/scripts/imagine.mjs"` path **verbatim** — it is already expanded; retyping
 the `<version>` segment from memory dies with "Cannot find module".
@@ -85,7 +71,7 @@ agent turn, ~30s in practice.
 
 `AGY_BIN` overrides the binary; otherwise it comes off PATH.
 
-## 3. Read the result
+## Read the result
 
 On success the script prints one line and exits 0:
 
@@ -143,14 +129,14 @@ timeout can signal the whole process group and a relative path of agy's lands aw
 files — but that is **not** a sandbox: skipped permissions are not fenced by cwd. Say so if a
 user asks what the flag costs them.
 
-## 4. Cost
+## Cost
 
 One call is one image. **No batching and no free re-rolls on either engine — ask before
 generating a second.**
 
 - `--engine grok`: billed to the user's SuperGrok subscription (verified 2026-08-23: generation
   succeeds with the OAuth bearer alone, no `XAI_API_KEY` present). Models differ in price by up
-  to 3×; `skills/imagine-prompts/references/model-and-params.md` has the grid.
+  to 3×; `model-and-params.md` has the grid.
 - `--engine agy`: spends the user's Google account quota, and costs an agent turn on top of the
   render (verified 2026-09-05 with no `GEMINI_API_KEY` in the environment and none stored — agy
   renders on its own login).

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // real-engine-smoke.mjs — Layer-2 E2E: drive the REAL installed engines
-// (codex / claude) through a live background job and assert the
-// cross-engine `wait` exit-code contract. This is a MANUAL gate: it spends real
+// (codex) through a live background job and assert its `wait` exit-code
+// contract. This is a MANUAL gate: it spends real
 // model tokens (jobs are cancelled within ~seconds to keep that minimal) and
 // needs the engines to be authed. It is intentionally NOT part of `npm test`.
 //
@@ -46,19 +46,10 @@ function parseJson(text) {
   }
 }
 
-// Mirrors cc's resolveDataRoot (plugins/cc/scripts/lib/adapter.mjs) — kept in
-// step by hand; cc is the only engine here whose data root is not the default.
-function ccDataRoot() {
-  return process.env.CC_PLUGIN_DATA
-    || process.env.CLAUDE_PLUGIN_DATA
-    || path.join(os.homedir(), ".claude", "plugins", "data", "cc");
-}
-
 function dataRoots() {
   const roots = new Set();
   roots.add(process.env.CLAUDE_PLUGIN_DATA
     || path.join(os.homedir(), ".claude/plugins/data/codex-agent-fleet"));
-  roots.add(ccDataRoot());
   return [...roots];
 }
 
@@ -68,17 +59,6 @@ function dataRoots() {
 function binaryPresent(bin) {
   const r = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15000 });
   return r.error?.code !== "ENOENT";
-}
-
-// cc launches under a profile; any valid-looking one will do for a smoke.
-function firstCcProfile() {
-  try {
-    return fs.readdirSync(path.join(ccDataRoot(), "profiles"))
-      .filter((f) => f.endsWith(".json"))
-      .sort()[0]?.slice(0, -".json".length) ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function pruneState(roots, wsBase) {
@@ -104,31 +84,16 @@ const ENGINES = {
     cancel: (ws, id) => ["cancel", id, "--cwd", ws, "--json"],
     waitFor: (ws, id, ms) => ["wait", id, "--cwd", ws, "--timeout-ms", String(ms), "--json"],
   },
-  cc: {
-    script: path.join(REPO, "plugins/cc/scripts/cc-companion.mjs"),
-    binary: "claude",
-    needsProfile: true,
-    launch: (ws, profile) => ["task", "smoke: reply with the single word ok", "--profile", profile, "--background", "--json"],
-    cancel: (ws, id) => ["cancel", id, "--json"],
-    // cc wait takes SECONDS, the others take ms.
-    waitFor: (ws, id, ms) => ["wait", id, "--timeout-s", String(Math.max(1, Math.round(ms / 1000))), "--json"],
-  },
 };
 
 function smokeEngine(name, cfg, roots) {
   if (!binaryPresent(cfg.binary)) return { name, skipped: `${cfg.binary} not on PATH` };
 
-  let profile = null;
-  if (cfg.needsProfile) {
-    profile = firstCcProfile();
-    if (!profile) return { name, skipped: "binary present but no profile to launch a real job" };
-  }
-
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), `real-${name}-`));
   const wsBase = path.basename(ws);
   const checks = [];
   try {
-    const launchArgs = cfg.needsProfile ? cfg.launch(ws, profile) : cfg.launch(ws);
+    const launchArgs = cfg.launch(ws);
     const launched = run([cfg.script, ...launchArgs], { cwd: ws, timeout: 60000 });
     const obj = parseJson(launched.stdout);
     const id = obj?.jobId;
@@ -170,7 +135,7 @@ function smokeEngine(name, cfg, roots) {
 function main() {
   const roots = dataRoots();
 
-  console.log("# Real-engine E2E smoke (live codex / claude)\n");
+  console.log("# Real-engine E2E smoke (live codex)\n");
   let failed = 0;
   let ran = 0;
   for (const [name, cfg] of Object.entries(ENGINES)) {

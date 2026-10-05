@@ -4,8 +4,8 @@
     "name": "audichuang"
   },
   "metadata": {
-    "description": "One marketplace for AI-agent delegation plugins — Codex and Claude Code (cc) via profiles — plus image generation.",
-    "version": "0.4.0"
+    "description": "Codex delegation from Claude Code, plus image generation.",
+    "version": "0.5.0"
   },
   "plugins": [
     {
@@ -18,16 +18,10 @@
       }
     },
     {
-      "name": "cc",
-      "source": "./plugins/cc",
-      "description": "Run tasks on a headless Claude Code instance, selected by profile — usable from Claude Code or a Codex host via handoff",
-      "version": "0.4.3"
-    },
-    {
       "name": "imagine",
       "source": "./plugins/imagine",
       "description": "Generate images from Claude Code with xAI Grok Imagine or Google Antigravity (agy) — prompt-craft guidance and a verified path on disk, whichever engine renders it.",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "author": {
         "name": "audichuang"
       }
