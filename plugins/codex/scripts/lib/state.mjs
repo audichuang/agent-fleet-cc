@@ -22,19 +22,25 @@ const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
 const FALLBACK_STATE_ROOT_DIR = path.join(os.tmpdir(), "codex-companion");
 const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-// Claude Code installs a plugin at <config>/plugins/cache/<marketplace>/<plugin>/<version>/ and
-// gives it <config>/plugins/data/<plugin>-<marketplace>/ for persistent data. A hook gets that
-// path as CLAUDE_PLUGIN_DATA; a Bash call made from a skill does not. Since 2.0.0 there is no
-// SessionStart hook to export it, so derive it from where this file is installed. A checkout
-// outside plugins/cache (the repo itself, tests) derives nothing and keeps the old fallback.
-export function derivePluginDataDir(fromDir = THIS_DIR) {
-  const parts = path.resolve(fromDir).split(path.sep);
-  const cache = parts.lastIndexOf("cache");
-  if (cache < 1 || parts[cache - 1] !== "plugins" || parts.length < cache + 4) {
+// Claude Code installs a plugin at <root>/cache/<marketplace>/<plugin>/<version>/ and gives it
+// <root>/data/<id>/ for persistent data, where <id> is `<plugin>@<marketplace>` with every
+// character other than letters, digits, `_` and `-` replaced by `-` (code.claude.com/docs/en/
+// plugins/loading and plugins/components, "Reference plugin paths and store data"). <root> is ~/.claude/plugins by default
+// but can be relocated (CLAUDE_CONFIG_DIR, CLAUDE_CODE_PLUGIN_CACHE_DIR), so only the fixed
+// layout below it is relied on. A hook gets that path as CLAUDE_PLUGIN_DATA; a Bash call made
+// from a skill does not, and since 2.0.0 there is no SessionStart hook to export it. A checkout
+// whose parent chain is not that layout (the repo itself, tests) derives nothing and keeps the
+// old fallback.
+export function derivePluginDataDir(pluginRoot = path.resolve(THIS_DIR, "..", "..")) {
+  const versionDir = path.resolve(pluginRoot);
+  const pluginDir = path.dirname(versionDir);
+  const marketplaceDir = path.dirname(pluginDir);
+  const cacheDir = path.dirname(marketplaceDir);
+  if (path.basename(cacheDir) !== "cache" || path.dirname(cacheDir) === cacheDir) {
     return null;
   }
-  const [marketplace, plugin] = [parts[cache + 1], parts[cache + 2]];
-  return path.join(parts.slice(0, cache).join(path.sep) || path.sep, "data", `${plugin}-${marketplace}`);
+  const id = `${path.basename(pluginDir)}@${path.basename(marketplaceDir)}`.replace(/[^A-Za-z0-9_-]/g, "-");
+  return path.join(path.dirname(cacheDir), "data", id);
 }
 
 export function resolvePluginDataDir(env = process.env) {

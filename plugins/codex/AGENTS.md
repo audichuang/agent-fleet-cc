@@ -23,8 +23,10 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   兩個都會刪 —— 在 Claude Code 裡跑測試時它們一定在環境裡。
 - **資料目錄靠安裝路徑推算**(`lib/state.mjs` 的 `derivePluginDataDir`):hook 拿得到
   `CLAUDE_PLUGIN_DATA`,skill 叫的 Bash **拿不到**,而 2.0.0 前是 SessionStart hook 把它匯出給 Bash。
-  所以從 `<config>/plugins/cache/<marketplace>/<plugin>/<version>/` 推出
-  `<config>/plugins/data/<plugin>-<marketplace>/`;repo checkout 推不出來,退回 `$TMPDIR` fallback。
+  所以照官方文件的版面,從 `<root>/cache/<marketplace>/<plugin>/<version>/` 推出 `<root>/data/<id>/`
+  (`<id>` = `<plugin>@<marketplace>` 把 `[A-Za-z0-9_-]` 以外換成 `-`;`<root>` 可被
+  `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_PLUGIN_CACHE_DIR` 搬走,所以**別比對它的名字**)。repo checkout
+  推不出來,退回 `$TMPDIR` fallback。`${CLAUDE_PLUGIN_DATA}` 只會被代換進 skill 文字、不會匯出給 Bash。
   `tests/codex/plugin-data-dir.test.mjs` 把 plugin 複製進假的 cache 目錄、不設環境變數跑 status/result。
 - **2.0.0 起沒有 SessionEnd 清理**:session 結束時不再主動終止本 session 的前景 job、也不再拆 broker。
   收尾靠既有的層:broker idle 5s 自關、dead-pid reconcile、watchdog、job 硬上限。

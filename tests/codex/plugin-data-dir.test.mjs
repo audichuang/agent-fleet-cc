@@ -10,12 +10,18 @@ import { derivePluginDataDir, resolveJobLogFile, saveState, writeJobFile } from 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PLUGIN_ROOT = path.join(ROOT, "plugins", "codex");
 
-test("the data dir is derived from the install path, and only from a plugins/cache install", () => {
+test("the data dir is derived from the install layout, whatever the plugins root is called", () => {
   const sep = path.sep;
-  const installed = ["", "home", "u", ".claude", "plugins", "cache", "agent-fleet", "codex", "2.0.0", "scripts", "lib"].join(sep);
-  assert.equal(derivePluginDataDir(installed), ["", "home", "u", ".claude", "plugins", "data", "codex-agent-fleet"].join(sep));
-  assert.equal(derivePluginDataDir(path.join(PLUGIN_ROOT, "scripts", "lib")), null, "a repo checkout derives nothing");
-  assert.equal(derivePluginDataDir(["", "a", "cache", "m", "p", "v"].join(sep)), null, "cache must sit under plugins/");
+  const at = (...parts) => ["", ...parts].join(sep);
+  assert.equal(derivePluginDataDir(at("home", "u", ".claude", "plugins", "cache", "agent-fleet", "codex", "2.0.0")),
+    at("home", "u", ".claude", "plugins", "data", "codex-agent-fleet"));
+  // CLAUDE_CODE_PLUGIN_CACHE_DIR can relocate the root to a dir not named "plugins".
+  assert.equal(derivePluginDataDir(at("srv", "cc-root", "cache", "agent-fleet", "codex", "2.0.0")),
+    at("srv", "cc-root", "data", "codex-agent-fleet"));
+  // The id is `<plugin>@<marketplace>` with anything outside [A-Za-z0-9_-] replaced by `-`.
+  assert.equal(derivePluginDataDir(at("r", "cache", "my.market", "codex", "2.0.0")), at("r", "data", "codex-my-market"));
+  assert.equal(derivePluginDataDir(PLUGIN_ROOT), null, "a repo checkout derives nothing");
+  assert.equal(derivePluginDataDir(at("a", "b", "codex", "2.0.0")), null, "no cache/ level, no derivation");
 });
 
 // 2.0.0 removed the SessionStart hook, which was what exported CLAUDE_PLUGIN_DATA to Bash. A
@@ -25,9 +31,10 @@ test("an installed companion finds existing jobs with CLAUDE_PLUGIN_DATA unset",
   // realpath: on macOS the tmpdir is a /var -> /private/var symlink, and the companion only runs
   // main() when argv[1] equals its own resolved module path.
   const config = fs.realpathSync(makeTempDir());
-  const installed = path.join(config, "plugins", "cache", "agent-fleet", "codex", "9.9.9");
+  // A relocated plugins root (not named "plugins"), the case a name check would miss.
+  const installed = path.join(config, "relocated-root", "cache", "agent-fleet", "codex", "9.9.9");
   fs.cpSync(PLUGIN_ROOT, installed, { recursive: true });
-  const dataDir = path.join(config, "plugins", "data", "codex-agent-fleet");
+  const dataDir = path.join(config, "relocated-root", "data", "codex-agent-fleet");
 
   const workspace = makeTempDir();
   const saved = process.env.CLAUDE_PLUGIN_DATA;

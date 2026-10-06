@@ -17,9 +17,10 @@ companion itself.
   lists this session's jobs and `task --resume-last` continues this session's thread, as before.
 - **Job state stays where it was without the SessionStart hook.** The hook also exported
   `CLAUDE_PLUGIN_DATA`, which a skill-driven Bash call does not get. The companion now derives
-  the data dir from its own install path (`<config>/plugins/cache/<marketplace>/codex/<version>/`
-  → `<config>/plugins/data/codex-<marketplace>/`), so an upgraded install keeps finding its
-  existing jobs. An explicit `CLAUDE_PLUGIN_DATA` still wins.
+  the data dir from its own install path, following Claude Code's documented layout
+  (`<root>/cache/<marketplace>/codex/<version>/` → `<root>/data/codex-<marketplace>/`, with the
+  root relocatable), so an upgraded install keeps finding its existing jobs. An explicit
+  `CLAUDE_PLUGIN_DATA` still wins.
 - **No more SessionEnd cleanup.** Ending a session no longer terminates that session's foreground
   jobs or tears down the shared broker. The existing layers cover it: the broker shuts itself
   down after 5 s idle, a dead worker is reconciled to `failed`, and the watchdog and the job's
