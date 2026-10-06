@@ -118,24 +118,19 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.
-- `shared/lib/` is the source of truth. Its full runtime (ProcessAdapter + runWorker) has no
-  shipped adopter since cc, grok and antigravity were retired — `tests/shared/` still covers
-  it. `codex` **uses** only the shared **state core**
-  (state-store / events / job / reconcile), **not** the worker — note
-  `sync-shared` still vendors the whole runtime (incl. `worker.mjs`) into codex, it just never
-  calls `runWorker` (its app-server broker stays engine-specific). Don't assume a plugin uses the
-  shared runtime the same way — check before editing.
+- `shared/lib/` is the source of truth, and it is only the **state core** codex uses
+  (`core/{state-store,events,job,reconcile}.mjs`). The generic worker, adapters, env sanitizer
+  and conformance suite went with the plugins that ran them (cc, grok, antigravity) — codex
+  drives its own app-server broker and never had a worker. Before adding something back, check
+  a shipped plugin imports it.
 
 ## Where things live
 - Domain glossary (the project's ubiquitous language): `CONTEXT.md`
 - Architecture decisions (why a shape was chosen, not how): `docs/adr/`
-- Specs / plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`, `docs/specs/`
+- Old specs and plans were removed from the tree; `git show 4cdeb2c:docs/<path>` reads them.
 - **Engine ↔ CLI contract audits** — every flag/output field a plugin depends on, pinned to a
   source anchor (or, for a closed binary, an evidence class) + the recipe to re-run the check.
   Update the audit doc, not the plugin's `AGENTS.md`, when you learn something about an engine:
   `docs/codex-protocol-sync-audit.md` · imagine has two, one per engine it renders on:
-  `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`. The retired
-  `antigravity` / `grok` plugins' audits (`docs/antigravity-cli-contract-audit.md`,
-  `docs/grok-cli-contract-audit.md`) stay because imagine's audits link into them — the `agy`
-  binary and grok's auth file are still imagine's engines. codex's desktop backend has its own:
+  `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`. codex's desktop backend has its own:
   `docs/codex-desktop-ipc-audit.md` (the Codex desktop app's private IPC router).

@@ -32,7 +32,8 @@ process.env.USERPROFILE = fakeHome;
 // tuning knobs (CODEX_JOB_TIMEOUT_MS, watchdog intervals) make timing
 // nondeterministic. Tests that need any of these set them explicitly.
 for (const key of Object.keys(process.env)) {
-  if (key.startsWith("CODEX_")) {
+  // CLAUDE_CODE_SESSION_ID too: it is the session-id fallback, and a run inside Claude Code has it.
+  if (key.startsWith("CODEX_") || key === "CLAUDE_CODE_SESSION_ID") {
     delete process.env[key];
   }
 }

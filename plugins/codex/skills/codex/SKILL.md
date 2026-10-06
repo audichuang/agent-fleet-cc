@@ -64,10 +64,10 @@ Open one of these when the row matches. Each file is one hop from here.
 
 | Reference | Read it when |
 | --- | --- |
-| [references/prompting.md](references/prompting.md) | Composing the prompt — outcome-first shape, which model, and the reviewer stance. `codex:codex-rescue` starts here when it tightens a forwarded request. |
+| [references/prompting.md](references/prompting.md) | Composing the prompt — outcome-first shape, which model, and the reviewer stance. |
 | [references/prompt-blocks.md](references/prompt-blocks.md) | You need a reusable section (stop rules, verification, retrieval budget) rather than writing one. |
 | [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md) | You need a complete template for a task type — diagnosis, narrow fix, review, research. |
 | [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md) | Checking a drafted prompt for lines that make GPT-6.1 worse. |
-| [references/delivery-paths.md](references/delivery-paths.md) | Choosing a direct `task`, `task --resume-last`, the `codex:codex-rescue` subagent, or a conversation fork. |
+| [references/delivery-paths.md](references/delivery-paths.md) | Choosing a direct `task`, `task --resume-last`, or a conversation fork. |
 | [references/background-jobs.md](references/background-jobs.md) | You launched with `--background`, or are waiting on a job — `wait`'s timeout and exit codes, the 30-minute check-in on a long job, the job's time cap, and how to tell a finished job. |
 | [references/desktop-backend.md](references/desktop-backend.md) | A task should run in the Codex desktop app, continue a thread open there, or a desktop run failed. |

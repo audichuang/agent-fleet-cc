@@ -11,7 +11,7 @@ import {
   saveState,
   writeJobFile
 } from "../../plugins/codex/scripts/lib/state.mjs";
-import { createJobProgressUpdater, indexedTerminalStatus } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { createJobProgressUpdater, createJobRecord, indexedTerminalStatus, readSessionId } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
 import { readCurrentTurnIdentity } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
 
 test("indexedTerminalStatus returns the index status only for terminal jobs", () => {
@@ -107,4 +107,13 @@ test("createJobProgressUpdater ignores events that do not change any tracked fie
   const after = fs.readFileSync(resolveJobFile(workspace, job.id), "utf8");
 
   assert.equal(before, after);
+});
+
+// 2.0.0 dropped the SessionStart hook that exported CODEX_COMPANION_SESSION_ID. Claude Code
+// exports CLAUDE_CODE_SESSION_ID to every Bash call, so jobs stay session-scoped without it.
+test("the session id falls back to Claude Code's own CLAUDE_CODE_SESSION_ID", () => {
+  assert.equal(readSessionId({ CLAUDE_CODE_SESSION_ID: "cc-1" }), "cc-1");
+  assert.equal(readSessionId({ CODEX_COMPANION_SESSION_ID: "explicit", CLAUDE_CODE_SESSION_ID: "cc-1" }), "explicit");
+  assert.equal(readSessionId({}), null);
+  assert.equal(createJobRecord({ id: "j" }, { env: { CLAUDE_CODE_SESSION_ID: "cc-1" } }).sessionId, "cc-1");
 });

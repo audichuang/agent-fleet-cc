@@ -52,7 +52,6 @@ test("app-server is spawned with image generation enabled", () => {
 
 test("model guidance keeps the workhorse and does not route to sol or luna", () => {
   const promptingSkill = read("skills/codex/references/prompting.md");
-  const agent = read("agents/codex-rescue.md");
 
   assert.match(promptingSkill, /\|\s*\*\*gpt-6\.1-sol\*\*\s*\|/);
   assert.match(promptingSkill, /\|\s*\*\*gpt-6-astra\*\*\s*\|/);
@@ -63,13 +62,6 @@ test("model guidance keeps the workhorse and does not route to sol or luna", () 
   assert.match(promptingSkill, /no Fast path/);
   assert.doesNotMatch(promptingSkill, /\$\d[\d.]*\s*\/\s*\$\d/);
   assert.match(promptingSkill, /route by which job it is, not by price/i);
-
-  assert.doesNotMatch(agent, /--model gpt-6-luna --effort max/);
-  assert.doesNotMatch(agent, /Ticket lane/);
-  assert.match(agent, /Never choose `gpt-6-sol` or `gpt-6-luna`/);
-  assert.match(agent, /Leave `--effort` unset unless the user explicitly requests a specific reasoning effort/);
-  assert.match(agent, /Leave model unset by default/);
-  assert.doesNotMatch(agent, /spark/i);
 });
 
 test("delivery-path reference is reachable and the host runs the companion", () => {
@@ -78,21 +70,17 @@ test("delivery-path reference is reachable and the host runs the companion", () 
 
   assert.match(promptingSkill, /\(delivery-paths\.md\)/);
   assert.match(deliveryPaths, /`--resume-last`/);
-  assert.match(deliveryPaths, /subagent_tokens: 20732/);
+  assert.doesNotMatch(deliveryPaths, /codex:codex-rescue`? subagent \|/);
   assert.match(deliveryPaths, /context: fork/);
   assert.match(deliveryPaths, /no `Agent` tool/i);
   assert.match(deliveryPaths, /There is no `\/codex:\*` slash command/);
   assert.match(deliveryPaths, /The host runs the companion/);
 });
 
-test("internal docs use task terminology for rescue runs", () => {
-  const agent = read("agents/codex-rescue.md");
+test("internal docs use task terminology for delegated runs", () => {
   const promptingSkill = read("skills/codex/references/prompting.md");
   const promptRecipes = read("skills/codex/references/codex-prompt-recipes.md");
 
-  assert.match(agent, /codex-companion\.mjs" task \.\.\./);
-  assert.match(agent, /This subagent only forwards to `task`/i);
-  assert.match(agent, /--resume-last/i);
   assert.match(promptingSkill, /Use `task` when the task is diagnosis/i);
   assert.match(promptRecipes, /Codex task prompts/i);
   assert.match(promptRecipes, /Use these as starting templates for Codex task prompts/i);
@@ -100,12 +88,16 @@ test("internal docs use task terminology for rescue runs", () => {
   assert.match(promptRecipes, /## Narrow Fix/);
 });
 
-test("hooks keep session-end cleanup and stop gating enabled", () => {
-  const source = read("hooks/hooks.json");
-  assert.match(source, /SessionStart/);
-  assert.match(source, /SessionEnd/);
-  assert.match(source, /stop-review-gate-hook\.mjs/);
-  assert.match(source, /session-lifecycle-hook\.mjs/);
+test("the skill is the whole surface: no subagent, no hooks, no second skill", () => {
+  // Discovery is a directory scan, so any of these coming back is a mkdir; pin all of them.
+  for (const dir of ["agents", "hooks", "commands"]) {
+    assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, dir)), false, `plugins/codex/${dir} must not come back`);
+  }
+  assert.deepEqual(fs.readdirSync(path.join(PLUGIN_ROOT, "skills")), ["codex"]);
+  const manifest = JSON.parse(read(".claude-plugin/plugin.json"));
+  for (const key of ["agents", "hooks", "commands"]) {
+    assert.equal(manifest[key], undefined, `plugin.json must not declare ${key}`);
+  }
 });
 
 test("status surfaces render the status report, not the stored result", () => {
@@ -126,47 +118,6 @@ test("status surfaces render the status report, not the stored result", () => {
   }
 
   assert.match(companionHandler("handleResult"), /renderStoredJobResult/);
-});
-
-test("the rescue agent names the ten-minute ceiling and where the record can be read", () => {
-  const agent = read("agents/codex-rescue.md");
-  assert.match(agent, /ten minutes/i);
-  assert.match(agent, /SIGTERM/);
-  assert.match(agent, /status <jobId>/);
-  assert.match(agent, /no stdout at all AND the call was not killed by a timeout/i);
-  assert.doesNotMatch(agent, /^context:\s*fork\b/m);
-});
-
-test("codex-rescue keeps a quoted description and the forwarding contract", () => {
-  const agent = read("agents/codex-rescue.md");
-  const parts = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(agent);
-  assert.ok(parts, "agents/codex-rescue.md has no frontmatter");
-  const [, frontmatter, body] = parts;
-
-  const description = /^description: (.+)$/m.exec(frontmatter);
-  assert.ok(description, "agents/codex-rescue.md has no description");
-  assert.match(description[1], /^".*"$/);
-
-  assert.match(body, /`codex:codex` skill/);
-  assert.match(body, /thin forwarding wrapper/i);
-  assert.match(body, /prefer foreground for a small, clearly bounded rescue request/i);
-  assert.match(body, /one `task` run per rescue handoff/i);
-  assert.match(body, /Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own/i);
-  assert.match(body, /Do not call `setup`, `review`, `adversarial-review`, `status`, `result`, or `cancel`/);
-  assert.match(body, /Pass any explicit `--model` value through verbatim/);
-  assert.match(body, /If the user asks for a concrete model name such as `gpt-5\.4-mini`, pass it through with `--model`/);
-  assert.match(body, /Return the stdout of the `codex-companion` command exactly as-is/);
-  assert.match(body, /On failure the companion exits non-zero and prints a structured.*envelope on stdout\. Return that stdout as-is/i);
-  assert.match(body, /references\/prompting\.md/);
-  assert.match(body, /to tighten the user's request into a better Codex prompt/);
-  assert.match(body, /Do not use that reference to inspect the repository, reason through the problem yourself, draft a solution, or do any independent work/);
-  assert.match(body, /Never hardcode a cache\/versioned path/i);
-  assert.match(body, /pass `--prompt-file <path>`/i);
-  assert.match(body, /Treat `--background` and `--wait` as Claude-side execution control only/);
-  assert.match(body, /Strip them before calling `task`/);
-  assert.match(body, /Treat a user-typed `--write` as a runtime control/i);
-  assert.match(body, /--resume/);
-  assert.match(body, /--fresh/);
 });
 
 test("codex ships exactly one skill, whose references are all one hop from SKILL.md", () => {

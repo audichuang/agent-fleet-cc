@@ -33,14 +33,12 @@ import { truncateToByteBudget } from "./lib/strings.mjs";
 import {
   applyJobPatchIfActive,
   generateJobId,
-  getConfig,
   jobFilePath,
   listJobs,
   readJobFile,
   resolveJobDoneFile,
   resolveJobFileInStateDir,
   resolveStateDir,
-  setConfig,
   upsertJob,
   writeCompletionSignalFile,
   writeJobFile
@@ -65,7 +63,7 @@ import {
   nowIso,
   resolveJobTimeoutMs,
   runTrackedJob,
-  SESSION_ID_ENV
+  readSessionId
 } from "./lib/tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import { parseExpectedTriplet, assertWorktreeAlignment } from "./lib/worktree-guard.mjs";
@@ -104,13 +102,12 @@ function resolveDefaultEffort() {
   }
   return "xhigh";
 }
-const STOP_REVIEW_TASK_MARKER = "Run a stop-gate review of the previous Claude turn.";
 
 function printUsage() {
   console.log(
     [
       "Usage:",
-      "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
+      "  node scripts/codex-companion.mjs setup [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [focus text]",
       "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--new-thread-via <cli|app>] [--model <model>] [--effort <none|minimal|low|medium|high|xhigh|max>] [--prompt-file <path> | prompt]",
@@ -278,7 +275,6 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const npmStatus = binaryAvailable("npm", ["--version"], { cwd });
   const codexStatus = getCodexAvailability(cwd);
   const authStatus = await getCodexAuthStatus(cwd);
-  const config = getConfig(workspaceRoot);
   const modelStatus = await resolveDefaultModelSupport(cwd, resolveDefaultModel(), codexStatus, authStatus);
   const desktopStatus = await probeDesktop();
 
@@ -300,9 +296,6 @@ async function buildSetupReport(cwd, actionsTaken = []) {
       `Codex does not list the default model \`${modelStatus.defaultModel}\` for your account. Run \`codex update\`, or set \`CODEX_DEFAULT_MODEL\` to one you have${suggestions ? `: ${suggestions}` : ""}.`
     );
   }
-  if (!config.stopReviewGate) {
-    nextSteps.push("Optional: run `setup --enable-review-gate` to require a fresh review before stop.");
-  }
 
   return {
     ready: nodeStatus.available && codexStatus.available && authStatus.loggedIn,
@@ -312,7 +305,6 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     auth: authStatus,
     model: modelStatus,
     sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
-    reviewGateEnabled: Boolean(config.stopReviewGate),
     desktop: desktopStatus,
     actionsTaken,
     nextSteps
@@ -322,26 +314,10 @@ async function buildSetupReport(cwd, actionsTaken = []) {
 async function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
-    booleanOptions: ["json", "enable-review-gate", "disable-review-gate"]
+    booleanOptions: ["json"]
   });
 
-  if (options["enable-review-gate"] && options["disable-review-gate"]) {
-    throw new Error("Choose either --enable-review-gate or --disable-review-gate.");
-  }
-
-  const cwd = resolveCommandCwd(options);
-  const workspaceRoot = resolveCommandWorkspace(options);
-  const actionsTaken = [];
-
-  if (options["enable-review-gate"]) {
-    setConfig(workspaceRoot, "stopReviewGate", true);
-    actionsTaken.push(`Enabled the stop-time review gate for ${workspaceRoot}.`);
-  } else if (options["disable-review-gate"]) {
-    setConfig(workspaceRoot, "stopReviewGate", false);
-    actionsTaken.push(`Disabled the stop-time review gate for ${workspaceRoot}.`);
-  }
-
-  const finalReport = await buildSetupReport(cwd, actionsTaken);
+  const finalReport = await buildSetupReport(resolveCommandCwd(options));
   outputResult(options.json ? finalReport : renderSetupReport(finalReport), options.json);
 }
 
@@ -429,7 +405,7 @@ function isActiveJobStatus(status) {
 }
 
 function getCurrentClaudeSessionId() {
-  return process.env[SESSION_ID_ENV] ?? null;
+  return readSessionId(process.env);
 }
 
 function filterJobsForCurrentClaudeSession(jobs) {
@@ -752,13 +728,6 @@ function buildReviewJobMetadata(reviewName, target) {
 }
 
 function buildTaskRunMetadata({ prompt, resumeLast = false }) {
-  if (!resumeLast && String(prompt ?? "").includes(STOP_REVIEW_TASK_MARKER)) {
-    return {
-      title: "Codex Stop Gate Review",
-      summary: "Stop-gate review of previous Claude turn"
-    };
-  }
-
   const title = resumeLast ? "Codex Resume" : "Codex Task";
   const fallbackSummary = resumeLast ? DEFAULT_CONTINUE_PROMPT : "Task";
   return {

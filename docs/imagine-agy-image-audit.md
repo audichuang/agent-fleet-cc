@@ -8,9 +8,9 @@ The engine here is the **Antigravity CLI binary** (`agy`), not an HTTP API. It i
 binary, so most of what follows is *live behavioural* evidence: what the process did on this
 machine on the date stated. Nothing here is documented by Google.
 
-> The same binary is audited from a different angle in `docs/antigravity-cli-contract-audit.md`
-> (the `antigravity` plugin's job lifecycle). That file owns launch/wait/cancel; this one owns
-> image generation. Neither should restate the other.
+> The retired `antigravity` plugin audited the same binary's job lifecycle (launch/wait/cancel) in
+> `docs/antigravity-cli-contract-audit.md`, removed with it; read it with
+> `git show 4cdeb2c:docs/antigravity-cli-contract-audit.md`. This file owns image generation.
 
 ## Baseline
 
@@ -136,6 +136,6 @@ The script exits non-zero and quotes agy back if the file is not there, so a gre
   account, and what happens when that runs out.
 - Whether `agy --sandbox` (it is in `--help`) would actually fence a run that also carries
   `--dangerously-skip-permissions`, and at what cost to the render. Untested — the same probe is
-  open in `docs/antigravity-cli-contract-audit.md`. Until it is answered, the plugin's position is
+  was open in the retired antigravity audit (`git show 4cdeb2c:docs/antigravity-cli-contract-audit.md`). Until it is answered, the plugin's position is
   that the agy path runs unfenced and says so.
 - Windows behaviour. Everything above is Linux, one machine.
