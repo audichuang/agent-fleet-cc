@@ -1,6 +1,7 @@
 // Codex-only progress + turn-identity layer for the shared directory-per-job
 // store (Phase 1A / Gap-2 Option A; see
-// docs/superpowers/plans/2026-06-29-codex-gap2-b3-resolution.md).
+// docs/superpowers/plans/2026-06-29-codex-gap2-b3-resolution.md,
+// removed from the tree; `git show 4cdeb2c:<that path>`).
 //
 // Under Option A, live progress (phase/threadId/turnId) is appended to the
 // per-job events.ndjson as `engine-event`s instead of being written into

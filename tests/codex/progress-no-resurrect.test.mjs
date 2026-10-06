@@ -1,5 +1,6 @@
 // Phase 1A / Gap-2 Option A resolution (see
-// docs/superpowers/plans/2026-06-29-codex-gap2-b3-resolution.md).
+// docs/superpowers/plans/2026-06-29-codex-gap2-b3-resolution.md,
+// removed from the tree; `git show 4cdeb2c:<that path>`).
 //
 // Option A moves job progress (phase/threadId/turnId) off job.json into the
 // append-only events.ndjson, so the progress-clobbers-terminal race (B3) is
