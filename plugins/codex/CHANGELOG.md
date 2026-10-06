@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.0.0
+
+**The `codex` skill is the whole plugin: the `codex-rescue` subagent, the hooks and the stop-time
+review gate are gone.** Claude Code reaches Codex through the skill, and the host runs the
+companion itself.
+
+- **Removed `codex:codex-rescue`.** A delegation is a companion `task` from the main thread; the
+  skill's `delivery-paths.md` no longer offers a subagent path.
+- **Removed the hooks** (`hooks/hooks.json`, `session-lifecycle-hook.mjs`,
+  `stop-review-gate-hook.mjs`) and with them the stop-time review gate: `setup` no longer takes
+  `--enable-review-gate` / `--disable-review-gate`, and `status` / `setup` no longer print a
+  review-gate line. A state file that still carries `config.stopReviewGate` loads unchanged.
+- **Jobs stay session-scoped without the SessionStart hook.** The companion reads Claude Code's
+  own `CLAUDE_CODE_SESSION_ID` (an explicit `CODEX_COMPANION_SESSION_ID` still wins), so `status`
+  lists this session's jobs and `task --resume-last` continues this session's thread, as before.
+- **No more SessionEnd cleanup.** Ending a session no longer terminates that session's foreground
+  jobs or tears down the shared broker. The existing layers cover it: the broker shuts itself
+  down after 5 s idle, a dead worker is reconciled to `failed`, and the watchdog and the job's
+  hard cap bound the rest.
+
 ## 1.8.0
 
 **A background job may run 3 hours, and a long one is checked on every 30 minutes.**

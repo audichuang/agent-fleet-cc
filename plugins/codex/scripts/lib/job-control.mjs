@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { getSessionRuntimeStatus } from "./codex.mjs";
 import { findJobByIdAcrossWorkspaces, getConfig, jobFilePath, listJobs, readJobFile, resolveStateDir } from "./state.mjs";
 import { readProgressSnapshot } from "./codex-progress.mjs";
-import { SESSION_ID_ENV } from "./tracked-jobs.mjs";
+import { readSessionId } from "./tracked-jobs.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
 
 export const DEFAULT_MAX_STATUS_JOBS = 8;
@@ -15,7 +15,7 @@ export function sortJobsNewestFirst(jobs) {
 }
 
 function getCurrentSessionId(options = {}) {
-  return options.env?.[SESSION_ID_ENV] ?? process.env[SESSION_ID_ENV] ?? null;
+  return (options.env ? readSessionId(options.env) : null) ?? readSessionId(process.env);
 }
 
 function filterJobsForCurrentSession(jobs, options = {}) {
@@ -350,8 +350,7 @@ export function buildStatusSnapshot(cwd, options = {}) {
     sessionRuntime: getSessionRuntimeStatus(options.env, workspaceRoot),
     running,
     latestFinished,
-    recent,
-    needsReview: Boolean(config.stopReviewGate)
+    recent
   };
 }
 

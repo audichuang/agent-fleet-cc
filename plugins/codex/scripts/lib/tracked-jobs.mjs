@@ -41,6 +41,13 @@ async function defaultInterruptOnTimeout(cwd, ctx) {
 }
 
 export const SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
+// Claude Code exports its own session id to every Bash call, so jobs stay scoped to the
+// session without a SessionStart hook. SESSION_ID_ENV still wins when set explicitly.
+export const CLAUDE_SESSION_ID_ENV = "CLAUDE_CODE_SESSION_ID";
+
+export function readSessionId(env = process.env) {
+  return env[SESSION_ID_ENV] || env[CLAUDE_SESSION_ID_ENV] || null;
+}
 export const JOB_TIMEOUT_ENV = "CODEX_JOB_TIMEOUT_MS";
 // Unconditional wall-clock backstop for a background job (layer 2). A single
 // task call can legitimately run many TDD cycles (npm/vitest/tsc) or a long
@@ -123,7 +130,7 @@ export function createJobLogFile(workspaceRoot, jobId, title) {
 
 export function createJobRecord(base, options = {}) {
   const env = options.env ?? process.env;
-  const sessionId = env[options.sessionIdEnv ?? SESSION_ID_ENV];
+  const sessionId = options.sessionIdEnv ? env[options.sessionIdEnv] : readSessionId(env);
   return {
     ...base,
     createdAt: nowIso(),

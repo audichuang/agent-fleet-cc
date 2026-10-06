@@ -56,9 +56,7 @@ function atomicWriteFileSync(filePath, data) {
 function defaultState() {
   return {
     version: STATE_VERSION,
-    config: {
-      stopReviewGate: false
-    },
+    config: {},
     jobs: []
   };
 }

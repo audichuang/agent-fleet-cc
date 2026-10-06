@@ -9,23 +9,20 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 
 ## 結構角色(判斷,不是清單)
 - **discovery**:host 要 Codex 檢查時讀 `skills/codex/SKILL.md`,自己跑 `scripts/codex-companion.mjs`。
-  **沒有 slash command**(`commands/` 在 1.6.4 刪掉)。另外一顆 **proactive `codex:codex-rescue`
-  subagent**(`agents/codex-rescue.md` — 卡住 / 要第二意見時主動用)。它的 description 常駐在 host
-  的系統提示裡,是自動發現路徑 —— fleet 的 `delegating-to-fleet` 路由索引已隨 fleet plugin
-  移除(見 `docs/adr/0001` 的 superseded 註記)。
+  **skill 就是整個介面**:沒有 slash command(`commands/` 在 1.6.4 刪)、沒有 subagent、沒有 hooks
+  (`agents/codex-rescue.md` 與 `hooks/` 在 2.0.0 刪)。自動發現只靠 skill 的 description。
 - `scripts/codex-companion.mjs` — CLI 入口;經 `lib/codex.mjs` 的 `runAppServerTurn` /
   `runAppServerReview` 驅動 Codex app-server(**不是** runWorker)。
 - `scripts/app-server-broker.mjs` — 持久**共用** broker(streaming turn/review/compact、idle-shutdown
   `CODEX_BROKER_IDLE_TIMEOUT_MS` 預設 5s);一次只服務一個 turn,並行的會收到 BROKER_BUSY(-32001)。
 - `scripts/codex-watchdog.mjs` — **detached** 背景 turn 的救援層(非唯一:另有 in-process transport
   watchdog、tracked-job timeout/interrupt、dead-pid/deadline reconcile)。
-- `scripts/stop-review-gate-hook.mjs` — Stop hook,對上一個 Claude turn 跑 codex review
-  (companion `setup --enable-review-gate` / `--disable-review-gate` 開關)。
-- `scripts/session-lifecycle-hook.mjs` — SessionStart/SessionEnd hook(`hooks/hooks.json`)。
-  SessionEnd **終止並標 failed** 本 session 非 background 的 queued/running job
-  (`endedBySession: true`),`background: true` 的**豁免存活**;broker 只在「shutdown 未被
-  BUSY 拒絕 **且** 無 active background job」才拆(`shouldTeardownBroker`)。下面
-  「session-scoped vs durable」那條踩雷的底層機制就是它。
+- **session 範圍靠 `CLAUDE_CODE_SESSION_ID`**(`lib/tracked-jobs.mjs` 的 `readSessionId`):Claude Code
+  把它匯出給每個 Bash call,所以 `status` 只列本 session 的 job、`task --resume-last` 只接本 session 的
+  thread,不需要 SessionStart hook。`CODEX_COMPANION_SESSION_ID` 有設時優先。測試的 `helpers.mjs`
+  兩個都會刪 —— 在 Claude Code 裡跑測試時它們一定在環境裡。
+- **2.0.0 起沒有 SessionEnd 清理**:session 結束時不再主動終止本 session 的前景 job、也不再拆 broker。
+  收尾靠既有的層:broker idle 5s 自關、dead-pid reconcile、watchdog、job 硬上限。
 - `scripts/lib/codex.mjs` — 高層編排(turn / review、auth·availability、model list、structured
   output);app-server **client 與 direct/broker transport 在 `lib/app-server.mjs`**。
 - `scripts/lib/desktop-ipc.mjs` — **桌面版後端**:經 Codex 桌面版私有 IPC router(`$CODEX_HOME/ipc/ipc.sock`,
@@ -37,7 +34,7 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `app`(`codex://threads/new?prompt&path` 深層連結 + 在 App 視窗按 Enter,再從 rollout 檔以首則訊息找出 thread id)。使用者文件在 `skills/codex/references/desktop-backend.md`;
   協定契約、實測證據與 app 更新後的重驗步驟在 `docs/codex-desktop-ipc-audit.md`,為何這樣設計在 `docs/adr/0004`。
 - `scripts/lib/worktree-guard.mjs` — **條件式** expected-triplet 驗證(給齊 expected-worktree /
-  branch / base 才 assert;現行 handoff/rescue/execute-plan 沒帶 → 實質 no-op)。
+  branch / base 才 assert;現行 verb 都沒帶 → 實質 no-op)。
 
 ## 進來改要遵守
 - **沒有 `commands/`。** host 依 skill 呼叫 companion verb(`review` / `adversarial-review` /
@@ -45,10 +42,10 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 - **動到 app-server 相關型別 → 跑 `npm run build:codex`**(`tsc`,對 generated types +
   `lib/app-server-protocol.d.ts`);為何 `npm test` 不涵蓋、CI 卻會紅,見 root Conventions。
 - **只有一顆 skill(`codex`)**,1.6.2 起。1.6.4 起它同時是呼叫入口(怎麼跑 companion)與
-  result-handling 契約。`codex-rescue` 會預載全文,所以 body 維持短,細節放
+  result-handling 契約。description 常駐 host 的系統提示,body 每次使用都會載入,所以維持短,細節放
   `skills/codex/references/`,並在 SKILL.md 的表格裡掛一行 —— `tests/codex/commands.test.mjs`
   同時釘住「只有一顆」與「表格 ↔ references/ 完全對齊」。要加第二顆先問為什麼。
-- **NOT dual-host**(無 `.codex-plugin/`)—— 不像 cc / agy;bump 只動 plugin.json ↔ marketplace。
+- **NOT dual-host**(無 `.codex-plugin/`);bump 只動 plugin.json ↔ marketplace。
 
 ## 踩雷
 - **桌面版只接得手「已有 turn」的 thread。** 只做 `thread/start` 的 thread 進了 state DB,但 app 不肯載入
@@ -117,27 +114,12 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   完成的 `imageGeneration` item 的 `savedPath` 進 turn 結果與 stdout 的 `Images:`。
 - **`context: fork` 別碰**(issue #234)。forked general-purpose subagent **沒有 `Agent` tool**,
   routing 會退回 `Skill(codex:rescue)` 並遞迴。command 檔已刪;不要把 `context: fork` 加回 skill。
-  `tests/codex/commands.test.mjs` 釘 skill 與 rescue agent。名字很像但機制不同的另兩個
+  `tests/codex/commands.test.mjs` 釘住 skill 是唯一介面。名字很像但機制不同的另兩個
   (`/subtask`、`/fork`)見 `skills/codex/references/delivery-paths.md`。
-- **`codex-rescue` 一次 spawn ~20K tokens**(實測 `subagent_tokens: 20732`,一次 trivial 轉發)。
-  成因:`skills:` frontmatter 會**預載技能全文**,不只 description。那個數字是 1.6.1 量的,當時預載兩顆
-  skill(`codex-cli-runtime` + `gpt-5-6-prompting`)+ agent body ≈ 4.8K 固定成本。**1.6.2 收成一顆
-  `codex` skill**:runtime 契約併回 agent body(本來就 ~90% 重複),prompting 降級成 references/ 靠
-  `cat` 取用,所以固定成本只剩一份短 skill body + agent body。**20K 那個數字還沒對 1.6.2 重測**,
-  當上界看;agent system prompt 與工具定義才是大頭,別預期等比例下降。
-  這筆錢買到的是 proactive discovery 與 `tools: Bash` 圍欄,**不是** context
-  隔離(隔離本來就由 Codex 自己的 context 提供,主線兩條路收到的位元組一樣,因為 agent 被明文禁止摘要)。
-  一批檢查走主線直接呼叫 companion 就好,別 N × 20K。要調的話 frontmatter 還有 `effort` / `maxTurns`
-  沒用 —— 但 `maxTurns` 會夾死 `--prompt-file` 那條(寫檔 + task + 收尾 = 3 turns 起),別設 2。
-  `permissionMode` / `hooks` / `mcpServers` 對 plugin subagent **會被靜默忽略**,別在這裡試 ——
-  這三個 key 在 Claude Code 的 agent frontmatter schema 裡**是有定義的**(對 user-defined agent
-  有效),所以「查了 schema 發現有」不構成推翻這條。要重驗哪些 key 現在真的存在、叫什麼,
-  `strings` 那顆 `claude` binary 撈 zod schema(`grep -oa '.\{0,220\}<描述片段>.\{0,320\}'`)——
-  那是唯一權威來源,別背清單,每個版本都可能加。
 
 ## 細節指向
-- 交付路徑選型(直接 `task` · `--resume-last` · subagent · conversation fork)含實測成本與 fork 命名
+- 交付路徑選型(直接 `task` · `--resume-last` · conversation fork)含 fork 命名
   陷阱:`skills/codex/references/delivery-paths.md`。
 - protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。
 - 寫 GPT-6.1 prompt:`skills/codex/references/prompting.md`;worktree 驗證合約見
-  `lib/worktree-guard.mjs`、設計見 `docs/superpowers/plans/2026-06-21-worktree-cwd-guard.md`。
+  `lib/worktree-guard.mjs`。

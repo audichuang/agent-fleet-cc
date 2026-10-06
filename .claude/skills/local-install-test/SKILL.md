@@ -179,22 +179,18 @@ grep -rc "<a string from your change>" \
   ~/.claude/plugins/cache/agent-fleet/<plugin>/<new>/
 ```
 
-Then exercise it for real — e.g. for codex: `/codex:setup` shows `Status: ready`,
-then run a real `/codex:rescue` or `/codex:review`. Grep'ing the cache is the fast
-proof the bytes are live; the slash command is the proof it behaves.
+Then exercise it for real. Both plugins are skill-only, so ask for the work in plain words
+and watch the skill load: for codex, "have Codex review this diff" (its companion `setup` should
+show `Status: ready`); for imagine, "make me a poster of …". Grep'ing the cache is the fast proof
+the bytes are live; a real run is the proof it behaves.
 
-Verifying plugin **agents** (subagents) has three extra traps (all hit for real on
-2026-07-23):
+`/reload-plugins` does NOT re-read `installed_plugins.json` — it reloads the paths resolved when
+the session started — so after flipping the pin to a new version, restart the session. Two more
+traps:
 
-- Agent definitions load at **session start**. `/reload-plugins` does NOT re-read
-  `installed_plugins.json` — it reloads the paths resolved when the session started —
-  and refreshing the cache dir under a running session changes nothing either. Every
-  agent-content change needs a full restart to take effect.
-- Headless `claude -p` loads **no plugin agents at all**, so it cannot probe them.
-  Verify in an interactive session: call the Agent tool with
-  `subagent_type: "<plugin>:<agent>"`, then prove the run went through the real
-  runtime by checking it left a job record (e.g.
-  `node plugins/codex/scripts/codex-companion.mjs status`).
+- Headless `claude -p` is a quick way to check a skill triggers, but prove the run went through
+  the real runtime by the record it left (e.g. `node plugins/codex/scripts/codex-companion.mjs
+  status`).
 - `claude plugin details <plugin>@agent-fleet` reflects the **marketplace clone**,
   not the installed pin — after a Workflow-C install it still shows the old
   version/component inventory. Trust `claude plugin list` (reads the pin) plus the

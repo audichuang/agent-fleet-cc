@@ -1,6 +1,6 @@
 # GPT-6.1 Prompting
 
-Use this when composing a prompt for Codex — when `codex:codex-rescue` tightens a forwarded `task`, or when the host writes a prompt before calling the companion.
+Use this when composing a prompt for Codex, before the host calls the companion.
 
 GPT-6.1 works best outcome-first: name the outcome, the success criteria, the constraints, and the files, then leave the path open. A process script from an older model adds noise. The 6.1 harness already covers autonomy, skills, plugins, and apps, so restating those is noise.
 
