@@ -21,6 +21,11 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   把它匯出給每個 Bash call,所以 `status` 只列本 session 的 job、`task --resume-last` 只接本 session 的
   thread,不需要 SessionStart hook。`CODEX_COMPANION_SESSION_ID` 有設時優先。測試的 `helpers.mjs`
   兩個都會刪 —— 在 Claude Code 裡跑測試時它們一定在環境裡。
+- **資料目錄靠安裝路徑推算**(`lib/state.mjs` 的 `derivePluginDataDir`):hook 拿得到
+  `CLAUDE_PLUGIN_DATA`,skill 叫的 Bash **拿不到**,而 2.0.0 前是 SessionStart hook 把它匯出給 Bash。
+  所以從 `<config>/plugins/cache/<marketplace>/<plugin>/<version>/` 推出
+  `<config>/plugins/data/<plugin>-<marketplace>/`;repo checkout 推不出來,退回 `$TMPDIR` fallback。
+  `tests/codex/plugin-data-dir.test.mjs` 把 plugin 複製進假的 cache 目錄、不設環境變數跑 status/result。
 - **2.0.0 起沒有 SessionEnd 清理**:session 結束時不再主動終止本 session 的前景 job、也不再拆 broker。
   收尾靠既有的層:broker idle 5s 自關、dead-pid reconcile、watchdog、job 硬上限。
 - `scripts/lib/codex.mjs` — 高層編排(turn / review、auth·availability、model list、structured

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { isProcessAlive } from "./process.mjs";
 import { resolveWorkspaceRoot } from "./workspace.mjs";
@@ -19,6 +20,26 @@ import { isClaimOrphaned } from "./shared/core/reconcile.mjs";
 const STATE_VERSION = 1;
 const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
 const FALLBACK_STATE_ROOT_DIR = path.join(os.tmpdir(), "codex-companion");
+const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// Claude Code installs a plugin at <config>/plugins/cache/<marketplace>/<plugin>/<version>/ and
+// gives it <config>/plugins/data/<plugin>-<marketplace>/ for persistent data. A hook gets that
+// path as CLAUDE_PLUGIN_DATA; a Bash call made from a skill does not. Since 2.0.0 there is no
+// SessionStart hook to export it, so derive it from where this file is installed. A checkout
+// outside plugins/cache (the repo itself, tests) derives nothing and keeps the old fallback.
+export function derivePluginDataDir(fromDir = THIS_DIR) {
+  const parts = path.resolve(fromDir).split(path.sep);
+  const cache = parts.lastIndexOf("cache");
+  if (cache < 1 || parts[cache - 1] !== "plugins" || parts.length < cache + 4) {
+    return null;
+  }
+  const [marketplace, plugin] = [parts[cache + 1], parts[cache + 2]];
+  return path.join(parts.slice(0, cache).join(path.sep) || path.sep, "data", `${plugin}-${marketplace}`);
+}
+
+export function resolvePluginDataDir(env = process.env) {
+  return env[PLUGIN_DATA_ENV] || derivePluginDataDir();
+}
 const STATE_FILE_NAME = "state.json";
 const JOBS_DIR_NAME = "jobs";
 const MAX_JOBS = 50;
@@ -73,7 +94,7 @@ export function resolveStateDir(cwd) {
   const slugSource = path.basename(workspaceRoot) || "workspace";
   const slug = slugSource.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "workspace";
   const hash = createHash("sha256").update(canonicalWorkspaceRoot).digest("hex").slice(0, 16);
-  const pluginDataDir = process.env[PLUGIN_DATA_ENV];
+  const pluginDataDir = resolvePluginDataDir();
   const stateRoot = pluginDataDir ? path.join(pluginDataDir, "state") : FALLBACK_STATE_ROOT_DIR;
   return path.join(stateRoot, `${slug}-${hash}`);
 }
@@ -588,7 +609,7 @@ export function collectCandidateStateRoots(cwd, options = {}) {
   const homedir = options.homedir ?? os.homedir();
   const roots = new Set();
 
-  const pluginDataDir = env[PLUGIN_DATA_ENV];
+  const pluginDataDir = resolvePluginDataDir(env);
   if (pluginDataDir) {
     roots.add(path.join(pluginDataDir, "state"));
   }
