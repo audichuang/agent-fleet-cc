@@ -45,9 +45,7 @@ suite (fake binaries, redirected `CLAUDE_PLUGIN_DATA`, no real network). Contrib
 to bump a version, what CI checks beyond `npm test`, which plugin may touch which — live in
 [`AGENTS.md`](AGENTS.md).
 
-**Shared foundation:** `shared/lib/` is a zero-dependency job runtime — a directory-per-job
-state store with O_EXCL CAS terminal transitions, a generic adapter-driven worker, mandatory env
-sanitization with a recursion guard, and a parameterized conformance suite. `codex` uses only its
-state core and drives its own app-server broker; it carries a vendored copy under
-`scripts/lib/shared/`, kept in sync by `npm run sync-shared` and drift-checked in CI. Designs live
-in `docs/specs/`.
+**Shared state core:** `shared/lib/core/` is a zero-dependency job store — a directory-per-job
+state store with O_EXCL CAS terminal transitions, an event log, and dead-worker reconcile. `codex`
+drives its own app-server broker and keeps its jobs here; it carries a vendored copy under
+`scripts/lib/shared/`, kept in sync by `npm run sync-shared` and drift-checked in CI.

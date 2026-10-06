@@ -19,6 +19,9 @@ companion itself.
   jobs or tears down the shared broker. The existing layers cover it: the broker shuts itself
   down after 5 s idle, a dead worker is reconciled to `failed`, and the watchdog and the job's
   hard cap bound the rest.
+- The vendored `scripts/lib/shared/` is down to the state core codex imports
+  (`core/{state-store,events,job,reconcile}.mjs`); the unused worker, adapters, env sanitizer
+  and arg parser no longer ship.
 
 ## 1.8.0
 

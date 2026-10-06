@@ -118,13 +118,11 @@ consistency test), `package.json` (add a `test:<plugin>` script), `scripts/sync-
 - `tests/codex/runtime.test.mjs` and `tests/shared/worker.test.mjs` are occasionally flaky
   (event-ordering races) — re-run once to confirm; an intermittent failure there, locally or
   in CI, is not a real regression.
-- `shared/lib/` is the source of truth. Its full runtime (ProcessAdapter + runWorker) has no
-  shipped adopter since cc, grok and antigravity were retired — `tests/shared/` still covers
-  it. `codex` **uses** only the shared **state core**
-  (state-store / events / job / reconcile), **not** the worker — note
-  `sync-shared` still vendors the whole runtime (incl. `worker.mjs`) into codex, it just never
-  calls `runWorker` (its app-server broker stays engine-specific). Don't assume a plugin uses the
-  shared runtime the same way — check before editing.
+- `shared/lib/` is the source of truth, and it is only the **state core** codex uses
+  (`core/{state-store,events,job,reconcile}.mjs`). The generic worker, adapters, env sanitizer
+  and conformance suite went with the plugins that ran them (cc, grok, antigravity) — codex
+  drives its own app-server broker and never had a worker. Before adding something back, check
+  a shipped plugin imports it.
 
 ## Where things live
 - Domain glossary (the project's ubiquitous language): `CONTEXT.md`
