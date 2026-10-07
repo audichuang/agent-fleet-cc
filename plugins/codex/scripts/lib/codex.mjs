@@ -1883,7 +1883,11 @@ export async function runDesktopTurn(cwd, options = {}) {
       if (!prompt) {
         throw new Error("A prompt is required for this Codex run.");
       }
-      turnId = await thread.startTurn(prompt, { model: options.model ?? null, effort: options.effort ?? null });
+      turnId = await thread.startTurn(prompt, {
+        model: options.model ?? null,
+        effort: options.effort ?? null,
+        fullAccess: resolveSandboxMode(options.sandbox) === "danger-full-access"
+      });
       emitProgress(options.onProgress, `Turn started in the Codex desktop app (${turnId}).`, "running", { threadId, turnId });
     }
 

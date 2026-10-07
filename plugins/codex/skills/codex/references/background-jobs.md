@@ -1,13 +1,8 @@
 # Following a background job
 
-Launch with `--background --json`; the payload's `jobId` is the handle. Then run this loop as
-**one background Bash command** (a single `wait` ends at its own timeout and leaves nobody
-waiting). It returns on a terminal exit code, or after 30 minutes with the job still running,
-and prints the last code. The last `wait` report is in `${TMPDIR:-/tmp}/codex-wait.out`.
-
-```bash
-start=$SECONDS; while :; do code=0; node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" wait <jobId> --timeout-ms 100000 > "${TMPDIR:-/tmp}/codex-wait.out" || code=$?; [ "$code" -ne 10 ] && break; [ $((SECONDS - start)) -ge 1800 ] && break; done; echo "wait exit: $code"
-```
+Launch with `--background --json`. The payload's `jobId` is the handle. Then run the `wait` loop
+from SKILL.md as **one background Bash command**. It prints `wait exit: <code>`, and the last
+`wait` report is in `${TMPDIR:-/tmp}/codex-wait.out`.
 
 | Exit | Meaning |
 | --- | --- |

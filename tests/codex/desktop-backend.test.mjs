@@ -306,6 +306,31 @@ test("with no thread settings the inherited mode comes from latestCollaborationM
   });
 });
 
+// A turn request that names no approval or sandbox policy gets the app's permission
+// default, a workspace-write sandbox without network: a task could not write outside the
+// project or ssh. The turn must carry the same full access a CLI thread runs with.
+test("a desktop turn asks for full access and no approvals, unless CODEX_SANDBOX_MODE narrows it", async (t) => {
+  const fake = await startFakeDesktop(t);
+  const saved = process.env.CODEX_SANDBOX_MODE;
+  t.after(() => {
+    if (saved === undefined) delete process.env.CODEX_SANDBOX_MODE;
+    else process.env.CODEX_SANDBOX_MODE = saved;
+  });
+  delete process.env.CODEX_SANDBOX_MODE;
+  await runDesktopTurn("/ws", { resumeThreadId: fake.threadId, prompt: "one", desktopDeps: { attachOptions: fake.attachOptions } });
+  const full = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
+  assert.equal(full.approvalPolicy, "never");
+  assert.equal(full.permissions, ":danger-full-access");
+  // The protocol audit's rule: never a raw sandboxPolicy on a turn (auto-review rejects it).
+  assert.equal(full.sandboxPolicy, undefined);
+
+  process.env.CODEX_SANDBOX_MODE = "read-only";
+  await runDesktopTurn("/ws", { resumeThreadId: fake.threadId, prompt: "two", desktopDeps: { attachOptions: fake.attachOptions } });
+  const narrowed = fake.requests("thread-follower-start-turn")[1].params.turnStart.request;
+  assert.equal(narrowed.approvalPolicy, undefined);
+  assert.equal(narrowed.permissions, undefined);
+});
+
 test("without a model the turn sends no collaborationMode, since codex requires one in it", async (t) => {
   const fake = await startFakeDesktop(t);
   await runDesktopTurn("/ws", {

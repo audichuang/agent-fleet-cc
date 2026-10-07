@@ -95,17 +95,43 @@ test("wait rejects extra job tokens and no-op --wait flag", () => {
   const jobId = "task-wait-strict";
   writeCompletedJob(workspace, jobId);
 
-  for (const rawArgs of [
-    `${jobId} extra --cwd ${workspace} --json`,
-    `${jobId} --wait --cwd ${workspace} --json`,
-    `${jobId} --bogus --cwd ${workspace} --json`,
+  for (const [rawArgs, expected] of [
+    [`${jobId} extra --cwd ${workspace} --json`, /wait.*exactly one job id/i],
+    [`${jobId} --wait --cwd ${workspace} --json`, /`wait` has no option `--wait`/],
+    [`${jobId} --bogus --cwd ${workspace} --json`, /`wait` has no option `--bogus`/],
   ]) {
     const result = run("node", [SCRIPT, "wait", rawArgs], { cwd: workspace });
     assert.equal(result.status, 1);
     const envelope = JSON.parse(result.stdout);
     assert.equal(envelope.status, "error");
-    assert.match(envelope.error, /wait.*exactly one job id/i);
+    assert.match(envelope.error, expected);
   }
+});
+
+// A host guessed `wait <id> --timeout 590` (seconds, like its own Bash timeout). The
+// unknown flag and its value became two more job ids, and the error blamed the job id.
+// Every job verb must name the flag; wait must point at --timeout-ms and its unit.
+test("job verbs name an unknown flag instead of reading it as a job id", () => {
+  const workspace = makeTempDir();
+  const jobId = "task-wait-unknown-flag";
+  writeCompletedJob(workspace, jobId);
+
+  for (const verb of ["wait", "status", "result", "cancel", "logs"]) {
+    const result = run("node", [SCRIPT, verb, jobId, "--timeout", "590", "--cwd", workspace, "--json"], { cwd: workspace });
+    assert.equal(result.status, 1, `${verb}: ${result.stdout}`);
+    const envelope = JSON.parse(result.stdout);
+    assert.match(envelope.error, new RegExp(`\`${verb}\` has no option \`--timeout\``));
+    assert.match(envelope.error, /--timeout-ms <ms>`, in milliseconds/);
+  }
+
+  const ok = run("node", [SCRIPT, "wait", jobId, "--timeout-ms", "100", "--cwd", workspace, "--json"], { cwd: workspace });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.equal(JSON.parse(ok.stdout).job.status, "completed");
+
+  // logs hands its argv to attach, so attach must know logs' own --follow.
+  const follow = run("node", [SCRIPT, "logs", jobId, "--follow", "--cwd", workspace], { cwd: workspace });
+  assert.equal(follow.status, 0, follow.stdout + follow.stderr);
+  assert.match(follow.stdout, /final log line/);
 });
 
 test("logs accepts slash-command raw arguments and streams the same log as attach", () => {

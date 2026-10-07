@@ -198,6 +198,22 @@ function parseCommandInput(argv, config = {}) {
   return parsed;
 }
 
+// The job verbs take a job id and nothing free-form, so a leftover `--flag` is an option
+// this verb does not have. parseArgs keeps unknown flags as positionals (task's prompt text
+// needs that), which here read as a second job id or vanished silently: `wait <id>
+// --timeout 590` failed with "accepts exactly one job id". Name the flag instead.
+function rejectUnknownOptions(verb, positionals) {
+  const unknown = positionals.find((token) => token.startsWith("-") && token !== "-");
+  if (!unknown) {
+    return;
+  }
+  const key = unknown.replace(/^-+/, "").split("=", 1)[0];
+  const hint = key.startsWith("timeout")
+    ? " The wait timeout is `--timeout-ms <ms>`, in milliseconds."
+    : "";
+  throw new Error(`\`${verb}\` has no option \`${unknown}\`.${hint} Run \`${verb} --help\` for its options.`);
+}
+
 function resolveCommandCwd(options = {}) {
   return options.cwd ? path.resolve(process.cwd(), options.cwd) : process.cwd();
 }
@@ -1233,6 +1249,7 @@ async function handleStatus(argv) {
     valueOptions: ["cwd", "timeout-ms", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json", "all", "wait"]
   });
+  rejectUnknownOptions("status", positionals);
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
@@ -1266,6 +1283,7 @@ async function handleWait(argv) {
     valueOptions: ["cwd", "timeout-ms", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json"]
   });
+  rejectUnknownOptions("wait", positionals);
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
@@ -1292,6 +1310,7 @@ function handleResult(argv) {
     valueOptions: ["cwd", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json"]
   });
+  rejectUnknownOptions("result", positionals);
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
@@ -1347,6 +1366,7 @@ async function handleCancel(argv) {
     valueOptions: ["cwd", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json"]
   });
+  rejectUnknownOptions("cancel", positionals);
 
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
@@ -1529,8 +1549,10 @@ const pureJobLogPath = (workspaceRoot, jobId) =>
 export async function handleAttach(argv, deps = {}) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
-    booleanOptions: ["json"]
+    // `logs --follow` hands its argv here; attach always follows, so the flag is a no-op.
+    booleanOptions: ["json", "follow"]
   });
+  rejectUnknownOptions("attach", positionals);
   const cwd = resolveCommandCwd(options);
   const expected = parseExpectedTriplet(options);
   assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query (see handleStatus)
@@ -1624,6 +1646,7 @@ export async function handleLogs(argv, deps = {}) {
     valueOptions: ["cwd", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json", "follow"]
   });
+  rejectUnknownOptions("logs", positionals);
   // C4: logs previously ignored the triplet entirely (flags not even parsed) and the
   // no-id fallback below read the current cwd's latest job log unguarded. Assert here
   // so both the fallback AND the handleAttach delegation are gated.

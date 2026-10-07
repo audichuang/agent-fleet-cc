@@ -129,9 +129,9 @@ test("codex ships exactly one skill, whose references are all one hop from SKILL
     .sort();
   assert.deepEqual(skills, ["codex"], "codex is meant to expose exactly one skill");
 
-  // codex-rescue preloads this file in full. Prompting detail stays in references.
+  // The whole SKILL.md loads every time the skill fires. Prompting detail stays in references.
   const body = read("skills/codex/SKILL.md");
-  assert.ok(body.split("\n").length < 80, "skills/codex/SKILL.md is preloaded by codex-rescue — keep detail in references/");
+  assert.ok(body.split("\n").length < 80, "skills/codex/SKILL.md loads in full on every trigger — keep detail in references/");
 
   const linked = [...body.matchAll(/\]\(references\/([^)]+)\)/g)].map((m) => m[1]).sort();
   const onDisk = fs.readdirSync(path.join(skillsDir, "codex", "references")).sort();
