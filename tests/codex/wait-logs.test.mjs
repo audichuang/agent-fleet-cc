@@ -127,6 +127,11 @@ test("job verbs name an unknown flag instead of reading it as a job id", () => {
   const ok = run("node", [SCRIPT, "wait", jobId, "--timeout-ms", "100", "--cwd", workspace, "--json"], { cwd: workspace });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   assert.equal(JSON.parse(ok.stdout).job.status, "completed");
+
+  // logs hands its argv to attach, so attach must know logs' own --follow.
+  const follow = run("node", [SCRIPT, "logs", jobId, "--follow", "--cwd", workspace], { cwd: workspace });
+  assert.equal(follow.status, 0, follow.stdout + follow.stderr);
+  assert.match(follow.stdout, /final log line/);
 });
 
 test("logs accepts slash-command raw arguments and streams the same log as attach", () => {

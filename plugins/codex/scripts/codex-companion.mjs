@@ -1549,7 +1549,8 @@ const pureJobLogPath = (workspaceRoot, jobId) =>
 export async function handleAttach(argv, deps = {}) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd", "poll-interval-ms", "expected-worktree", "expected-branch", "expected-base"],
-    booleanOptions: ["json"]
+    // `logs --follow` hands its argv here; attach always follows, so the flag is a no-op.
+    booleanOptions: ["json", "follow"]
   });
   rejectUnknownOptions("attach", positionals);
   const cwd = resolveCommandCwd(options);
