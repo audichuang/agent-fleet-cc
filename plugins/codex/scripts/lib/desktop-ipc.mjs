@@ -708,14 +708,15 @@ export class DesktopThread {
     };
     if (model) request.model = model;
     if (effort) request.effort = effort;
-    // A turn request with no approval or sandbox policy gets the app's own permission
-    // default (the app.asar turn-start builder: `useAppServerPermissionDefault` when the
-    // request names none), which is a workspace-write sandbox without network. A task then
-    // could not write outside the project or ssh, and stopped to ask. CLI threads run with
-    // full access and no approvals; name both so a desktop turn runs the same way.
+    // A turn request that names no permissions gets the app's own permission default (the
+    // app.asar turn-start builder: `useAppServerPermissionDefault` when the request names
+    // none), a workspace-write sandbox without network. A task then could not write outside
+    // the project or ssh, and stopped to ask. Ask for what the app's own "Full access"
+    // selector sends: the built-in `:danger-full-access` profile (`permissions`, never a raw sandbox
+    // policy override — see docs/codex-protocol-sync-audit.md) and no approvals.
     if (fullAccess) {
       request.approvalPolicy = "never";
-      request.sandboxPolicy = { type: "dangerFullAccess" };
+      request.permissions = ":danger-full-access";
     }
     // With inheritThreadSettings the app copies the thread's last collaborationMode into
     // the turn, and codex lets a collaborationMode override model and effort (TurnStartParams

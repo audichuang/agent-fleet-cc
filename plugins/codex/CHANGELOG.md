@@ -5,15 +5,20 @@
 - **A desktop turn runs with full access and no approvals, the same as a CLI thread.** A turn
   request that named no permissions got the app's default, a workspace-write sandbox without
   network, so a task could not write outside its project or ssh, and stopped to ask. The
-  companion now sends `approvalPolicy: "never"` and a `dangerFullAccess` sandbox policy on every
-  desktop turn it starts (not when `CODEX_SANDBOX_MODE` narrows it, and not on the first turn of
-  `--new-thread-via app`, which the app starts itself).
+  companion now sends what the app's own "Full access" selector sends, `approvalPolicy: "never"`
+  and the `:danger-full-access` permission profile, on every desktop turn it starts (not when
+  `CODEX_SANDBOX_MODE` narrows it, and not on the first turn of `--new-thread-via app`, which
+  the app starts itself). A workspace that requires auto-review refuses it with "you need to use
+  auto review"; `CODEX_SANDBOX_MODE=workspace-write` is the way out.
 - **The job verbs name an option they do not have.** `wait <id> --timeout 590` used to fail with
   "`wait` accepts exactly one job id", because the unknown flag and its value were read as two
   more job ids; `status`, `result`, `cancel` and `logs` ignored such a flag silently. All five now
   fail with ``has no option `--timeout` `` and point at `--timeout-ms <ms>` (milliseconds).
 - The skill now spells out the launch and the `wait` loop in `SKILL.md` itself, with the
   milliseconds unit, instead of one hop away in `background-jobs.md`.
+- The skill says Codex already has full access on both backends, so there is no permission flag
+  to look for, and `prompting.md` no longer tells the host to make Codex wait for confirmation
+  (a background job has nobody to answer, so the run ended on the question).
 
 ## 2.0.0
 

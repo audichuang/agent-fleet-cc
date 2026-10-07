@@ -320,13 +320,15 @@ test("a desktop turn asks for full access and no approvals, unless CODEX_SANDBOX
   await runDesktopTurn("/ws", { resumeThreadId: fake.threadId, prompt: "one", desktopDeps: { attachOptions: fake.attachOptions } });
   const full = fake.requests("thread-follower-start-turn")[0].params.turnStart.request;
   assert.equal(full.approvalPolicy, "never");
-  assert.deepEqual(full.sandboxPolicy, { type: "dangerFullAccess" });
+  assert.equal(full.permissions, ":danger-full-access");
+  // The protocol audit's rule: never a raw sandboxPolicy on a turn (auto-review rejects it).
+  assert.equal(full.sandboxPolicy, undefined);
 
   process.env.CODEX_SANDBOX_MODE = "read-only";
   await runDesktopTurn("/ws", { resumeThreadId: fake.threadId, prompt: "two", desktopDeps: { attachOptions: fake.attachOptions } });
   const narrowed = fake.requests("thread-follower-start-turn")[1].params.turnStart.request;
   assert.equal(narrowed.approvalPolicy, undefined);
-  assert.equal(narrowed.sandboxPolicy, undefined);
+  assert.equal(narrowed.permissions, undefined);
 });
 
 test("without a model the turn sends no collaborationMode, since codex requires one in it", async (t) => {

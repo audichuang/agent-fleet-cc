@@ -35,7 +35,5 @@ Version-dependent and easy to mix up. Checked against Claude Code 2.1.223:
 Before 2.1.212, `/fork` was the in-session fork that `/subtask` is now. The last two rows are the
 pair that actually gets confused: near-identical spelling, opposite answer in column one.
 
-**`context: fork` is a trap in this repo.** `commands/rescue.md` once set it: a forked
-general-purpose subagent has no `Agent` tool, so the routing fell back to `Skill(codex:rescue)`
-and re-entered the command (issue #234). The command file is gone. Do not put `context: fork` on
-the skill. Call the companion directly.
+**Do not put `context: fork` on the skill.** A forked general-purpose subagent has no `Agent` tool,
+so a delegation inside it loops back into the skill. Call the companion directly.

@@ -50,6 +50,7 @@ companion's `Thread ready` (CLI) or `Attaching to thread` (desktop) progress lin
 | --- | --- | --- |
 | `is waiting for … on thread` | The turn stopped on an approval in the app. It is still running there, and the job no longer tracks it: `cancel` will not stop it. | The user approves or denies it (or stops it) in the app, then a follow-up with `--thread <id>` if more is needed. |
 | `no longer has thread … open` | The user closed the thread in the app mid-turn. The outcome is unknown. | Ask the user to check the thread in the app. |
+| `you need to use auto review` | The workspace requires auto-review on this model, and refuses the full access the companion asks for. | Rerun with `CODEX_SANDBOX_MODE=workspace-write` in the environment: the turn then keeps the thread's own permissions. |
 | `not reachable` / `not running` | The app is closed, or this OS has no app socket. | Ask the user to open the Codex desktop app, or run on the CLI with `--backend cli`. |
 | `version mismatch` | The installed app speaks a different IPC version than this plugin. | Use `--backend cli` and report it; the plugin needs an update for that app build. |
 | `did not load thread` | The app never took the thread, usually because a CLI process still holds it. | Wait for that run to end, then retry. |

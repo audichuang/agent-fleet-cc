@@ -34,7 +34,7 @@ When you do write one, name the lenses and require each to be weighed: correctne
 - State the goal and what done looks like. A numbered procedure narrows the search.
 - Add a line only to close a gap you have already seen. "Be concise" makes GPT-6.1 drop required content. Say "lead with the conclusion and keep the required facts" instead.
 - Save `ALWAYS` / `NEVER` for invariants: required output fields, and actions that must not happen. Judgment calls get a decision rule.
-- Say the permission once. Safe local actions proceed. External writes, destructive actions, and scope expansion wait for confirmation.
+- Say the permission once, as what Codex may do and what is out of scope. A running job has nobody to answer a question, so "ask first" ends the run with the question as its answer. Codex already has full access and no approvals: name the boundary ("do not push; report the command instead") rather than asking it to wait for confirmation.
 - GPT-6.1 will loop, so include a stop rule. Copy the wording from [prompt-blocks.md](prompt-blocks.md) rather than inventing a longer one.
 - Give absolute file paths and have Codex read them. When validation exists, name the check (tests, types, build, or a smoke run). Lines that reliably hurt are in [codex-prompt-antipatterns.md](codex-prompt-antipatterns.md).
 
