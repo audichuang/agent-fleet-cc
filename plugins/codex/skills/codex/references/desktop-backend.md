@@ -63,7 +63,10 @@ the app for what only the app can do.
 
 - The IPC protocol is private to the desktop app. It can change with an app update; a change
   surfaces as the version-mismatch failure above, not as a wrong answer.
-- `--write` changes nothing on either backend: CLI threads already run with full access in this
-  plugin, and a desktop turn uses the app thread's own permissions.
-- Anything running as the user can talk to that socket. A desktop turn runs with the thread's
-  own permissions in the app, which for most app threads means full access.
+- `--write` changes nothing on either backend. Both run with full access and no approvals: a
+  CLI thread is made that way, and the companion asks for it on every desktop turn it starts.
+  `CODEX_SANDBOX_MODE` narrows the CLI and leaves a desktop turn on the thread's own permissions.
+- `--new-thread-via app` is the exception: the app starts that first turn itself, with the
+  permissions selected in the app. Set full access there before the run if the task writes
+  outside the project or uses the network (ssh, installs).
+- Anything running as the user can talk to that socket.

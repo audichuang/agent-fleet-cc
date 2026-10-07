@@ -699,7 +699,7 @@ export class DesktopThread {
     return Array.isArray(this.state?.requests) ? this.state.requests : [];
   }
 
-  async startTurn(prompt, { model = null, effort = null } = {}) {
+  async startTurn(prompt, { model = null, effort = null, fullAccess = false } = {}) {
     const request = {
       threadId: this.threadId,
       turnTrigger: "composer",
@@ -708,6 +708,15 @@ export class DesktopThread {
     };
     if (model) request.model = model;
     if (effort) request.effort = effort;
+    // A turn request with no approval or sandbox policy gets the app's own permission
+    // default (the app.asar turn-start builder: `useAppServerPermissionDefault` when the
+    // request names none), which is a workspace-write sandbox without network. A task then
+    // could not write outside the project or ssh, and stopped to ask. CLI threads run with
+    // full access and no approvals; name both so a desktop turn runs the same way.
+    if (fullAccess) {
+      request.approvalPolicy = "never";
+      request.sandboxPolicy = { type: "dangerFullAccess" };
+    }
     // With inheritThreadSettings the app copies the thread's last collaborationMode into
     // the turn, and codex lets a collaborationMode override model and effort (TurnStartParams
     // `collaboration_mode`). A desktop task's thread starts with the CLI bootstrap's `low`,
