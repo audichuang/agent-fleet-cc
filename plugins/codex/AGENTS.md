@@ -62,6 +62,11 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `collaborationMode` 帶進新 turn,而 codex 讓協作模式優先於 `model`/`effort`;thread 第一輪是 `low` 的 CLI
   bootstrap,所以 1.8.0 以前桌面任務全跑 `low`。`startTurn` 因此自帶 `collaborationMode`,別拿掉。測試只看得到線上
   送了什麼,實際用哪個 effort 要看 rollout 的 `turn_context`(見 `docs/codex-desktop-ipc-audit.md` B13)。
+- **桌面版的權限要自己要,而且要用 app 自己的形狀。** turn request 沒帶任何權限欄位時,app 套用它自己的預設
+  (workspace-write、無網路),任務寫不出 project、不能 ssh,停下來問。`startTurn` 因此送
+  `approvalPolicy:"never"` + `permissions:":danger-full-access"`(app「完整存取」選單送的就是這個);**別改成
+  `sandboxPolicy`**:protocol audit 明令 turn/start 不帶它(auto-review 的 workspace 會拒)。證據見
+  `docs/codex-desktop-ipc-audit.md` B14。
 - **thread 一次只有一個 writer。** app 開著的 thread,CLI `thread/resume` 回 `already has an active writer`
   —— 這不是 bug,是 `--backend auto` 把這種 follow-up 送去 app 的理由。
 - **`--new-thread-via app` 只按一次 Enter,別加重按。** App 開新對話要幾秒(忙時實測 3.3 s),所以是等
@@ -119,6 +124,10 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   effort `xhigh`;`review/start` 沒有 effort 欄,所以寫在該 thread 的 `model_reasoning_effort`。
   這兩個 verb 的 `--background` 走同一個 detached worker。app-server 以 `--enable image_generation` 啟動,
   完成的 `imageGeneration` item 的 `savedPath` 進 turn 結果與 stdout 的 `Images:`。
+- **未知 flag 不會報錯,會變成 positional。** `lib/args.mjs` 的 `parseArgs` 刻意如此(`task` 的 prompt 文字要能含
+  `--flag`)。所以只吃 job id 的 verb 都過 `rejectUnknownOptions`,否則 `wait <id> --timeout 590` 會被讀成三個
+  job id。給 job verb 加 option 時,要同時加進該 handler 的 `valueOptions`/`booleanOptions`;`logs` 把 argv
+  原樣交給 `handleAttach`,所以 `logs` 的 flag 也要讓 attach 認得。
 - **`context: fork` 別碰**(issue #234)。forked general-purpose subagent **沒有 `Agent` tool**,
   routing 會退回 `Skill(codex:rescue)` 並遞迴。command 檔已刪;不要把 `context: fork` 加回 skill。
   `tests/codex/commands.test.mjs` 釘住 skill 是唯一介面。名字很像但機制不同的另兩個
