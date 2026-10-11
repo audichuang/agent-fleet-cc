@@ -25,7 +25,8 @@ after an app update with these steps:
    # Linux: /usr/lib/chatgpt/resources/app.asar
    python3 - "$ASAR" <<'EOF'
    import mmap, sys
-   m = mmap.mmap(open(sys.argv[1], "rb").fileno(), 0, access=mmap.ACCESS_READ)
+   f = open(sys.argv[1], "rb")  # keep the file object: an inline open() is collected and its fd closed
+   m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
    i = m.find(b'{"thread-stream-state-changed":'); print(m[i:i+900].decode("utf8", "replace"))
    EOF
    ```

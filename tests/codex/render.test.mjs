@@ -86,7 +86,7 @@ test("renderJobStatusReport surfaces timedOut jobs without the misleading 'abort
     timedOut: true,
     title: "Long-running task",
     errorMessage:
-      "Tracked job task-timeout-render exceeded the 15m hard timeout; the job record was marked failed. The underlying runner was not cancelled and may still be executing in the background — kill it manually if it keeps consuming resources.",
+      "Tracked job task-timeout-render exceeded the 15m hard timeout; the job record was marked failed and the Codex turn was sent an interrupt. If it keeps consuming resources, kill it manually.",
     duration: "15m 1s",
     jobClass: "task",
     kindLabel: "rescue"
@@ -94,7 +94,10 @@ test("renderJobStatusReport surfaces timedOut jobs without the misleading 'abort
 
   // New wording must be present
   assert.match(output, /Hard timeout: job marked failed after exceeding the configured duration\./);
-  assert.match(output, /underlying runner was not cancelled and may still be executing/);
+  // The timeout path interrupts the turn (tracked-jobs.mjs); saying the runner was not
+  // cancelled contradicted the error line printed right under it.
+  assert.match(output, /Codex turn was sent an interrupt/);
+  assert.doesNotMatch(output, /runner was not cancelled/);
   // Misleading wording from the prior version must NOT be present
   assert.doesNotMatch(output, /runner watchdog aborted the job/);
   // Error message must still be rendered

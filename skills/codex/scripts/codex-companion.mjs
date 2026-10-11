@@ -109,12 +109,12 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/codex-companion.mjs setup [--json]",
-      "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>]",
-      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--new-thread-via <cli|app>] [--model <model>] [--effort <level>] [--prompt-file <path> | prompt]",
+      "  node scripts/codex-companion.mjs review [--wait|--background] [--json] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>]",
+      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--json] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>] [focus text]",
+      "  node scripts/codex-companion.mjs task [--background] [--json] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--new-thread-via <cli|app>] [--model <model>] [--effort <level>] [--prompt-file <path> | --prompt <text> | prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
-      "  node scripts/codex-companion.mjs logs [job-id]",
+      "  node scripts/codex-companion.mjs logs [job-id] [--follow] [--json]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
     ].join("\n")
@@ -196,7 +196,43 @@ function parseCommandInput(argv, config = {}) {
   if (parsed.helpRequested && (!fromRawString || parsed.helpBeforeText)) {
     throw new HelpRequested();
   }
-  return parsed;
+  return { ...parsed, fromRawString, knownOptions: [...(config.valueOptions ?? []), ...(config.booleanOptions ?? [])] };
+}
+
+// task and the review verbs read leftover positionals as prompt or focus text, so a
+// mistyped option used to become text and the run went ahead without it: `task --backnd
+// desktop …` ran on the CLI, with no computer use and no warning. A token that is its own
+// argument, or one a raw string carries before any prompt text, was meant as an option.
+// One raw string ("why does foo --verbose crash") still keeps an inline flag as text, and
+// `--` or --prompt-file pass any text through.
+function rejectMistypedOptions(verb, parsed) {
+  const suspect = parsed.unknownOptions.find(({ token, beforeText }) =>
+    /^--?[A-Za-z]/.test(token) && (!parsed.fromRawString || beforeText)
+  );
+  if (!suspect) {
+    return;
+  }
+  const key = suspect.token.replace(/^-+/, "").split("=", 1)[0];
+  const guess =
+    parsed.knownOptions.find((option) => editDistance(option, key) <= 2) ??
+    parsed.knownOptions.find((option) => key.length >= 3 && (option.startsWith(key) || key.startsWith(option)));
+  const hint = guess ? ` Did you mean \`--${guess}\`?` : "";
+  throw new Error(
+    `\`${verb}\` has no option \`${suspect.token}\`.${hint} Run \`${verb} --help\` for its options. ` +
+      "Text that has to start with a dash goes after `--` or in --prompt-file."
+  );
+}
+
+function editDistance(a, b) {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = current;
+  }
+  return previous[b.length];
 }
 
 // The job verbs take a job id and nothing free-form, so a leftover `--flag` is an option
@@ -859,9 +895,18 @@ export async function resolveTaskBackend(requested, threadId, deps = {}) {
   return threadId && (await (deps.isThreadOwnedByDesktop ?? isThreadOwnedByDesktop)(threadId)) ? "desktop" : "cli";
 }
 
+// `--prompt <text>` is what callers guess (this repo's own tests did, while it was not an
+// option and only worked by falling through as text), so it is one.
 function readTaskPrompt(cwd, options, positionals) {
+  const sources = [options["prompt-file"] != null, options.prompt != null, positionals.length > 0].filter(Boolean).length;
+  if (sources > 1) {
+    throw new Error("Give the prompt one way: --prompt-file <path>, --prompt <text>, or trailing text.");
+  }
   if (options["prompt-file"]) {
     return fs.readFileSync(path.resolve(cwd, options["prompt-file"]), "utf8");
+  }
+  if (options.prompt != null) {
+    return String(options.prompt);
   }
 
   const positionalPrompt = positionals.join(" ");
@@ -1034,13 +1079,15 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
 }
 
 async function handleReviewCommand(argv, config) {
-  const { options, positionals } = parseCommandInput(argv, {
+  const parsed = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "effort", "cwd", "expected-worktree", "expected-branch", "expected-base"],
     booleanOptions: ["json", "background", "wait"],
     aliasMap: {
       m: "model"
     }
   });
+  rejectMistypedOptions(config.reviewName === "Review" ? "review" : "adversarial-review", parsed);
+  const { options, positionals } = parsed;
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
@@ -1104,8 +1151,8 @@ async function handleReview(argv) {
 }
 
 async function handleTask(argv) {
-  const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["model", "effort", "cwd", "prompt-file", "backend", "thread", "new-thread-via", "expected-worktree", "expected-branch", "expected-base"],
+  const parsed = parseCommandInput(argv, {
+    valueOptions: ["model", "effort", "cwd", "prompt-file", "prompt", "backend", "thread", "new-thread-via", "expected-worktree", "expected-branch", "expected-base"],
     // "wait" is accepted and discarded (as in handleReviewCommand): an unrecognised
     // --flag becomes a positional, and positionals ARE the prompt — so a forwarded
     // `--wait` would otherwise be sent to Codex as part of the prompt text.
@@ -1114,6 +1161,8 @@ async function handleTask(argv) {
       m: "model"
     }
   });
+  rejectMistypedOptions("task", parsed);
+  const { options, positionals } = parsed;
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);

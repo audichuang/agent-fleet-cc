@@ -18,8 +18,9 @@ timeout under the Bash call's own (2 minutes by default). Bare `wait` waits 4 mi
 
 `${TMPDIR:-/tmp}/codex-wait.out` holds the last `wait` report, which is the same report as
 `status <jobId>`: no extra call is needed. Each `Progress` line says how long ago it was written;
-`Last activity` is the newest write to the log; `Codex session ID` is the thread id (keep it, see
-below).
+`Last activity` is the newest write to the log; `Codex session ID` is the thread id, printed once
+Codex has a thread (not in the first seconds): note it, it is the handle if the job record is
+ever lost (below).
 
 - `Last activity` under 30 minutes: it is working. Rerun the loop; a one-line progress note to
   the user is enough. A `! … process may be stuck` mark alone is not a stall: it shows after
@@ -37,19 +38,23 @@ macOS and Linux.
 
 ## When `wait` or `status` cannot find the job
 
-`No job found for "<id>"` while the run should still be going:
+`No job found for "<id>"` for a job you launched does not prove the record is gone, nor that the
+run is still going.
 
-1. Retry with the **full** job id (`wait`, `status` and `result` look across workspaces for a
-   full id, not for a prefix).
-2. Still missing: the record is gone, not the run. A desktop turn keeps running in the app. Tell
-   the user exactly that, with the thread id from an earlier report, and stop following it
-   through the companion.
-3. Once the user says the turn has ended, collect its answer on the record:
-   `task --backend desktop --thread <id>` with a prompt that asks for the final report. If the
-   prompt had Codex write a report file, you may relay that file, and say it came from the file,
-   not from `result`.
+1. Retry with the **full** job id: `wait`, `status` and `result` look across workspaces for a
+   full id, not for a prefix.
+2. Retry with the launch's environment. Records live under `CODEX_COMPANION_DATA` (default
+   `~/.local/state/codex-companion`); a launch that set it is found only where it pointed. The
+   launch JSON's `logFile` shows which directory that was.
+3. Still missing: the outcome is unknown. Say so, with the thread id from an earlier report,
+   and ask the user to look at that thread (a desktop turn shows in the app). Do not report it
+   as running, finished or failed.
+4. Once the user has seen the thread end, collect its answer on the record with
+   `task --backend desktop --thread <id>` (or `--thread <id>` alone for a CLI thread) and a
+   prompt that asks for the final report. A report file the prompt had Codex write can be
+   relayed too: say it came from the file, not from `result`.
 
-Never relaunch the prompt as a fresh run: the first one is still working, and two runs on one
+Never relaunch the prompt as a fresh run: if the first one is still working, two runs on one
 screen or one checkout spoil each other.
 
 ## Time cap

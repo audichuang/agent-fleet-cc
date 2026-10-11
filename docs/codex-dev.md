@@ -59,6 +59,12 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   CHANGELOG 最新一節要同號,`tests/versions.test.mjs` 檢查。
 
 ## 踩雷
+- **`task` / review 的多餘位置參數就是 prompt / focus 文字,所以打錯的 option 曾經默默變成文字**:`task --backnd
+  desktop …` 照樣 exit 0 跑在 CLI(2026-10-11 實測)。`rejectMistypedOptions` 現在擋下「自成一個 argv」或「單一原始
+  字串裡出現在任何文字之前」的未知 option,並用編輯距離猜正確名稱;一整串引號 prompt 裡夾的 `--verbose` 仍是文字,
+  `--` 之後與 `--prompt-file` 不受影響。`tests/codex/mistyped-option.test.mjs`。
+- **app-server 用 `-c features.image_generation=true` 開圖像生成,別改回 `--enable`。** `--enable` 會驗證 key,
+  CLI 不認得就 exit 1(`Unknown feature flag`),上游哪天退役這個 key,每次 spawn 都會死;`-c` 只送 `configWarning`。
 - **桌面版只接得手「已有 turn」的 thread。** 只做 `thread/start` 的 thread 進了 state DB,但 app 不肯載入
   (2026-10-03 實測)。所以新的 desktop task 先在**一次性**(`disableBroker`)app-server 跑一輪 bootstrap;
   走共用 broker 的話 broker 的 app-server 會一直握著 thread 的單一寫入鎖,app 開不了它。

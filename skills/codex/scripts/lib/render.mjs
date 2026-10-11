@@ -128,7 +128,7 @@ function pushJobDetails(lines, job, options = {}) {
     lines.push(`  ! Auto-reconciled as failed: worker process${pidSuffix} exited without reporting.`);
   } else if (job.timedOut) {
     lines.push(`  ! Hard timeout: job marked failed after exceeding the configured duration.`);
-    lines.push(`    The underlying runner was not cancelled and may still be executing in the background.`);
+    lines.push(`    The Codex turn was sent an interrupt; \`logs\` shows \`Turn interrupted\` once it stopped.`);
     if (job.errorMessage) {
       lines.push(`  Error: ${job.errorMessage}`);
     }

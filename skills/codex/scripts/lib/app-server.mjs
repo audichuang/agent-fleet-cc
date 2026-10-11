@@ -323,9 +323,11 @@ export class SpawnedCodexAppServerClient extends AppServerClientBase {
   }
 
   async initialize() {
-    // image_generation is stable-on in current catalogs, and off in some configs.
-    // --enable forces the tool on for this process so a generated file can come back.
-    this.proc = spawn("codex", ["app-server", "--enable", "image_generation"], {
+    // image_generation is stable-on in current catalogs, and off in some configs, so force it
+    // on for this process so a generated file can come back. Through `-c`, not `--enable`:
+    // `--enable` exits 1 on a key the CLI does not know ("Unknown feature flag"), so a CLI
+    // that retires the key would fail every run; `-c features.<key>` only warns.
+    this.proc = spawn("codex", ["app-server", "-c", "features.image_generation=true"], {
       cwd: this.cwd,
       env: this.options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
