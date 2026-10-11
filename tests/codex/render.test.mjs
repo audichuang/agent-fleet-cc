@@ -94,10 +94,11 @@ test("renderJobStatusReport surfaces timedOut jobs without the misleading 'abort
 
   // New wording must be present
   assert.match(output, /Hard timeout: job marked failed after exceeding the configured duration\./);
-  // The timeout path interrupts the turn (tracked-jobs.mjs); saying the runner was not
-  // cancelled contradicted the error line printed right under it.
-  assert.match(output, /Codex turn was sent an interrupt/);
-  assert.doesNotMatch(output, /runner was not cancelled/);
+  // The timeout path tries to interrupt the turn (tracked-jobs.mjs), best effort: it is skipped
+  // without a thread and turn id, and a desktop turn logs no "Turn interrupted". So the line
+  // neither says the runner was left alone nor promises the turn stopped.
+  assert.match(output, /tried to interrupt the Codex turn; if it is still running, stop it in Codex/);
+  assert.doesNotMatch(output, /runner was not cancelled|Turn interrupted/);
   // Misleading wording from the prior version must NOT be present
   assert.doesNotMatch(output, /runner watchdog aborted the job/);
   // Error message must still be rendered
