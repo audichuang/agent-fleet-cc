@@ -129,7 +129,7 @@ test("smoke A — expected mode: gate drops foreign endpoint, broker session cre
       [
         "task",
         "--cwd", B.dir,
-        "--prompt", "Print the single word: SMOKEOK",
+        "Print the single word: SMOKEOK",
         "--expected-worktree", B.dir,
         "--expected-branch", B.branch,
         "--expected-base", B.base
@@ -212,7 +212,7 @@ test("smoke B — contrast: without expected mode, foreign bogus endpoint causes
       [
         "task",
         "--cwd", C.dir,
-        "--prompt", "Print the single word: CONTRASTOK"
+        "Print the single word: CONTRASTOK"
       ],
       {
         cwd: C.dir,

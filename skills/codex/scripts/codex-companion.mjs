@@ -111,7 +111,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs setup [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--json] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--json] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--json] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--new-thread-via <cli|app>] [--model <model>] [--effort <level>] [--prompt-file <path> | --prompt <text> | prompt]",
+      "  node scripts/codex-companion.mjs task [--background] [--json] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--new-thread-via <cli|app>] [--model <model>] [--effort <level>] [--prompt-file <path> | prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
       "  node scripts/codex-companion.mjs logs [job-id] [--follow] [--json]",
@@ -207,7 +207,7 @@ function parseCommandInput(argv, config = {}) {
 // `--` or --prompt-file pass any text through.
 function rejectMistypedOptions(verb, parsed) {
   const suspect = parsed.unknownOptions.find(({ token, beforeText }) =>
-    /^--?[A-Za-z]/.test(token) && (!parsed.fromRawString || beforeText)
+    /^-+[A-Za-z]/.test(token) && (!parsed.fromRawString || beforeText)
   );
   if (!suspect) {
     return;
@@ -895,18 +895,9 @@ export async function resolveTaskBackend(requested, threadId, deps = {}) {
   return threadId && (await (deps.isThreadOwnedByDesktop ?? isThreadOwnedByDesktop)(threadId)) ? "desktop" : "cli";
 }
 
-// `--prompt <text>` is what callers guess (this repo's own tests did, while it was not an
-// option and only worked by falling through as text), so it is one.
 function readTaskPrompt(cwd, options, positionals) {
-  const sources = [options["prompt-file"] != null, options.prompt != null, positionals.length > 0].filter(Boolean).length;
-  if (sources > 1) {
-    throw new Error("Give the prompt one way: --prompt-file <path>, --prompt <text>, or trailing text.");
-  }
   if (options["prompt-file"]) {
     return fs.readFileSync(path.resolve(cwd, options["prompt-file"]), "utf8");
-  }
-  if (options.prompt != null) {
-    return String(options.prompt);
   }
 
   const positionalPrompt = positionals.join(" ");
@@ -1152,7 +1143,7 @@ async function handleReview(argv) {
 
 async function handleTask(argv) {
   const parsed = parseCommandInput(argv, {
-    valueOptions: ["model", "effort", "cwd", "prompt-file", "prompt", "backend", "thread", "new-thread-via", "expected-worktree", "expected-branch", "expected-base"],
+    valueOptions: ["model", "effort", "cwd", "prompt-file", "backend", "thread", "new-thread-via", "expected-worktree", "expected-branch", "expected-base"],
     // "wait" is accepted and discarded (as in handleReviewCommand): an unrecognised
     // --flag becomes a positional, and positionals ARE the prompt — so a forwarded
     // `--wait` would otherwise be sent to Codex as part of the prompt text.

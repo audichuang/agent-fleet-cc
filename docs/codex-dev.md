@@ -63,6 +63,8 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   desktop …` 照樣 exit 0 跑在 CLI(2026-10-11 實測)。`rejectMistypedOptions` 現在擋下「自成一個 argv」或「單一原始
   字串裡出現在任何文字之前」的未知 option,並用編輯距離猜正確名稱;一整串引號 prompt 裡夾的 `--verbose` 仍是文字,
   `--` 之後與 `--prompt-file` 不受影響。`tests/codex/mistyped-option.test.mjs`。
+  **刻意沒有 `--prompt <text>`**:加過一版,第二輪 review 找到兩個洞 —— `parseArgs` 的 `split("=", 2)` 截掉
+  `--prompt=a=b` 的後半,單一原始字串裡提到 `--prompt` 的 prompt 被當成第二個來源。打 `--prompt` 現在報錯並指向 `--prompt-file`。
 - **app-server 用 `-c features.image_generation=true` 開圖像生成,別改回 `--enable`。** `--enable` 會驗證 key,
   CLI 不認得就 exit 1(`Unknown feature flag`),上游哪天退役這個 key,每次 spawn 都會死;`-c` 只送 `configWarning`。
 - **桌面版只接得手「已有 turn」的 thread。** 只做 `thread/start` 的 thread 進了 state DB,但 app 不肯載入

@@ -23,7 +23,7 @@ function makeRepo() {
 }
 
 function runTask(cwd, extraArgs, env = {}) {
-  return spawnSync(process.execPath, [COMPANION, "task", "--cwd", cwd, "--prompt", "noop", ...extraArgs], {
+  return spawnSync(process.execPath, [COMPANION, "task", "--cwd", cwd, ...extraArgs, "noop"], {
     encoding: "utf8",
     env: { ...process.env, CODEX_COMPANION_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")), ...env }
   });

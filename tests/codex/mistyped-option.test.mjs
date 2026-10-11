@@ -22,7 +22,8 @@ for (const [argv, flag, guess] of [
   [["task", "Reply OK", "--backnd", "desktop"], "--backnd", "--backend"],
   [["task", "--backnd desktop Reply OK"], "--backnd", "--backend"],
   [["adversarial-review", "--bse", "main", "focus on retries"], "--bse", "--base"],
-  [["review", "--jsno"], "--jsno", "--json"]
+  [["review", "--jsno"], "--jsno", "--json"],
+  [["task", "---backend", "desktop", "Click the page"], "---backend", "--backend"]
 ]) {
   test(`${argv.join(" ")} names ${flag} instead of sending it as text`, () => {
     const result = runCompanion(argv);
@@ -36,7 +37,8 @@ for (const [argv, flag, guess] of [
 for (const argv of [
   ["task", "why does foo --verbose crash"],
   ["task", "--fresh", "--", "--backnd", "is a typo in our docs"],
-  ["adversarial-review", "check the --retry path"]
+  ["adversarial-review", "check the --retry path"],
+  ["task", "Explain how --prompt differs from trailing text"]
 ]) {
   test(`${argv.join(" ")} stays text`, () => {
     const result = runCompanion(argv);
@@ -44,14 +46,10 @@ for (const argv of [
   });
 }
 
-// Callers guess `--prompt` (this repo's own tests did, back when it fell through as text).
-test("task --prompt <text> is the prompt, not an unknown option", () => {
+// There is no `--prompt`; callers guess it (this repo's own tests did, while it fell through
+// as prompt text), so it names --prompt-file.
+test("task --prompt <text> names --prompt-file", () => {
   const result = runCompanion(["task", "--prompt", "Reply OK"]);
-  assert.doesNotMatch(result.stderr + result.stdout, /has no option|Give the prompt one way/);
-});
-
-test("task with two prompt sources says so instead of picking one", () => {
-  const result = runCompanion(["task", "--prompt", "Reply OK", "and this too"]);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr + result.stdout, /Give the prompt one way/);
+  assert.match(result.stderr + result.stdout, /has no option `--prompt`\. Did you mean `--prompt-file`/);
 });
