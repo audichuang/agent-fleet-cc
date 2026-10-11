@@ -22,33 +22,30 @@ node "${CLAUDE_SKILL_DIR}/scripts/codex-companion.mjs" <verb> ...
 
 ## CLI or the Codex desktop app
 
-Before every `task`, you decide the backend. The user rarely says "computer use", so judge the work itself: **does Codex need hands on a live screen?** Only the Codex desktop app (macOS or Linux) runs computer use and the browser reliably. A CLI run may list computer-use tools, because the app's plugins are shared through `~/.codex/config.toml`, but there they fail to launch apps or screenshot the wrong window: never accept UI results from a CLI run.
+Decide the backend before every `task`. The user rarely says "computer use", so ask one question about the work itself: **does Codex need hands on a live screen?**
 
-- **Live screen → `--backend desktop`.** Codex must click, type or scroll in a GUI app or a web page, log in and act on a site, fill a form, click through a UI to reproduce or check a bug, read what a page shows once rendered, screenshot an app, or run a real-UI or manual QA round from a protocol doc (even when it is called a test).
-- **Files and a terminal → leave `--backend` unset.** The work is code, commands or text, including work *about* a UI or a page: fix a component, write a Playwright or E2E test, fetch a URL or an API, run headless tests. A fix, diagnosis or implementation stays on the CLI even while the app is running.
-- **The user asks for the app → `--backend desktop`.** They want to watch the run there, or they name their conversation in the app.
+| The work | Backend |
+| --- | --- |
+| Click, type or scroll in a GUI app or a web page; log in or fill a form on a site; click through a UI to reproduce or check a bug; read what a page shows once rendered; screenshot an app; a real-UI or manual QA round from a protocol doc (even when it is called a test) | `--backend desktop` |
+| Code, commands or text, including work *about* a UI or a page: fix a component, write a Playwright or E2E test, fetch a URL or an API, run headless tests. A fix stays here even while the app is running | leave `--backend` unset (CLI) |
+| The user wants to watch the run in the app, or names their conversation there (a `codex://threads/<id>` link) | `--backend desktop` |
 
-Torn between the first two? If a terminal alone could finish the job, it is the CLI.
+Torn between the first two? If a terminal alone could finish the job, it is the CLI. Only the Codex desktop app (macOS or Linux) runs computer use and the browser reliably. A CLI run may list computer-use tools, because the app's plugins are shared through `~/.codex/config.toml`, but there they fail to launch apps or screenshot the wrong window: never accept UI results from a CLI run.
 
-Passing `--backend desktop` is the whole decision. Spell it exactly: `task` reads an unknown option as prompt text, so a typo runs on the CLI without computer use. After launching, `status <jobId> --json` shows `backend: "desktop"`; if it does not, cancel and relaunch. The companion creates the thread, opens it in the app where the user sees it, and tracks the turn to its end; checking the app first is its job, not yours. In the prompt itself, not only in a file it points to, name what Codex should operate, what to report back, and each UI action the round needs authorized (changing app settings or theme, deleting test data, logging in, accepting OS permission prompts): computer use stops to ask before any of those it was not explicitly told to do. Two flags have their own triggers:
-
-- `--new-thread-via app` when the user wants the chat created by the app itself (it presses Enter in the app's window).
-- `--thread <id>` continues one named thread. Without `--backend` it goes to the app only if the app has that thread loaded right now; otherwise the CLI continues it. So when the user means their conversation *in the app* (a `codex://threads/<id>` link, "my Codex desktop chat"), pass `--backend desktop` too.
-
-A desktop run that stops on an approval fails with that reason; the turn is still waiting in the app. Tell the user to approve it there.
-
-`status`, `wait`, `logs`, `result` and `cancel` work the same for either backend. Routing, failures and limits: the `desktop-backend.md` row below.
+Passing `--backend desktop` is all you do for the app. The companion creates the thread, opens it in the user's app and follows the turn to its end. Do not open the app yourself, type into it, or hand the user a prompt to paste: that run has no job record, nothing to `wait` on, and no result to collect. Spell the flag exactly: `task` reads an unknown option as prompt text, so a typo runs on the CLI. In the prompt itself, not only in a file it points to, name what Codex should operate, what to report back, and each UI action the round needs authorized (changing app settings or theme, deleting test data, logging in, accepting OS permission prompts): computer use stops to ask before any of those it was not explicitly told to do. Before a real-UI round, a continued app thread (`--thread`), or after a desktop failure, read `desktop-backend.md`.
 
 Leave `--model` unset. The companion uses `gpt-6.1-sol` at `xhigh`, the stronger model this delegation is for. Pass `--model` only when the user names a model. Do not pass `gpt-6-sol` or `gpt-6-luna`. Do not pass a service tier. `gpt-6-astra` only when the user asks for the frontier model. Leave `--effort` unset as well: the companion runs at `xhigh`. Pass `--effort` only when the user names a level, which is per-model (`prompting.md` says where the catalog lists them).
 
-A run that will not finish inside ten minutes uses the companion's own `--background` (and `--json` when you need the job id). That is the tracked job. A foreground call killed at that ceiling is a SIGTERM; the record is already on disk. Say so and run `status`. Do not treat the empty stdout as a failed review. Never pipe companion output into `head` or `tail`: redirect it to a file and read the file. Run the launch line, then the other two lines together as **one background Bash command** (a single `wait` ends at its own timeout and leaves nothing waiting). `--timeout-ms` is in milliseconds; there is no `--timeout`. A job is stopped and recorded as failed after 3 hours, and a desktop turn is interrupted in the app with it. The cap is fixed when the job starts, so for a run that may go longer (a full UI test round, say) put `CODEX_JOB_TIMEOUT_MS=<ms>` in front of the launch command; it cannot be raised afterwards.
+## Launching and following a job
+
+A run that will not finish inside ten minutes uses the companion's own `--background` (and `--json` for the job id). That is the tracked job. A foreground call killed at that ceiling is a SIGTERM; the record is already on disk. Say so and run `status`. Do not treat the empty stdout as a failed review. Never pipe companion output into `head` or `tail`: redirect it to a file and read the file. A job is stopped and recorded as failed after 3 hours, and a desktop turn is interrupted in the app with it. The cap is fixed at launch, so for a run that may go longer (a full UI round, say) put `CODEX_JOB_TIMEOUT_MS=<ms>` in front of the launch line; it cannot be raised afterwards. For the app, the launch line gains `--backend desktop` right after `task`. Run the launch line, then the other two lines together as **one background Bash command** (a single `wait` ends at its own timeout and leaves nothing waiting). `--timeout-ms` is in milliseconds; there is no `--timeout`.
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/scripts/codex-companion.mjs" task --background --json --prompt-file <file> > "${TMPDIR:-/tmp}/codex-launch.json"
 J=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).jobId' "${TMPDIR:-/tmp}/codex-launch.json"); echo "job: $J"
 start=$SECONDS; while :; do code=0; node "${CLAUDE_SKILL_DIR}/scripts/codex-companion.mjs" wait "$J" --timeout-ms 100000 > "${TMPDIR:-/tmp}/codex-wait.out" || code=$?; [ "$code" -ne 10 ] && break; [ $((SECONDS - start)) -ge 1800 ] && break; done; echo "wait exit: $code"
 ```
-`wait exit: 0` means done: run `result <jobId>`. Following a job you did not just launch, set `J=<jobId>` instead of the `J=$(…)` line. Other exit codes and the 30-minute check-in: `background-jobs.md`.
+`wait exit: 0` means done: run `result <jobId>`. `10` is the 30-minute check-in, not a failure: `codex-wait.out` already holds the `status` report (`Last activity`, `Progress`); read it, give the user one line, and rerun the loop. Any other code, a job the companion no longer finds, or a stall: `background-jobs.md`. After a desktop launch, `status <jobId> --json` must show `backend: "desktop"`; if it does not, cancel and relaunch. Following a job you did not just launch, set `J=<jobId>` instead of the `J=$(…)` line.
 
 Return the companion stdout verbatim. If Codex generated images, show the user the saved files: non-JSON stdout has an `Images:` section, and `--json` carries `imageGenerations[].savedPath`.
 
@@ -73,5 +70,5 @@ Open one of these when the row matches. Each file is one hop from here.
 | [references/codex-prompt-recipes.md](references/codex-prompt-recipes.md) | You need a complete template for a task type — diagnosis, narrow fix, review, research. |
 | [references/codex-prompt-antipatterns.md](references/codex-prompt-antipatterns.md) | Checking a drafted prompt for lines that make GPT-6.1 worse. |
 | [references/delivery-paths.md](references/delivery-paths.md) | Choosing a direct `task`, `task --resume-last`, or a conversation fork. |
-| [references/background-jobs.md](references/background-jobs.md) | You are about to launch with `--background`, or are waiting on a job — `wait`'s timeout and exit codes, the 30-minute check-in on a long job, the job's time cap, and how to tell a finished job. |
-| [references/desktop-backend.md](references/desktop-backend.md) | A task should run in the Codex desktop app, continue a thread open there, or a desktop run failed. |
+| [references/background-jobs.md](references/background-jobs.md) | You are about to launch with `--background`, or are waiting on a job — `wait`'s timeout and exit codes, the 30-minute check-in on a long job, a job `wait` no longer finds, the time cap, and how to tell a finished job. |
+| [references/desktop-backend.md](references/desktop-backend.md) | A task should run in the Codex desktop app (a real-UI round above all), continue a thread open there, or a desktop run failed. |
