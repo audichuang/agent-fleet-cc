@@ -17,11 +17,6 @@ import { ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
 import { terminateProcessTree } from "./process.mjs";
 import { stripAnsi } from "./strings.mjs";
 
-// The skill's version lives in its SKILL.md frontmatter (metadata.version), the one file every
-// installer copies; there is no separate manifest to drift from it.
-const SKILL_MD_URL = new URL("../../SKILL.md", import.meta.url);
-export const SKILL_VERSION = /^\s+version:\s*"?([\w.+-]+)"?\s*$/m.exec(fs.readFileSync(SKILL_MD_URL, "utf8"))?.[1];
-
 export const BROKER_ENDPOINT_ENV = "CODEX_COMPANION_APP_SERVER_ENDPOINT";
 export const BROKER_BUSY_RPC_CODE = -32001;
 
@@ -29,7 +24,8 @@ export const BROKER_BUSY_RPC_CODE = -32001;
 const DEFAULT_CLIENT_INFO = {
   title: "Codex Plugin",
   name: "Claude Code",
-  version: SKILL_VERSION ?? "0.0.0"
+  // The skill ships unversioned (git history is the record); the protocol still wants a string.
+  version: "0.0.0"
 };
 
 /** @type {InitializeCapabilities} */

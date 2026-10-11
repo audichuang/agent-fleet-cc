@@ -5,7 +5,6 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { makeTempDir, run } from "./helpers.mjs";
-import { SKILL_VERSION } from "../../skills/codex/scripts/lib/app-server.mjs";
 import { resolveDataDir, resolveJobLogFile, saveState, writeJobFile } from "../../skills/codex/scripts/lib/state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -46,9 +45,4 @@ test("a job written by the retired plugin is still found by id", () => {
   const result = run("node", [companion, "result", "task-kept", "--cwd", workspace, "--json"], { cwd: workspace, env });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).job.id, "task-kept");
-});
-
-test("the app-server clientInfo version is the skill's metadata.version", () => {
-  const fm = fs.readFileSync(path.join(SKILL_ROOT, "SKILL.md"), "utf8").match(/^---\n([\s\S]*?)\n---/)[1];
-  assert.equal(SKILL_VERSION, fm.match(/version:\s*"?([\d.]+)"?/)[1]);
 });

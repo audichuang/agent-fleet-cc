@@ -1,8 +1,6 @@
 ---
 name: codex
 description: Runs Codex for a review, a check, a diagnosis, an implementation, or an image, or has the Codex desktop app operate a real GUI or web page with computer use (click through, test or screenshot a live UI), and is consulted before any Codex payload is shown. Use it whenever the user asks Codex to do something, in any language ("ask codex", "請 codex", "讓 Codex 跑"), instead of opening Codex in a terminal, tmux or a worktree manager (unless the user names that tool), even when earlier rounds ran that way. The host runs the companion script. Findings are never auto-fixed, a failed or never-invoked run is reported rather than replaced, and generated image files are shown. Default model is gpt-6.1-sol.
-metadata:
-  version: "3.0.0"
 ---
 
 ## Calling Codex

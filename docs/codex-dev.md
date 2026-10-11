@@ -55,8 +55,8 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   result-handling 契約。description 常駐 host 的系統提示,body 每次使用都會載入,所以維持短(<80 行),
   細節放 `skills/codex/references/`,並在 SKILL.md 的表格裡掛一行 —— `tests/codex/commands.test.mjs`
   釘住「表格 ↔ references/ 完全對齊」,`tests/repo-structure.test.mjs` 釘住「只有一顆」。
-- **版本**在 `skills/codex/SKILL.md` frontmatter 的 `metadata.version`(app-server 的 clientInfo 也讀它),
-  CHANGELOG 最新一節要同號,`tests/versions.test.mjs` 檢查。
+- **沒有版本號、沒有 CHANGELOG**(2026-10-11 起):變更紀錄就是 commit 訊息。app-server 的 clientInfo
+  版本因此固定送 `"0.0.0"`。
 
 ## 踩雷
 - **`task` / review 的多餘位置參數就是 prompt / focus 文字,所以打錯的 option 曾經默默變成文字**:`task --backnd

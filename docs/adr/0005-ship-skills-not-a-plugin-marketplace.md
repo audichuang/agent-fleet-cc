@@ -13,7 +13,8 @@ with no output, and the session lost a round finding out why.
 **Decision.** The repo ships two skills, `skills/codex/` and `skills/imagine/`, under `skills/`, installed with
 aghub or `npx skills` like the maintainer's other skills. The marketplace, plugin manifests,
 `bump-version`, `sync-shared`, the repo-level `shared/` source and the `local-install-test` skill
-are removed. A skill's version is `metadata.version` in its `SKILL.md`, paired with its CHANGELOG.
+are removed. A skill's version is `metadata.version` in its `SKILL.md`, paired with its CHANGELOG
+(superseded 2026-10-11: skills ship unversioned, and the commit message is the change record).
 codex keeps jobs in `~/.local/state/codex-companion` (`CODEX_COMPANION_DATA` overrides) and still
 finds jobs the plugin wrote by id. Entry guards compare real paths, because installed skills are
 symlinks by default.
