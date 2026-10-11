@@ -9,7 +9,7 @@ import {
   resolveStateFile,
   saveState,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 function seedRunning(workspace, jobId) {
   const running = {

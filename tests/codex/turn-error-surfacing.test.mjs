@@ -7,12 +7,12 @@ import { fileURLToPath } from "node:url";
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
-import { resolveJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { runTrackedJob } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
-import { describeTurnError } from "../../plugins/codex/scripts/lib/codex.mjs";
+import { resolveJobFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { runTrackedJob } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
+import { describeTurnError } from "../../skills/codex/scripts/lib/codex.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCRIPT = path.join(ROOT, "plugins/codex/scripts/codex-companion.mjs");
+const SCRIPT = path.join(ROOT, "skills/codex/scripts/codex-companion.mjs");
 
 // Drive the REAL companion CLI against a fake codex whose turn/review/start ACKs
 // then emits a terminal `error` notification — the production silent-death path.

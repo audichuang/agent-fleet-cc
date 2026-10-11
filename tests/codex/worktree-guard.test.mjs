@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseExpectedTriplet, assertWorktreeAlignment, sanitizeGitEnv, BROKER_ENDPOINT_ENV }
-  from "../../plugins/codex/scripts/lib/worktree-guard.mjs";
+  from "../../skills/codex/scripts/lib/worktree-guard.mjs";
 import { TRIPLET_VECTORS, ALIGN_VECTORS } from "./worktree-guard-vectors.mjs";
 
 test("parseExpectedTriplet honours all-or-none", () => {

@@ -5,11 +5,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { writeJobFile, saveState } from "../../plugins/codex/scripts/lib/state.mjs";
-import { resolveWorkspaceRoot } from "../../plugins/codex/scripts/lib/workspace.mjs";
-import { buildSingleJobSnapshot } from "../../plugins/codex/scripts/lib/job-control.mjs";
+import { writeJobFile, saveState } from "../../skills/codex/scripts/lib/state.mjs";
+import { resolveWorkspaceRoot } from "../../skills/codex/scripts/lib/workspace.mjs";
+import { buildSingleJobSnapshot } from "../../skills/codex/scripts/lib/job-control.mjs";
 
-const COMPANION = path.resolve("plugins/codex/scripts/codex-companion.mjs");
+const COMPANION = path.resolve("skills/codex/scripts/codex-companion.mjs");
 
 function makeRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wtguard-"));
@@ -25,7 +25,7 @@ function makeRepo() {
 function runTask(cwd, extraArgs, env = {}) {
   return spawnSync(process.execPath, [COMPANION, "task", "--cwd", cwd, "--prompt", "noop", ...extraArgs], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")), ...env }
+    env: { ...process.env, CODEX_COMPANION_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")), ...env }
   });
 }
 
@@ -37,7 +37,7 @@ function runTask(cwd, extraArgs, env = {}) {
 function runCmd(cmd, cwd, args, env = {}) {
   return spawnSync(process.execPath, [COMPANION, cmd, "--cwd", cwd, ...args], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")), ...env }
+    env: { ...process.env, CODEX_COMPANION_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")), ...env }
   });
 }
 // branch matches (makeRepo uses "feat") so the TOPLEVEL check is what fails.
@@ -94,9 +94,9 @@ test("task: valid triplet passes the gate and enqueues the job (--background)", 
 test("task-worker: re-verifies expected from stored request, exits non-zero on mismatch", () => {
   const { dir, base } = makeRepo();
   const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "pd-worker-"));
-  // Override CLAUDE_PLUGIN_DATA for this process so writeJobFile uses the same state dir
-  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  // Override CODEX_COMPANION_DATA for this process so writeJobFile uses the same state dir
+  const origPluginData = process.env.CODEX_COMPANION_DATA;
+  process.env.CODEX_COMPANION_DATA = pluginData;
 
   let workspaceRoot, jobId;
   try {
@@ -124,15 +124,15 @@ test("task-worker: re-verifies expected from stored request, exits non-zero on m
   } finally {
     // Always restore so we don't affect other tests even if an exception occurs
     if (origPluginData === undefined) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
+      delete process.env.CODEX_COMPANION_DATA;
     } else {
-      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+      process.env.CODEX_COMPANION_DATA = origPluginData;
     }
   }
 
   const r = spawnSync(process.execPath, [COMPANION, "task-worker", "--cwd", dir, "--job-id", jobId], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData }
+    env: { ...process.env, CODEX_COMPANION_DATA: pluginData }
   });
 
   assert.notEqual(r.status, 0, `expected non-zero exit but got ${r.status}; stdout: ${r.stdout}; stderr: ${r.stderr}`);
@@ -145,7 +145,7 @@ test("review: mismatched expected-worktree exits non-zero before engine", () => 
   const r = spawnSync(process.execPath,
     [COMPANION, "review", "--cwd", dir, "--scope", "working-tree",
      "--expected-worktree", "/nope", "--expected-branch", "feat", "--expected-base", base],
-    { encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")) } });
+    { encoding: "utf8", env: { ...process.env, CODEX_COMPANION_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")) } });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr + r.stdout, /worktree mismatch|WorktreeMismatch/i);
 });
@@ -153,8 +153,8 @@ test("review: mismatched expected-worktree exits non-zero before engine", () => 
 test("expected mode disables cross-workspace job fallback in buildSingleJobSnapshot", () => {
   // Workspace A: has a job seeded in a shared state dir
   const pluginData = fs.mkdtempSync(path.join(os.tmpdir(), "pd-cwguard-"));
-  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  const origPluginData = process.env.CODEX_COMPANION_DATA;
+  process.env.CODEX_COMPANION_DATA = pluginData;
 
   const { dir: dirA, base: baseA } = makeRepo();
   const { dir: dirB, base: baseB } = makeRepo();
@@ -190,9 +190,9 @@ test("expected mode disables cross-workspace job fallback in buildSingleJobSnaps
     );
   } finally {
     if (origPluginData === undefined) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
+      delete process.env.CODEX_COMPANION_DATA;
     } else {
-      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+      process.env.CODEX_COMPANION_DATA = origPluginData;
     }
   }
 });
@@ -219,11 +219,11 @@ test("status --wait --expected-worktree blocks cross-workspace lookup (non-zero 
   // Seed completed job into A's state (using dirA as cwd so resolveWorkspaceRoot picks the right dir)
   const workspaceRootA = resolveWorkspaceRoot(dirA);
   const foreignJobId = "foreign-wait-guard-" + Date.now();
-  const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginData };
+  const env = { ...process.env, CODEX_COMPANION_DATA: pluginData };
 
-  // Temporarily redirect process CLAUDE_PLUGIN_DATA so writeJobFile goes to the shared pluginData
-  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  // Temporarily redirect process CODEX_COMPANION_DATA so writeJobFile goes to the shared pluginData
+  const origPluginData = process.env.CODEX_COMPANION_DATA;
+  process.env.CODEX_COMPANION_DATA = pluginData;
   try {
     writeJobFile(workspaceRootA, foreignJobId, {
       id: foreignJobId,
@@ -243,9 +243,9 @@ test("status --wait --expected-worktree blocks cross-workspace lookup (non-zero 
     });
   } finally {
     if (origPluginData === undefined) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
+      delete process.env.CODEX_COMPANION_DATA;
     } else {
-      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+      process.env.CODEX_COMPANION_DATA = origPluginData;
     }
   }
 
@@ -286,10 +286,10 @@ test("wait --expected-worktree blocks cross-workspace lookup (non-zero exit, no 
 
   const workspaceRootA = resolveWorkspaceRoot(dirA);
   const foreignJobId = "foreign-wait2-guard-" + Date.now();
-  const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginData };
+  const env = { ...process.env, CODEX_COMPANION_DATA: pluginData };
 
-  const origPluginData = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  const origPluginData = process.env.CODEX_COMPANION_DATA;
+  process.env.CODEX_COMPANION_DATA = pluginData;
   try {
     writeJobFile(workspaceRootA, foreignJobId, {
       id: foreignJobId,
@@ -309,9 +309,9 @@ test("wait --expected-worktree blocks cross-workspace lookup (non-zero exit, no 
     });
   } finally {
     if (origPluginData === undefined) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
+      delete process.env.CODEX_COMPANION_DATA;
     } else {
-      process.env.CLAUDE_PLUGIN_DATA = origPluginData;
+      process.env.CODEX_COMPANION_DATA = origPluginData;
     }
   }
 

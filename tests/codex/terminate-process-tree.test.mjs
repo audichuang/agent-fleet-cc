@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { terminateProcessTree } from "../../plugins/codex/scripts/lib/process.mjs";
+import { terminateProcessTree } from "../../skills/codex/scripts/lib/process.mjs";
 
 // A wedged Codex app-server is NOT a process-group leader (it is spawned inside
 // the broker's group), so kill(-pid) alone cannot reap its MCP/tool children.

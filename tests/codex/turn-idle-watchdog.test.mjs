@@ -7,7 +7,7 @@ import {
   resolveTurnIdleTimeoutMs,
   TURN_IDLE_TIMEOUT_ENV,
   DEFAULT_TURN_IDLE_TIMEOUT_MS
-} from "../../plugins/codex/scripts/lib/codex.mjs";
+} from "../../skills/codex/scripts/lib/codex.mjs";
 
 // Controllable timer set injected into captureTurn's idle watchdog so the test
 // decides exactly when "idle" elapses — no wall-clock flakiness. Global timers

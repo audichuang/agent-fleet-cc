@@ -12,7 +12,7 @@ import {
   saveState,
   writeCompletionSignalFile,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 // C5: a job's terminal side-effects (per-job record + state.json index + the <jobId>.done
 // signal a Claude-side `until [ -f signalFile ]` loop blocks on) are written separately,

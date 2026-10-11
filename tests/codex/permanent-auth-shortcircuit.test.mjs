@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { captureTurn, isTerminalTurnError } from "../../plugins/codex/scripts/lib/codex.mjs";
+import { captureTurn, isTerminalTurnError } from "../../skills/codex/scripts/lib/codex.mjs";
 
 function makeFakeClient() {
   return {

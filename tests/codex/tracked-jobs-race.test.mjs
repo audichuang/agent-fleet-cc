@@ -12,8 +12,8 @@ import {
   upsertJob,
   writeCompletionSignalFile,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
-import { runTrackedJob } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
+import { runTrackedJob } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
 
 test("runTrackedJob does not resurrect a job an external actor already marked terminal", async () => {
   const workspace = makeTempDir();

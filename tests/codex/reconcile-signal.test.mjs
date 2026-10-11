@@ -8,7 +8,7 @@ import {
   resolveJobDoneFile,
   saveState,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 // A pid that is effectively never a live process, so dead-PID reconcile fires.
 const DEAD_PID = 2_147_483_646;

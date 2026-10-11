@@ -5,7 +5,7 @@ import {
   AppServerClientBase,
   CodexAppServerClient,
   resolveRequestTimeoutMs
-} from "../../plugins/codex/scripts/lib/app-server.mjs";
+} from "../../skills/codex/scripts/lib/app-server.mjs";
 
 test("CodexAppServerClient.connect closes the partially-built client and rethrows if initialize() fails", async () => {
   let closed = 0;

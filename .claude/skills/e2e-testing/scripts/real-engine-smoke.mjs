@@ -48,8 +48,8 @@ function parseJson(text) {
 
 function dataRoots() {
   const roots = new Set();
-  roots.add(process.env.CLAUDE_PLUGIN_DATA
-    || path.join(os.homedir(), ".claude/plugins/data/codex-agent-fleet"));
+  roots.add(process.env.CODEX_COMPANION_DATA
+    || path.join(os.homedir(), ".local/state/codex-companion"));
   return [...roots];
 }
 
@@ -78,7 +78,7 @@ function pruneState(roots, wsBase) {
 
 const ENGINES = {
   codex: {
-    script: path.join(REPO, "plugins/codex/scripts/codex-companion.mjs"),
+    script: path.join(REPO, "skills/codex/scripts/codex-companion.mjs"),
     binary: "codex",
     launch: (ws) => ["task", "smoke: reply with the single word ok", "--background", "--json"],
     cancel: (ws, id) => ["cancel", id, "--cwd", ws, "--json"],

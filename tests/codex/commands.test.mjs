@@ -5,16 +5,16 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const PLUGIN_ROOT = path.join(ROOT, "plugins", "codex");
+const PLUGIN_ROOT = path.join(ROOT, "skills", "codex");
 
 function read(relativePath) {
   return fs.readFileSync(path.join(PLUGIN_ROOT, relativePath), "utf8");
 }
 
 test("slash commands are gone; the skill is how the host calls Codex", () => {
-  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, "commands")), false, "plugins/codex/commands must not come back");
+  assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, "commands")), false, "codex/commands must not come back");
 
-  const skill = read("skills/codex/SKILL.md");
+  const skill = read("SKILL.md");
   assert.match(skill, /codex-companion\.mjs/);
   assert.match(skill, /`review`/);
   assert.match(skill, /`adversarial-review`/);
@@ -33,7 +33,7 @@ test("slash commands are gone; the skill is how the host calls Codex", () => {
 });
 
 test("the skill backgrounds long runs on the companion and names the ten-minute ceiling", () => {
-  const skill = read("skills/codex/SKILL.md");
+  const skill = read("SKILL.md");
   assert.match(skill, /--background/);
   assert.match(skill, /ten minutes/i);
   assert.match(skill, /SIGTERM/);
@@ -51,7 +51,7 @@ test("app-server is spawned with image generation enabled", () => {
 });
 
 test("model guidance keeps the workhorse and does not route to sol or luna", () => {
-  const promptingSkill = read("skills/codex/references/prompting.md");
+  const promptingSkill = read("references/prompting.md");
 
   assert.match(promptingSkill, /\|\s*\*\*gpt-6\.1-sol\*\*\s*\|/);
   assert.match(promptingSkill, /\|\s*\*\*gpt-6-astra\*\*\s*\|/);
@@ -65,8 +65,8 @@ test("model guidance keeps the workhorse and does not route to sol or luna", () 
 });
 
 test("delivery-path reference is reachable and the host runs the companion", () => {
-  const promptingSkill = read("skills/codex/references/prompting.md");
-  const deliveryPaths = read("skills/codex/references/delivery-paths.md");
+  const promptingSkill = read("references/prompting.md");
+  const deliveryPaths = read("references/delivery-paths.md");
 
   assert.match(promptingSkill, /\(delivery-paths\.md\)/);
   assert.match(deliveryPaths, /`--resume-last`/);
@@ -78,8 +78,8 @@ test("delivery-path reference is reachable and the host runs the companion", () 
 });
 
 test("internal docs use task terminology for delegated runs", () => {
-  const promptingSkill = read("skills/codex/references/prompting.md");
-  const promptRecipes = read("skills/codex/references/codex-prompt-recipes.md");
+  const promptingSkill = read("references/prompting.md");
+  const promptRecipes = read("references/codex-prompt-recipes.md");
 
   assert.match(promptingSkill, /Use `task` when the task is diagnosis/i);
   assert.match(promptRecipes, /Codex task prompts/i);
@@ -88,15 +88,10 @@ test("internal docs use task terminology for delegated runs", () => {
   assert.match(promptRecipes, /## Narrow Fix/);
 });
 
-test("the skill is the whole surface: no subagent, no hooks, no second skill", () => {
+test("the skill is the whole surface: no subagent, no hooks, no plugin manifest", () => {
   // Discovery is a directory scan, so any of these coming back is a mkdir; pin all of them.
-  for (const dir of ["agents", "hooks", "commands"]) {
-    assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, dir)), false, `plugins/codex/${dir} must not come back`);
-  }
-  assert.deepEqual(fs.readdirSync(path.join(PLUGIN_ROOT, "skills")), ["codex"]);
-  const manifest = JSON.parse(read(".claude-plugin/plugin.json"));
-  for (const key of ["agents", "hooks", "commands"]) {
-    assert.equal(manifest[key], undefined, `plugin.json must not declare ${key}`);
+  for (const dir of ["agents", "hooks", "commands", "skills", ".claude-plugin"]) {
+    assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, dir)), false, `codex/${dir} must not come back`);
   }
 });
 
@@ -120,26 +115,18 @@ test("status surfaces render the status report, not the stored result", () => {
   assert.match(companionHandler("handleResult"), /renderStoredJobResult/);
 });
 
-test("codex ships exactly one skill, whose references are all one hop from SKILL.md", () => {
-  const skillsDir = path.join(PLUGIN_ROOT, "skills");
-  const skills = fs
-    .readdirSync(skillsDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
-    .sort();
-  assert.deepEqual(skills, ["codex"], "codex is meant to expose exactly one skill");
-
+test("the skill's references are all one hop from SKILL.md", () => {
   // The whole SKILL.md loads every time the skill fires. Prompting detail stays in references.
-  const body = read("skills/codex/SKILL.md");
-  assert.ok(body.split("\n").length < 80, "skills/codex/SKILL.md loads in full on every trigger — keep detail in references/");
+  const body = read("SKILL.md");
+  assert.ok(body.split("\n").length < 80, "SKILL.md loads in full on every trigger — keep detail in references/");
 
   const linked = [...body.matchAll(/\]\(references\/([^)]+)\)/g)].map((m) => m[1]).sort();
-  const onDisk = fs.readdirSync(path.join(skillsDir, "codex", "references")).sort();
+  const onDisk = fs.readdirSync(path.join(PLUGIN_ROOT, "references")).sort();
   assert.deepEqual(linked, onDisk, "SKILL.md's reference table must match references/ exactly");
 });
 
 test("every markdown link in the skill resolves from the file that contains it", () => {
-  const skillDir = path.join(PLUGIN_ROOT, "skills", "codex");
+  const skillDir = PLUGIN_ROOT;
   const files = [
     path.join(skillDir, "SKILL.md"),
     ...fs.readdirSync(path.join(skillDir, "references")).map((name) => path.join(skillDir, "references", name))

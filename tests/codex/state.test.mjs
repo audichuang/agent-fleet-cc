@@ -20,7 +20,7 @@ import {
   updateState,
   upsertJob,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 const DEAD_PID = 2147483646; // above PID_MAX on Linux/macOS — never a live process
 
@@ -76,14 +76,14 @@ test("applyJobPatchIfActive does not claim a terminal lock for a non-terminal (p
   );
 });
 
-test("resolveStateDir uses a temp-backed per-workspace directory when CLAUDE_PLUGIN_DATA is unset", () => {
+test("resolveStateDir uses a temp-backed per-workspace directory when CODEX_COMPANION_DATA is unset", () => {
   const workspace = makeTempDir();
   // This test asserts the temp-backed FALLBACK, which only applies when
-  // CLAUDE_PLUGIN_DATA is not set. A real plugin install (or a Claude Code
-  // session) sets CLAUDE_PLUGIN_DATA to a $HOME path, which would otherwise
+  // CODEX_COMPANION_DATA is not set. A real plugin install (or a Claude Code
+  // session) sets CODEX_COMPANION_DATA to a $HOME path, which would otherwise
   // make `startsWith(os.tmpdir())` fail — so control it here for determinism.
-  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-  delete process.env.CLAUDE_PLUGIN_DATA;
+  const previousPluginDataDir = process.env.CODEX_COMPANION_DATA;
+  delete process.env.CODEX_COMPANION_DATA;
 
   try {
     const stateDir = resolveStateDir(workspace);
@@ -93,18 +93,18 @@ test("resolveStateDir uses a temp-backed per-workspace directory when CLAUDE_PLU
     assert.match(stateDir, new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   } finally {
     if (previousPluginDataDir == null) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
+      delete process.env.CODEX_COMPANION_DATA;
     } else {
-      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+      process.env.CODEX_COMPANION_DATA = previousPluginDataDir;
     }
   }
 });
 
-test("resolveStateDir uses CLAUDE_PLUGIN_DATA when it is provided", () => {
+test("resolveStateDir uses CODEX_COMPANION_DATA when it is provided", () => {
   const workspace = makeTempDir();
   const pluginDataDir = makeTempDir();
-  const previousPluginDataDir = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  const previousPluginDataDir = process.env.CODEX_COMPANION_DATA;
+  process.env.CODEX_COMPANION_DATA = pluginDataDir;
 
   try {
     const stateDir = resolveStateDir(workspace);
@@ -117,9 +117,9 @@ test("resolveStateDir uses CLAUDE_PLUGIN_DATA when it is provided", () => {
     );
   } finally {
     if (previousPluginDataDir == null) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
+      delete process.env.CODEX_COMPANION_DATA;
     } else {
-      process.env.CLAUDE_PLUGIN_DATA = previousPluginDataDir;
+      process.env.CODEX_COMPANION_DATA = previousPluginDataDir;
     }
   }
 });

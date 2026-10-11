@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isProcessAlive, runCommand, terminateProcessTree } from "../../plugins/codex/scripts/lib/process.mjs";
+import { isProcessAlive, runCommand, terminateProcessTree } from "../../skills/codex/scripts/lib/process.mjs";
 
 test("runCommand never runs through a shell and forwards args as a literal array (no shell injection)", () => {
   // Regression for the Windows shell:true + array-args path that let a

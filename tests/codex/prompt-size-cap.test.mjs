@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { truncateToByteBudget } from "../../plugins/codex/scripts/lib/strings.mjs";
+import { truncateToByteBudget } from "../../skills/codex/scripts/lib/strings.mjs";
 import {
   buildAdversarialReviewPrompt,
   MAX_REVIEW_PROMPT_BYTES
-} from "../../plugins/codex/scripts/codex-companion.mjs";
+} from "../../skills/codex/scripts/codex-companion.mjs";
 
 const baseContext = (content) => ({
   target: { label: "working tree" },

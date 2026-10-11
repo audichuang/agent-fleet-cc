@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { SpawnedCodexAppServerClient } from "../../plugins/codex/scripts/lib/app-server.mjs";
+import { SpawnedCodexAppServerClient } from "../../skills/codex/scripts/lib/app-server.mjs";
 
 // On graceful shutdown the broker calls appClient.close(); on POSIX that used to
 // send a bare SIGTERM to the codex app-server pid only, orphaning its MCP/tool

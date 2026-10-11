@@ -1,6 +1,6 @@
 # imagine plugin ↔ agy `generate_image` — Contract & Sync Audit
 
-What `plugins/imagine`'s `--engine agy` path depends on, pinned to evidence, plus the recipe to
+What `skills/imagine/`'s `--engine agy` path depends on, pinned to evidence, plus the recipe to
 re-run every check. Update **this** file when you learn something about the surface — not the
 plugin's `AGENTS.md` (root `AGENTS.md`: engine knowledge lives in the audit doc).
 
@@ -119,7 +119,7 @@ Costs one render (only when you suspect the drop behaviour or the JSON shape cha
 ```bash
 cd "$(mktemp -d)"
 printf 'a plain red circle on a white background' > p.txt
-node <path-to-plugin>/scripts/imagine.mjs --engine agy --prompt-file p.txt --out "$PWD/probe.jpg"
+node <path-to-skill>/scripts/imagine.mjs --engine agy --prompt-file p.txt --out "$PWD/probe.jpg"
 file probe.jpg
 ls ~/.gemini/antigravity-cli/brain/*/ -t | head    # the tool's own drop, newest first
 ```

@@ -4,8 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { captureTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
-import { isHeartbeatProgressLine, readJobProgressPreview } from "../../plugins/codex/scripts/lib/job-control.mjs";
+import { captureTurn } from "../../skills/codex/scripts/lib/codex.mjs";
+import { isHeartbeatProgressLine, readJobProgressPreview } from "../../skills/codex/scripts/lib/job-control.mjs";
 
 // A live run (gpt-6.1-sol, 2026-10-06) wrote a `Token usage` and a `Rate limits` line on
 // every model call — every 5–30 s while a command ran — so the 4-line Progress preview

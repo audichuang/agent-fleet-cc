@@ -10,12 +10,12 @@ import {
   saveState,
   writeCompletionSignalFile,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 import {
   gatherObservation,
   runWatchdog,
   terminateHungJob
-} from "../../plugins/codex/scripts/codex-watchdog.mjs";
+} from "../../skills/codex/scripts/codex-watchdog.mjs";
 
 const CONFIG = { hangQuietMs: 900_000, hardQuietMs: 1_800_000 };
 

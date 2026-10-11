@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { stripAnsi } from "../../plugins/codex/scripts/lib/strings.mjs";
+import { stripAnsi } from "../../skills/codex/scripts/lib/strings.mjs";
 
 const ESC = "\u001b";
 const BEL = "\u0007";

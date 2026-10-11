@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
 import { run } from "./helpers.mjs";
-import { buildMainErrorEnvelope } from "../../plugins/codex/scripts/codex-companion.mjs";
+import { buildMainErrorEnvelope } from "../../skills/codex/scripts/codex-companion.mjs";
 
 const COMPANION = path.resolve(
-  fileURLToPath(new URL("../../plugins/codex/scripts/codex-companion.mjs", import.meta.url))
+  fileURLToPath(new URL("../../skills/codex/scripts/codex-companion.mjs", import.meta.url))
 );
 
 test("buildMainErrorEnvelope wraps an Error into a structured stdout envelope", () => {

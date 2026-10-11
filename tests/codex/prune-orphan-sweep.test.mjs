@@ -9,7 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { resolveJobLogFile, saveState } from "../../plugins/codex/scripts/lib/state.mjs";
+import { resolveJobLogFile, saveState } from "../../skills/codex/scripts/lib/state.mjs";
 
 const EMPTY_STATE = { version: 1, config: { stopReviewGate: false }, jobs: [] };
 

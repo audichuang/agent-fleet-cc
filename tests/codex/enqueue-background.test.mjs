@@ -3,9 +3,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { resolveJobDoneFile, resolveJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { readStoredJobWithRetry } from "../../plugins/codex/scripts/lib/job-control.mjs";
-import { enqueueBackgroundTask, spawnDetachedTaskWorker, spawnWatchdog } from "../../plugins/codex/scripts/codex-companion.mjs";
+import { resolveJobDoneFile, resolveJobFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { readStoredJobWithRetry } from "../../skills/codex/scripts/lib/job-control.mjs";
+import { enqueueBackgroundTask, spawnDetachedTaskWorker, spawnWatchdog } from "../../skills/codex/scripts/codex-companion.mjs";
 
 test("enqueueBackgroundTask exposes the signal file and launches the watchdog", () => {
   const workspace = makeTempDir();

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { captureTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
+import { captureTurn } from "../../skills/codex/scripts/lib/codex.mjs";
 
 // Codex's send_message_to_user_async / request_user_input_async tools emit an
 // agentMessage with phase "final_answer" AND delivery "async" while the turn keeps

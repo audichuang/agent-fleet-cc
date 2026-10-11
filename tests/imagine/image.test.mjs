@@ -11,7 +11,7 @@ import {
   outPathFor,
   main,
   ImageError,
-} from "../../plugins/imagine/scripts/imagine.mjs";
+} from "../../skills/imagine/scripts/imagine.mjs";
 
 const dir = () => mkdtempSync(path.join(tmpdir(), "imagine-"));
 

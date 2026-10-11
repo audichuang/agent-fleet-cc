@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { splitRawArgumentString } from "../../plugins/codex/scripts/lib/args.mjs";
+import { splitRawArgumentString } from "../../skills/codex/scripts/lib/args.mjs";
 
 test("splitRawArgumentString keeps backslashes literal inside single quotes (POSIX)", () => {
   // Single quotes preserve everything literally, including backslashes.

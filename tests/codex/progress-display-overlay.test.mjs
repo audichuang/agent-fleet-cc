@@ -7,9 +7,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { resolveStateDir, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { appendProgressEvent } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
-import { buildStatusSnapshot, resolveResultJob } from "../../plugins/codex/scripts/lib/job-control.mjs";
+import { resolveStateDir, writeJobFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { appendProgressEvent } from "../../skills/codex/scripts/lib/codex-progress.mjs";
+import { buildStatusSnapshot, resolveResultJob } from "../../skills/codex/scripts/lib/job-control.mjs";
 
 function seedRecord(workspace, id, overrides) {
   writeJobFile(workspace, id, {

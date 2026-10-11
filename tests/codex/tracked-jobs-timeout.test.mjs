@@ -3,9 +3,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { resolveJobFile, resolveStateDir } from "../../plugins/codex/scripts/lib/state.mjs";
-import { runTrackedJob, DEFAULT_JOB_TIMEOUT_MS } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
-import { appendProgressEvent } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
+import { resolveJobFile, resolveStateDir } from "../../skills/codex/scripts/lib/state.mjs";
+import { runTrackedJob, DEFAULT_JOB_TIMEOUT_MS } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
+import { appendProgressEvent } from "../../skills/codex/scripts/lib/codex-progress.mjs";
 
 test("the default background-job hard cap is three hours", () => {
   // A single task call can legitimately run many TDD cycles (npm/vitest/tsc) or

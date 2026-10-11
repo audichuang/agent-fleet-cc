@@ -8,12 +8,12 @@ import { fileURLToPath } from "node:url";
 
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
-import { rethrowUnlessEpipe } from "../../plugins/codex/scripts/codex-companion.mjs";
-import { resolveJobLogFile, saveState, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { appendLogLine } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { rethrowUnlessEpipe } from "../../skills/codex/scripts/codex-companion.mjs";
+import { resolveJobLogFile, saveState, writeJobFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { appendLogLine } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCRIPT = path.join(ROOT, "plugins", "codex", "scripts", "codex-companion.mjs");
+const SCRIPT = path.join(ROOT, "skills", "codex", "scripts", "codex-companion.mjs");
 
 function writeCompletedJob(workspace, jobId) {
   const logFile = resolveJobLogFile(workspace, jobId);

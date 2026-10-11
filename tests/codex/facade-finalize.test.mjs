@@ -24,7 +24,7 @@ import {
   resolveJobFile,
   resolveJobLockFile,
   writeJobFile,
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 const DEAD_PID = 2147483646; // above PID_MAX on Linux/macOS — never a live process
 

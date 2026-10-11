@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
 
-const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugins/codex/scripts/codex-companion.mjs");
+const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../skills/codex/scripts/codex-companion.mjs");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function brokersFor(repo) {

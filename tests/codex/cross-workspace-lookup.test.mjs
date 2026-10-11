@@ -4,14 +4,14 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { makeTempDir } from "./helpers.mjs"; // hermetic env isolation (sets CLAUDE_PLUGIN_DATA to a temp dir)
+import { makeTempDir } from "./helpers.mjs"; // hermetic env isolation (sets CODEX_COMPANION_DATA to a temp dir)
 import {
   collectCandidateStateRoots,
   findJobByIdAcrossWorkspaces
-} from "../../plugins/codex/scripts/lib/state.mjs";
-import { buildSingleJobSnapshot } from "../../plugins/codex/scripts/lib/job-control.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
+import { buildSingleJobSnapshot } from "../../skills/codex/scripts/lib/job-control.mjs";
 
-const STATE_ROOT = path.join(process.env.CLAUDE_PLUGIN_DATA, "state");
+const STATE_ROOT = path.join(process.env.CODEX_COMPANION_DATA, "state");
 
 function seedJobInWorkspaceDir(workspaceDirName, job) {
   const jobsDir = path.join(STATE_ROOT, workspaceDirName, "jobs");
@@ -35,7 +35,19 @@ test("the test harness redirects HOME so collectCandidateStateRoots never reads 
 test("collectCandidateStateRoots includes the configured plugin-data state root", () => {
   fs.mkdirSync(STATE_ROOT, { recursive: true });
   const roots = collectCandidateStateRoots("/some/cwd");
-  assert.ok(roots.includes(STATE_ROOT), "the active CLAUDE_PLUGIN_DATA/state root must be a candidate");
+  assert.ok(roots.includes(STATE_ROOT), "the active CODEX_COMPANION_DATA/state root must be a candidate");
+});
+
+test("collectCandidateStateRoots finds the retired plugin's data under ~/.claude and CLAUDE_CONFIG_DIR", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-legacy-home-"));
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-legacy-config-"));
+  const underHome = path.join(home, ".claude", "plugins", "data", "codex-agent-fleet", "state");
+  const underConfig = path.join(configDir, "plugins", "data", "codex-agent-fleet", "state");
+  fs.mkdirSync(underHome, { recursive: true });
+  fs.mkdirSync(underConfig, { recursive: true });
+  const roots = collectCandidateStateRoots("/some/cwd", { homedir: home, env: { CLAUDE_CONFIG_DIR: configDir } });
+  assert.ok(roots.includes(underHome), "~/.claude/plugins/data/codex-*/state must be a candidate");
+  assert.ok(roots.includes(underConfig), "$CLAUDE_CONFIG_DIR/plugins/data/codex-*/state must be a candidate");
 });
 
 test("findJobByIdAcrossWorkspaces finds a job stored under a sibling workspace state dir", () => {

@@ -12,4 +12,4 @@ coverage/
 .codegraph/
 *.tsbuildinfo
 output/
-plugins/codex/.generated/
+skills/codex/.generated/

@@ -1,6 +1,6 @@
 # imagine plugin ↔ xAI Image API — Contract & Sync Audit
 
-What `plugins/imagine` depends on, pinned to evidence, plus the recipe to re-run every check.
+What `skills/imagine/` depends on, pinned to evidence, plus the recipe to re-run every check.
 Update **this** file when you learn something about the surface — not the plugin's `AGENTS.md`
 (root `AGENTS.md`: engine knowledge lives in the audit doc).
 

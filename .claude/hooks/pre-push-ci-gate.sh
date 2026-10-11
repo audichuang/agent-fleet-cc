@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Pre-push CI gate (local, this machine only).
 #
-# Runs the two CI steps that `npm test` does NOT do — `build:codex` (a tsc
-# typecheck) and the `sync-shared` vendored-lib drift check — and blocks the
-# push (PreToolUse deny) if either fails, so a codex type error or vendored
-# drift can't redden CI *after* the push.
+# Runs the CI step that `npm test` does NOT do — `build:codex` (a tsc
+# typecheck) — and blocks the push (PreToolUse deny) if it fails, so a codex
+# type error can't redden CI *after* the push.
 #
 # Wired from .claude/settings.local.json, NOT the committed settings.json, on
 # purpose: build:codex's prebuild shells out to `codex app-server generate-ts`,
@@ -23,12 +22,6 @@ esac
 
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}" 2>/dev/null || exit 0
 
-# The vendored-runtime targets sync-shared regenerates. Scoped on purpose:
-# a whole-tree `git diff` would false-block on any unrelated uncommitted work.
-VENDORED=(
-  plugins/codex/scripts/lib/shared
-)
-
 deny() {
   # Static reason (no quotes/backslashes/newlines) → JSON-safe without jq.
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$1"
@@ -37,11 +30,6 @@ deny() {
 
 if ! npm run build:codex >/tmp/prepush-ci-gate.log 2>&1; then
   deny "Pre-push CI gate: build:codex (tsc) FAILED — CI would go red. Run npm run build:codex (log at /tmp/prepush-ci-gate.log), fix the type error, then push."
-fi
-
-npm run sync-shared >/tmp/prepush-ci-gate.log 2>&1
-if ! git diff --exit-code --quiet -- "${VENDORED[@]}"; then
-  deny "Pre-push CI gate: sync-shared drift — vendored copies were regenerated and differ from what is committed. Commit the regenerated plugins/*/scripts/lib/shared, then push."
 fi
 
 # Green: emit nothing, exit 0 → the push proceeds.

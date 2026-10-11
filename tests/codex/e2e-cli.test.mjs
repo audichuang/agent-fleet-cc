@@ -1,7 +1,7 @@
 // Black-box e2e: drives the REAL codex-companion.mjs CLI as a subprocess.
 // Covers the review-found wait/logs contract bugs (T1/T2/T7).
 
-import "./helpers.mjs"; // hermetic CLAUDE_PLUGIN_DATA/HOME isolation
+import "./helpers.mjs"; // hermetic CODEX_COMPANION_DATA/HOME isolation
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -9,11 +9,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolveJobLogFile, saveState, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { appendLogLine } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { resolveJobLogFile, saveState, writeJobFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { appendLogLine } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCRIPT = path.join(ROOT, "plugins/codex/scripts/codex-companion.mjs");
+const SCRIPT = path.join(ROOT, "skills/codex/scripts/codex-companion.mjs");
 
 function ws() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "codex-e2e-"));

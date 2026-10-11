@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { reapStaleBroker, sendBrokerShutdown, teardownBrokerSession } from "../../plugins/codex/scripts/lib/broker-lifecycle.mjs";
+import { reapStaleBroker, sendBrokerShutdown, teardownBrokerSession } from "../../skills/codex/scripts/lib/broker-lifecycle.mjs";
 
 test("reapStaleBroker escalates to SIGKILL when a broker ignores SIGTERM (identity confirmed)", async () => {
   const killed = [];

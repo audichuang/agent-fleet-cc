@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { shouldRefuseBrokerShutdown, wireAppServerDeathTeardown } from "../../plugins/codex/scripts/app-server-broker.mjs";
+import { shouldRefuseBrokerShutdown, wireAppServerDeathTeardown } from "../../skills/codex/scripts/app-server-broker.mjs";
 
 const me = Symbol("me");
 const other = Symbol("other");

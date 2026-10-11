@@ -15,10 +15,10 @@ import {
   saveState,
   writeCompletionSignalFile,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCRIPT = path.join(ROOT, "plugins", "codex", "scripts", "codex-companion.mjs");
+const SCRIPT = path.join(ROOT, "skills", "codex", "scripts", "codex-companion.mjs");
 
 const isAlive = (pid) => {
   try {

@@ -7,7 +7,7 @@ import {
   renderReviewResult,
   renderStoredJobResult,
   renderTaskResult
-} from "../../plugins/codex/scripts/lib/render.mjs";
+} from "../../skills/codex/scripts/lib/render.mjs";
 
 test("renderCancelReport confirms cancellation when the job was actually cancelled", () => {
   const out = renderCancelReport({ id: "job-y", status: "cancelled", title: "Investigate" });

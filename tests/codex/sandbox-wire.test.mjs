@@ -9,7 +9,7 @@ import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCRIPT = path.join(ROOT, "plugins/codex/scripts/codex-companion.mjs");
+const SCRIPT = path.join(ROOT, "skills/codex/scripts/codex-companion.mjs");
 
 function commitInitial(repo) {
   fs.writeFileSync(path.join(repo, "README.md"), "hello\n");

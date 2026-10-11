@@ -5,7 +5,7 @@ import {
   classifyLiveness,
   createLivenessGate,
   resolveWatchdogConfig
-} from "../../plugins/codex/scripts/lib/liveness.mjs";
+} from "../../skills/codex/scripts/lib/liveness.mjs";
 
 const THRESHOLDS = { hangQuietMs: 900_000, hardQuietMs: 1_800_000 };
 

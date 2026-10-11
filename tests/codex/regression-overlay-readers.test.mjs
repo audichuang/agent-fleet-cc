@@ -14,8 +14,8 @@ import {
   writeJobFile,
   resolveJobLogFile,
   findJobByIdAcrossWorkspaces,
-} from "../../plugins/codex/scripts/lib/state.mjs";
-import { handleAttach } from "../../plugins/codex/scripts/codex-companion.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
+import { handleAttach } from "../../skills/codex/scripts/codex-companion.mjs";
 
 // Seed the exact state the markRunning-vs-finalize window leaves behind: job.json
 // stale-"running" plus a COMPLETE terminal claim owned by a LIVE finalizer

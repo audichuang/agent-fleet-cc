@@ -3,8 +3,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { resolveJobDoneFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { runTrackedJob } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
+import { resolveJobDoneFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { runTrackedJob } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
 
 test("runTrackedJob writes a completed signal file on success", async () => {
   const workspace = makeTempDir();

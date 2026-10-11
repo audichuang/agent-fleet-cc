@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { AppServerClientBase } from "../../plugins/codex/scripts/lib/app-server.mjs";
+import { AppServerClientBase } from "../../skills/codex/scripts/lib/app-server.mjs";
 
 // C2: the app-server can send the CLIENT requests (approvals, requestUserInput, MCP
 // elicitation, auth-token refresh, …). This plugin cannot fulfil any of them, but a

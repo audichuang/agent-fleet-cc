@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 
 import { installFakeCodex } from "./fake-codex-fixture.mjs";
 import { makeTempDir } from "./helpers.mjs";
-import { BROKER_ENDPOINT_ENV } from "../../plugins/codex/scripts/lib/app-server.mjs";
-import { interruptAppServerTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
+import { BROKER_ENDPOINT_ENV } from "../../skills/codex/scripts/lib/app-server.mjs";
+import { interruptAppServerTurn } from "../../skills/codex/scripts/lib/codex.mjs";
 
 test("interruptAppServerTurn no-ops instead of spawning a throwaway app-server when no broker session is recorded", async () => {
   // The turn lives on the SHARED broker. Without a recorded session, connect's

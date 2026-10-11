@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { isSessionStale } from "../../plugins/codex/scripts/lib/broker-lifecycle.mjs";
+import { isSessionStale } from "../../skills/codex/scripts/lib/broker-lifecycle.mjs";
 
 // A broker that crashed can leave a reusable-looking session: its recorded pid is
 // dead but a stale unix socket may still ping. Reuse must be gated on the pid

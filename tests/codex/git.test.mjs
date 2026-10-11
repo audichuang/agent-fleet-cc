@@ -3,7 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "../../plugins/codex/scripts/lib/git.mjs";
+import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "../../skills/codex/scripts/lib/git.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 
 // D: a foreign GIT_DIR inherited in process.env would re-point EVERY git call (workspace /

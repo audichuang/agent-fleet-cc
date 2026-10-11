@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
 
-const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugins/codex/scripts/codex-companion.mjs");
+const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../skills/codex/scripts/codex-companion.mjs");
 
 // `adversarial-review --help` used to take "--help" as focus text and launch a real
 // review (and `task --help` a real task). With PATH emptied, a verb that tried to run

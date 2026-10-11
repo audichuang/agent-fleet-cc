@@ -18,13 +18,13 @@ import {
   jobDir,
   readJob,
   writeJob,
-} from "../../plugins/codex/scripts/lib/shared/core/state-store.mjs";
-import { appendEvent } from "../../plugins/codex/scripts/lib/shared/core/events.mjs";
-import { TERMINAL_STATUSES } from "../../plugins/codex/scripts/lib/shared/core/job.mjs";
+} from "../../skills/codex/scripts/lib/shared/core/state-store.mjs";
+import { appendEvent } from "../../skills/codex/scripts/lib/shared/core/events.mjs";
+import { TERMINAL_STATUSES } from "../../skills/codex/scripts/lib/shared/core/job.mjs";
 import {
   readCurrentTurnIdentity,
   resolveAuthoritativeStatus,
-} from "../../plugins/codex/scripts/lib/codex-progress.mjs";
+} from "../../skills/codex/scripts/lib/codex-progress.mjs";
 
 function seedJob(stateDir, id) {
   createJob(

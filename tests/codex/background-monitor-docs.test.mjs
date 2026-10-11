@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const PLUGIN_ROOT = path.join(ROOT, "plugins", "codex");
+const PLUGIN_ROOT = path.join(ROOT, "skills", "codex");
 
 function read(relativePath) {
   return fs.readFileSync(path.join(PLUGIN_ROOT, relativePath), "utf8");
@@ -16,7 +16,7 @@ function read(relativePath) {
 // stays silent. That command is gone. The skill is now the only place that
 // tells the host how to background a Codex run, so the pin lives here.
 test("the skill backgrounds through the companion's own --background flag", () => {
-  const skill = read("skills/codex/SKILL.md");
+  const skill = read("SKILL.md");
   assert.match(skill, /companion's own `--background`/);
   assert.match(skill, /ten minutes/i);
   assert.match(skill, /SIGTERM/);

@@ -4,9 +4,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { makeTempDir } from "./helpers.mjs";
-import { writeJobFile, saveState, resolveJobLogFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { appendLogLine, DEFAULT_JOB_TIMEOUT_MS, JOB_TIMEOUT_ENV } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
-import { streamJobLog, handleAttach, makeUtf8LogReader, defaultFollowMaxPolls } from "../../plugins/codex/scripts/codex-companion.mjs";
+import { writeJobFile, saveState, resolveJobLogFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { appendLogLine, DEFAULT_JOB_TIMEOUT_MS, JOB_TIMEOUT_ENV } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
+import { streamJobLog, handleAttach, makeUtf8LogReader, defaultFollowMaxPolls } from "../../skills/codex/scripts/codex-companion.mjs";
 
 test("streamJobLog writes new chunks until terminal, then flushes the tail and exits", async () => {
   const out = [];
@@ -93,7 +93,7 @@ test("streamJobLog resets the null-status run when a readable status reappears",
 });
 
 test("handleAttach observes the terminal status of a cross-workspace job via its physical state dir", async () => {
-  const stateRoot = path.join(process.env.CLAUDE_PLUGIN_DATA, "state");
+  const stateRoot = path.join(process.env.CODEX_COMPANION_DATA, "state");
   const physicalDir = path.join(stateRoot, "projF-1234567890abcdef"); // name != re-derived slug-hash
   const jobsDir = path.join(physicalDir, "jobs");
   const jobDir = path.join(jobsDir, "task-xross");

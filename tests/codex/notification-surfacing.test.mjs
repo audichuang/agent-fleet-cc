@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { captureTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
+import { captureTurn } from "../../skills/codex/scripts/lib/codex.mjs";
 
 // D: the app-server sends cost- and safety-relevant notifications that this client does
 // NOT opt out of (only the high-frequency token deltas are opted out) — yet

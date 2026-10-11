@@ -1,6 +1,6 @@
 # agent-fleet-cc
 
-A Claude Code plugin marketplace that turns Claude Code into a commander which
+An agent-skills repo that turns Claude Code (or another agent) into a commander which
 delegates work to other AI CLIs. This glossary pins the vocabulary for *how an
 engine advertises itself to the commander* — the distinction that decides
 whether Claude Code reaches for an engine on its own.
@@ -8,7 +8,7 @@ whether Claude Code reaches for an engine on its own.
 ## Language
 
 **Engine**:
-A delegatable AI CLI the marketplace wraps, shipped as a plugin under `plugins/<name>/`.
+A delegatable AI CLI this repo wraps, shipped as a skill directory `<name>/`.
 Today that is `codex` alone.
 _Avoid_: provider, model, tool.
 

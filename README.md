@@ -1,51 +1,52 @@
-# agent-fleet — Codex delegation and image generation for Claude Code
+# agent-fleet — Codex delegation and image generation, as agent skills
 
-Two Claude Code plugins, one marketplace:
+Two skills, each a self-contained directory (`SKILL.md` plus the scripts it runs):
 
-| Plugin | How Claude Code reaches it | What it does |
+| Skill | How an agent reaches it | What it does |
 |---|---|---|
-| `codex` | the `codex` skill (no slash commands): ask for a Codex review, check, diagnosis, implementation or image | Delegates to OpenAI Codex (app-server, or the Codex desktop app over IPC) |
-| `imagine` | the `imagine` skill: ask for an image (also `/imagine:imagine`) | The marketplace's only image entry point, on either of two engines: xAI Grok Imagine over `POST /v1/images/generations` (reuses the grok CLI's OAuth login read-only, or `XAI_API_KEY`), or `--engine agy` through Antigravity's built-in `generate_image` (the user's Google login, no API key). Not a delegation engine: the file on disk is the receipt |
+| `codex` | ask for a Codex review, check, diagnosis, implementation or image, or for Codex to operate a real UI in the Codex desktop app; `/codex` in Claude Code | Delegates to OpenAI Codex (app-server, or the Codex desktop app over IPC with computer use) and tracks the job |
+| `imagine` | ask for an image; `/imagine` in Claude Code | Generates one image on xAI Grok Imagine (`POST /v1/images/generations`, reusing the grok CLI's OAuth login read-only, or `XAI_API_KEY`) or, with `--engine agy`, Antigravity's built-in `generate_image` (the user's Google login, no API key). The file on disk is the receipt |
 
 ## Install
 
-```bash
-/plugin marketplace add audichuang/agent-fleet-cc
+From this repo, with the `skills` CLI or aghub:
 
-/plugin install codex@agent-fleet
-/plugin install imagine@agent-fleet
-/reload-plugins
+```bash
+npx skills add audichuang/agent-fleet-cc
+aghub-cli -g -a all source sync https://github.com/audichuang/agent-fleet-cc --skill codex,imagine --install-missing --yes
 ```
 
-Install only the ones you use. Per-plugin requirements (the codex CLI login; for imagine, a grok
-login, `XAI_API_KEY`, or the `agy` CLI) are documented under `plugins/<name>/`.
+Install only the ones you use. Requirements: Node ≥ 22; for codex, the `codex` CLI logged in (and
+the Codex desktop app for `--backend desktop`); for imagine, a grok login, `XAI_API_KEY`, or the
+`agy` CLI.
 
-## Migrating from the standalone repos
+## Migrating from the Claude Code plugins
 
-This repo supersedes `audichuang/codex-plugin-cc` and `audichuang/antigravity-plugin` (both
-archived). The antigravity, grok and cc plugins it once carried have since been retired; an
-installed copy keeps working but receives no updates — uninstall it with `/plugin uninstall`.
+`codex@agent-fleet` (≤ 2.0.1) and `imagine@agent-fleet` (≤ 0.3.0) were Claude Code plugins. They
+keep working but receive no updates. Remove them so the plugin and the skill don't both answer the
+same request:
+
+```bash
+/plugin uninstall codex@agent-fleet
+/plugin uninstall imagine@agent-fleet
+/plugin marketplace remove agent-fleet
+```
+
+Jobs the codex plugin recorded stay readable by id (`status`, `wait`, `result <job-id>`); new jobs
+live in `~/.local/state/codex-companion`.
 
 ## Development
 
 ```bash
-npm run verify         # the whole CI chain: check-version, sync-shared drift, npm test, build:codex
-npm test               # structure + shared + codex + imagine + e2e
-npm run test:codex     # one suite at a time (also test:imagine, test:shared, …)
-npm run test:e2e       # black-box CLI end-to-end regression for codex (real subprocess, fake engine, no API key)
-npm run sync-shared    # re-vendor shared/lib into plugins/codex/scripts/lib/shared/ (CI drift-checks this)
+npm run verify         # the whole CI chain: check-versions, npm test, build:codex
+npm test               # structure + codex + imagine + e2e
+npm run test:codex     # one suite at a time (also test:imagine, test:e2e)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)
 ```
 
 Run the suites on **Node 24**: the codex suite's unref'd-timer tests fail on 22.22–23.x, which is
 why CI pins 24 even though `engines` still allows `>=22.3`.
 
-Layout: `plugins/<name>/` is the exact install payload; `tests/<name>/` mirrors it with a hermetic
-suite (fake binaries, redirected `CLAUDE_PLUGIN_DATA`, no real network). Contributor rules — how
-to bump a version, what CI checks beyond `npm test`, which plugin may touch which — live in
-[`AGENTS.md`](AGENTS.md).
-
-**Shared state core:** `shared/lib/core/` is a zero-dependency job store — a directory-per-job
-state store with O_EXCL CAS terminal transitions, an event log, and dead-worker reconcile. `codex`
-drives its own app-server broker and keeps its jobs here; it carries a vendored copy under
-`scripts/lib/shared/`, kept in sync by `npm run sync-shared` and drift-checked in CI.
+Layout: `skills/<skill>/` is the exact install payload; `tests/<skill>/` mirrors it with a hermetic suite
+(fake binaries, redirected `CODEX_COMPANION_DATA` and `HOME`, no real network). Contributor rules
+live in [`AGENTS.md`](AGENTS.md); per-skill developer notes in `docs/<skill>-dev.md`.

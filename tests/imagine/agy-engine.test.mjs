@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { generateWithAgy, agyPrompt, resolveAgyBin, sniffMime, parseArgs, main, ImageError } from "../../plugins/imagine/scripts/imagine.mjs";
+import { generateWithAgy, agyPrompt, resolveAgyBin, sniffMime, parseArgs, main, ImageError } from "../../skills/imagine/scripts/imagine.mjs";
 
 // Deliberately NOT the "imagine-agy-" prefix the engine stages under — the cleanup test
 // counts those, and sharing the prefix would count the test's own scratch dirs.

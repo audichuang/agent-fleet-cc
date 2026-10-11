@@ -1,10 +1,10 @@
 # Codex Plugin ↔ Codex Desktop App — IPC Contract Audit
 
-Living record of what the **codex plugin's desktop backend** (`plugins/codex/scripts/lib/desktop-ipc.mjs`,
+Living record of what the **codex plugin's desktop backend** (`skills/codex/scripts/lib/desktop-ipc.mjs`,
 `runDesktopTurn` / `interruptDesktopTurn` in `lib/codex.mjs`) depends on in the **Codex desktop
 app's private IPC router**: what was verified, on which builds, by which evidence, and how to
 re-check after an app update. The *why* is in `docs/adr/0004-codex-desktop-backend-over-private-ipc.md`;
-the user-facing contract is `plugins/codex/skills/codex/references/desktop-backend.md`.
+the user-facing contract is `skills/codex/references/desktop-backend.md`.
 
 > Scope: the router protocol, the conversation-state shape the plugin reads, and the app
 > behaviours the design rests on. Not covered: app-server JSON-RPC (that is
@@ -40,7 +40,7 @@ after an app update with these steps:
    real Unix socket; it records every message on the wire).
 5. **Run the live smoke on each OS you ship to** (desktop app running, a throwaway cwd):
    ```bash
-   C=plugins/codex/scripts/codex-companion.mjs
+   C=skills/codex/scripts/codex-companion.mjs
    node $C setup | grep 'desktop app'                                     # reachable?
    node $C task --backend desktop --cwd "$TMP" --json "Do not read files. Run echo SMOKE once and reply with its output."
    node $C task --cwd "$TMP" --resume-last --json "Do not run commands. Repeat your last reply and add RESUME."   # auto → desktop

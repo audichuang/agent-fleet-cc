@@ -1,7 +1,7 @@
 ---
 name: e2e-testing
 description: >-
-  Complete end-to-end testing for the agent-fleet-cc plugin marketplace (codex). Use this whenever you need to verify engine
+  Complete end-to-end testing for the agent-fleet-cc skills repo (codex). Use this whenever you need to verify engine
   behavior end-to-end, run or write E2E tests, run the real-engine smoke check,
   confirm a control-plane fix actually works against the live CLIs, prove a test
   is a true regression, or answer "did you actually run it end-to-end?". Triggers
@@ -23,8 +23,8 @@ get right is to never conflate them, and to be explicit about which one you ran.
 
 | Layer | What it drives | Engine | Auth/network | Determinism | Where it runs |
 |---|---|---|---|---|---|
-| **Hermetic E2E** (`npm run test:e2e`) | the REAL plugin CLIs as subprocesses | **fake shim / seeded on-disk state** | none | deterministic | CI + `npm test` |
-| **Real-engine smoke** (manual gate) | the REAL plugin CLIs as subprocesses | **real codex + real model** | required | non-deterministic, costs money | local, by hand, pre-release |
+| **Hermetic E2E** (`npm run test:e2e`) | the REAL companion CLIs as subprocesses | **fake shim / seeded on-disk state** | none | deterministic | CI + `npm test` |
+| **Real-engine smoke** (manual gate) | the REAL companion CLIs as subprocesses | **real codex + real model** | required | non-deterministic, costs money | local, by hand, pre-release |
 
 Both are "end-to-end" at the **CLI/process boundary** (real `argv`, real spawn,
 real on-disk state machine). They differ only in whether a **live model engine**
@@ -43,7 +43,7 @@ npm run test:e2e     # the black-box e2e file (codex)
 npm test             # full chain; test:e2e is the last && leg, so it gates the build
 ```
 
-`test:e2e` runs `tests/codex/e2e-cli.test.mjs`. It spawns the real plugin CLI
+`test:e2e` runs `tests/codex/e2e-cli.test.mjs`. It spawns the real companion CLI
 (`codex-companion.mjs`) as a subprocess against an isolated workspace with
 fake/seeded state — the canonical template; read it before writing a new one.
 
@@ -89,11 +89,11 @@ silently breaks orchestrators that script `case $? in 2) ...`.
 Follow the shape in `tests/codex/e2e-cli.test.mjs`:
 
 1. **Isolated workspace per test** — `fs.mkdtempSync`; redirect the engine's data
-   dir env (`CLAUDE_PLUGIN_DATA`; `tests/codex/helpers.mjs` does it on import) so nothing leaks.
+   dir env (`CODEX_COMPANION_DATA`; `tests/codex/helpers.mjs` does it on import) so nothing leaks.
 2. **Drive the real CLI** via `spawnSync(process.execPath, [COMPANION, ...args])`
    — this exercises the genuine `argv`/entry path, not an in-process helper.
 3. **Seed state, not a live model** — either a fake engine shim
-   (`tests/codex/fake-codex-fixture.mjs`) or write `job.json` + log files directly with the plugin's
+   (`tests/codex/fake-codex-fixture.mjs`) or write `job.json` + log files directly with the skill's
    own state writers, so `wait`/`logs`/`cancel`/`status` have something to read.
 4. **Assert the contract** — exit codes (`res.status`) AND the `--json`
    projection a real orchestrator consumes (assert exactly one clean JSON line;
@@ -147,8 +147,8 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
   pgrep command, or `pgrep` then `kill` only PIDs whose `ps -o cmd=` is an actual
   `node …/_worker.mjs`, never a `/bin/bash -c`.
 
-- **Real smoke leaves harmless terminal job records** in the plugin-data state
-  dir (`~/.claude/plugins/data/codex-agent-fleet/state/`). They're inert; prune
+- **Real smoke leaves harmless terminal job records** in the companion data
+  dir (`~/.local/state/codex-companion/state/`). They're inert; prune
   the `real-*` slugs the smoke script created so the dir stays tidy.
 
 ## Reporting honestly
@@ -157,4 +157,4 @@ When you claim E2E verification, say which layer: "hermetic e2e suite
 (`npm run test:e2e`, fake engines)" or "real-engine smoke (live codex)".
 If you only ran the hermetic layer, say so — do not imply the live engines were
 exercised. The `IRONCLAD` rule in `AGENTS.md` still applies to any test edits:
-don't touch sibling plugins' files unless the change is genuinely cross-cutting.
+don't touch the sibling skill's files unless the change is genuinely cross-cutting.

@@ -2,7 +2,7 @@ import "./helpers.mjs"; // hermetic isolation: drops ambient CODEX_* (incl. CODE
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveSandboxMode } from "../../plugins/codex/scripts/lib/codex.mjs";
+import { resolveSandboxMode } from "../../skills/codex/scripts/lib/codex.mjs";
 
 function withEnv(value, fn) {
   const prev = process.env.CODEX_SANDBOX_MODE;

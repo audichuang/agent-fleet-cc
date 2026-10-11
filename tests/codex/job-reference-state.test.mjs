@@ -12,8 +12,8 @@ import { makeTempDir } from "./helpers.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
-import { resolveJobsDir, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
-import { readStoredJob, resolveCancelableJob, resolveResultJob } from "../../plugins/codex/scripts/lib/job-control.mjs";
+import { resolveJobsDir, writeJobFile } from "../../skills/codex/scripts/lib/state.mjs";
+import { readStoredJob, resolveCancelableJob, resolveResultJob } from "../../skills/codex/scripts/lib/job-control.mjs";
 
 function seedRecord(workspace, id, overrides) {
   writeJobFile(workspace, id, {

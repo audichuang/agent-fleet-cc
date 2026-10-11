@@ -12,7 +12,7 @@ import {
   resolveStateFile,
   saveState,
   writeCompletionSignalFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 test("resolveJobDoneFile points at <jobId>.done inside the jobs dir", () => {
   const workspace = makeTempDir();

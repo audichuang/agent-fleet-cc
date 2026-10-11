@@ -10,9 +10,9 @@ import {
   resolveStateFile,
   saveState,
   writeJobFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
-import { createJobProgressUpdater, createJobRecord, indexedTerminalStatus, readSessionId } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
-import { readCurrentTurnIdentity } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
+import { createJobProgressUpdater, createJobRecord, indexedTerminalStatus, readSessionId } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
+import { readCurrentTurnIdentity } from "../../skills/codex/scripts/lib/codex-progress.mjs";
 
 test("indexedTerminalStatus returns the index status only for terminal jobs", () => {
   const workspace = makeTempDir();

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createIdleTracker } from "../../plugins/codex/scripts/lib/idle-shutdown.mjs";
+import { createIdleTracker } from "../../skills/codex/scripts/lib/idle-shutdown.mjs";
 
 function fakeTimers() {
   let scheduled = null;

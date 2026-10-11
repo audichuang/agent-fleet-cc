@@ -6,7 +6,7 @@ import {
   captureTurn,
   extractTurnIdFromStartResponse,
   resolveFinalMessage
-} from "../../plugins/codex/scripts/lib/codex.mjs";
+} from "../../skills/codex/scripts/lib/codex.mjs";
 
 function makeFakeClient() {
   return {

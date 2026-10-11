@@ -10,9 +10,9 @@ import {
   writeJobFile,
   applyJobPatchIfActive,
   writeCompletionSignalFile
-} from "../../plugins/codex/scripts/lib/state.mjs";
-import { installJobCrashNet, runTrackedJob } from "../../plugins/codex/scripts/lib/tracked-jobs.mjs";
-import { appendProgressEvent } from "../../plugins/codex/scripts/lib/codex-progress.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
+import { installJobCrashNet, runTrackedJob } from "../../skills/codex/scripts/lib/tracked-jobs.mjs";
+import { appendProgressEvent } from "../../skills/codex/scripts/lib/codex-progress.mjs";
 
 // A worker process runs exactly one tracked job. While it is in flight, ANY
 // uncaught throw / unhandled rejection (e.g. a synchronous throw from a transport

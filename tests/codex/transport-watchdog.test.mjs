@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import "./helpers.mjs"; // hermetic env isolation (side-effect import)
-import { captureTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
+import { captureTurn } from "../../skills/codex/scripts/lib/codex.mjs";
 
 // captureTurn's transport watchdog is the backstop that turns a mid-turn app-server /
 // broker death (crash / OOM before turn/completed) into a PROMPT terminal state, so a

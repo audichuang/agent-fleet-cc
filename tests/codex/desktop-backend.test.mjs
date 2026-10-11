@@ -17,9 +17,9 @@ import {
   isThreadOwnedByDesktop,
   pressEnterInDesktopApp,
   resolveDesktopOpenEnv
-} from "../../plugins/codex/scripts/lib/desktop-ipc.mjs";
-import { interruptAppServerTurn, runDesktopTurn } from "../../plugins/codex/scripts/lib/codex.mjs";
-import { resolveNewThreadVia, resolveTaskBackend } from "../../plugins/codex/scripts/codex-companion.mjs";
+} from "../../skills/codex/scripts/lib/desktop-ipc.mjs";
+import { interruptAppServerTurn, runDesktopTurn } from "../../skills/codex/scripts/lib/codex.mjs";
+import { resolveNewThreadVia, resolveTaskBackend } from "../../skills/codex/scripts/codex-companion.mjs";
 
 // A stand-in for the Codex desktop app's IPC router + the window that owns a thread.
 // It speaks the real framing (u32 LE length + JSON) over a real Unix socket and records
@@ -679,7 +679,7 @@ test("when the Enter never lands, the run says so and points at the prefilled ch
 });
 
 test("the one Enter waits longer than a busy app took to open the chat", async () => {
-  const { NEW_CHAT_SETTLE_MS } = await import("../../plugins/codex/scripts/lib/codex.mjs");
+  const { NEW_CHAT_SETTLE_MS } = await import("../../skills/codex/scripts/lib/codex.mjs");
   assert.ok(NEW_CHAT_SETTLE_MS > 3_300, `settle ${NEW_CHAT_SETTLE_MS} ms must exceed the measured 3.3 s`);
 });
 

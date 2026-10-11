@@ -16,7 +16,7 @@ import {
   resolveJobFile,
   resolveJobLockFile,
   writeJobFile,
-} from "../../plugins/codex/scripts/lib/state.mjs";
+} from "../../skills/codex/scripts/lib/state.mjs";
 
 const DEAD_PID = 2147483646; // above PID_MAX — never a live process, so the claim is orphaned
 

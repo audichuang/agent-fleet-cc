@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import { makeTempDir } from "./helpers.mjs"; // hermetic env + fs isolation
-import { saveState, loadState, resolveJobFile, writeJobFile } from "../../plugins/codex/scripts/lib/state.mjs";
+import { saveState, loadState, resolveJobFile, writeJobFile } from "../../skills/codex/scripts/lib/state.mjs";
 
 // Regression (Codex deep-review BLOCKER): pruneJobs sorted by updatedAt and kept
 // only the newest MAX_JOBS, so a still-active (queued/running) job with a stale

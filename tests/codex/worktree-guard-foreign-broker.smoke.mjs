@@ -22,10 +22,10 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const WT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const COMPANION = path.join(WT_ROOT, "plugins/codex/scripts/codex-companion.mjs");
-const STATE_LIB = path.join(WT_ROOT, "plugins/codex/scripts/lib/state.mjs");
-const CODEX_LIB = path.join(WT_ROOT, "plugins/codex/scripts/lib/codex.mjs");
-const BROKER_LIFECYCLE_LIB = path.join(WT_ROOT, "plugins/codex/scripts/lib/broker-lifecycle.mjs");
+const COMPANION = path.join(WT_ROOT, "skills/codex/scripts/codex-companion.mjs");
+const STATE_LIB = path.join(WT_ROOT, "skills/codex/scripts/lib/state.mjs");
+const CODEX_LIB = path.join(WT_ROOT, "skills/codex/scripts/lib/codex.mjs");
+const BROKER_LIFECYCLE_LIB = path.join(WT_ROOT, "skills/codex/scripts/lib/broker-lifecycle.mjs");
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ function runCompanion(args, { cwd = process.cwd(), env = {} } = {}) {
     timeout: 60_000,
     env: {
       ...process.env,
-      CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-smoke-")),
+      CODEX_COMPANION_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-smoke-")),
       ...env
     }
   });
@@ -87,18 +87,18 @@ before(async () => {
 // ── utility: resolve broker state dir from broker.json ─────────────────────
 
 async function getBrokerSessionForCwd(pluginData, cwd) {
-  // loadBrokerSession reads CLAUDE_PLUGIN_DATA from process.env at import time
+  // loadBrokerSession reads CODEX_COMPANION_DATA from process.env at import time
   // so we redirect before the call.
-  const orig = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  const orig = process.env.CODEX_COMPANION_DATA;
+  process.env.CODEX_COMPANION_DATA = pluginData;
   try {
     const { loadBrokerSession } = await import(BROKER_LIFECYCLE_LIB);
     return loadBrokerSession(cwd);
   } finally {
     if (orig === undefined) {
-      delete process.env.CLAUDE_PLUGIN_DATA;
+      delete process.env.CODEX_COMPANION_DATA;
     } else {
-      process.env.CLAUDE_PLUGIN_DATA = orig;
+      process.env.CODEX_COMPANION_DATA = orig;
     }
   }
 }
@@ -137,7 +137,7 @@ test("smoke A — expected mode: gate drops foreign endpoint, broker session cre
       {
         cwd: B.dir,
         env: {
-          CLAUDE_PLUGIN_DATA: pluginData,
+          CODEX_COMPANION_DATA: pluginData,
           // Inject foreign endpoint — gate must clear this before connect
           CODEX_COMPANION_APP_SERVER_ENDPOINT: foreignEndpoint
         }
@@ -217,7 +217,7 @@ test("smoke B — contrast: without expected mode, foreign bogus endpoint causes
       {
         cwd: C.dir,
         env: {
-          CLAUDE_PLUGIN_DATA: pluginData,
+          CODEX_COMPANION_DATA: pluginData,
           CODEX_COMPANION_APP_SERVER_ENDPOINT: bogusEndpoint
         }
       }
@@ -253,7 +253,7 @@ test("smoke C — unit: assertWorktreeAlignment deletes CODEX_COMPANION_APP_SERV
   }
 
   const { assertWorktreeAlignment, BROKER_ENDPOINT_ENV } = await import(
-    path.join(WT_ROOT, "plugins/codex/scripts/lib/worktree-guard.mjs")
+    path.join(WT_ROOT, "skills/codex/scripts/lib/worktree-guard.mjs")
   );
 
   const repo = makeRepo("main");
