@@ -1,6 +1,6 @@
 ---
 name: imagine
-description: Generates a still image with xAI Grok Imagine (default) or Google Antigravity (agy) and returns the path of the file that actually landed on disk. Use whenever the user wants a picture MADE rather than found or edited — a poster, hero image, banner, thumbnail, album or book cover, product shot, portrait, mascot, avatar, icon, key visual, illustration, technical diagram, UI mockup, or plainly "a photo of X" — including a one-line idea they expect expanded, even if they never say "prompt". Also use to diagnose a render that came back generic, mushy, badly lit, or carrying invented text.
+description: Generates a still image with xAI Grok Imagine (default) or Google Antigravity (agy) and returns the path of the file that actually landed on disk. Use whenever the user wants a picture MADE rather than found or edited — posters, banners, thumbnails and other marketing visuals, product shots, covers, characters and mascots, avatars and icons, portraits, illustrations, illustrated diagrams, UI mockup images, or plainly a photo — including a one-line idea they expect expanded, even if they never say "prompt". Also use to diagnose a render that came back generic, mushy, badly lit, or carrying invented text.
 ---
 
 # Imagine
