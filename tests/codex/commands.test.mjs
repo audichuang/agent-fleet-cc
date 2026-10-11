@@ -47,7 +47,9 @@ test("the skill backgrounds long runs on the companion and names the ten-minute 
 
 test("app-server is spawned with image generation enabled", () => {
   const source = read("scripts/lib/app-server.mjs");
-  assert.match(source, /spawn\("codex", \["app-server", "--enable", "image_generation"\]/);
+  assert.match(source, /spawn\("codex", \["app-server", "-c", "features\.image_generation=true"\]/);
+  // `--enable` fails the whole spawn once the CLI no longer knows the key.
+  assert.doesNotMatch(source, /"--enable"/);
 });
 
 test("model guidance keeps the workhorse and does not route to sol or luna", () => {

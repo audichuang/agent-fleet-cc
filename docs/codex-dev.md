@@ -55,10 +55,18 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   result-handling 契約。description 常駐 host 的系統提示,body 每次使用都會載入,所以維持短(<80 行),
   細節放 `skills/codex/references/`,並在 SKILL.md 的表格裡掛一行 —— `tests/codex/commands.test.mjs`
   釘住「表格 ↔ references/ 完全對齊」,`tests/repo-structure.test.mjs` 釘住「只有一顆」。
-- **版本**在 `skills/codex/SKILL.md` frontmatter 的 `metadata.version`(app-server 的 clientInfo 也讀它),
-  CHANGELOG 最新一節要同號,`tests/versions.test.mjs` 檢查。
+- **沒有版本號、沒有 CHANGELOG**(2026-10-11 起):變更紀錄就是 commit 訊息。app-server 的 clientInfo
+  版本因此固定送 `"0.0.0"`。
 
 ## 踩雷
+- **`task` / review 的多餘位置參數就是 prompt / focus 文字,所以打錯的 option 曾經默默變成文字**:`task --backnd
+  desktop …` 照樣 exit 0 跑在 CLI(2026-10-11 實測)。`rejectMistypedOptions` 現在擋下「自成一個 argv」或「單一原始
+  字串裡出現在任何文字之前」的未知 option,並用編輯距離猜正確名稱;一整串引號 prompt 裡夾的 `--verbose` 仍是文字,
+  `--` 之後與 `--prompt-file` 不受影響。`tests/codex/mistyped-option.test.mjs`。
+  **刻意沒有 `--prompt <text>`**:加過一版,第二輪 review 找到兩個洞 —— `parseArgs` 的 `split("=", 2)` 截掉
+  `--prompt=a=b` 的後半,單一原始字串裡提到 `--prompt` 的 prompt 被當成第二個來源。打 `--prompt` 現在報錯並指向 `--prompt-file`。
+- **app-server 用 `-c features.image_generation=true` 開圖像生成,別改回 `--enable`。** `--enable` 會驗證 key,
+  CLI 不認得就 exit 1(`Unknown feature flag`),上游哪天退役這個 key,每次 spawn 都會死;`-c` 只送 `configWarning`。
 - **桌面版只接得手「已有 turn」的 thread。** 只做 `thread/start` 的 thread 進了 state DB,但 app 不肯載入
   (2026-10-03 實測)。所以新的 desktop task 先在**一次性**(`disableBroker`)app-server 跑一輪 bootstrap;
   走共用 broker 的話 broker 的 app-server 會一直握著 thread 的單一寫入鎖,app 開不了它。

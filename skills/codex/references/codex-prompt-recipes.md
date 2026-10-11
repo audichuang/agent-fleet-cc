@@ -14,6 +14,7 @@ the files itself. Trim any section a task does not need.
 - [Research / grounded answer](#research--grounded-answer)
 - [Rewrite / content](#rewrite--content)
 - [Agentic / tool-heavy](#agentic--tool-heavy)
+- [Real-UI round](#real-ui-round)
 
 ## Diagnosis
 
@@ -165,4 +166,37 @@ update acknowledging the request and stating your first step.
 Resolve the request in the fewest useful tool loops, but do not let loop
 minimization outrank correctness. If a required input is missing, finish what does
 not depend on it, then end with the question as your final answer. Do not fabricate.
+```
+
+## Real-UI round
+
+Runs with `--backend desktop` (`desktop-backend.md`, A real-UI round). Computer use only takes
+the UI actions this prompt names, so the authorized list is not optional.
+
+```text
+# Goal
+Check <app or page> on this machine by hand, following the protocol in
+`/absolute/path/to/protocol.md`, at commit <sha> (already checked out in <path>).
+
+# What to operate
+<the app, how it is launched, the window or URL, test account if any>
+
+# Authorized UI actions
+You may, without asking: <change the theme / app settings X, delete test data under Y,
+log in as Z, accept the OS permission prompt for W>. Anything outside this list that needs
+confirmation: mark the item not-run with the reason and move on.
+
+# Results
+- Write each item's verdict to `/absolute/path/to/results.json` as you go, and a summary to
+  `/absolute/path/to/report.md` at the end.
+- Verdicts: pass, fail (what you saw vs. what the protocol expects, with a screenshot path),
+  or not-run (why: a tool limit, a missing precondition, an unauthorized action).
+- Never mark an item pass that you could not observe.
+
+# Constraints
+- Do not edit product code or the user's real settings beyond the authorized list.
+- If the app crashes or the environment breaks, record it, restore what you can, and continue.
+
+# Stop rules
+Stop when every protocol item has a verdict, then reply with the summary and the report paths.
 ```

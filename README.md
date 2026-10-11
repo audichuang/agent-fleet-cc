@@ -38,7 +38,7 @@ live in `~/.local/state/codex-companion`.
 ## Development
 
 ```bash
-npm run verify         # the whole CI chain: check-versions, npm test, build:codex
+npm run verify         # the whole CI chain: npm test, build:codex
 npm test               # structure + codex + imagine + e2e
 npm run test:codex     # one suite at a time (also test:imagine, test:e2e)
 npm run build:codex    # typecheck the codex app-server glue (needs the codex CLI)

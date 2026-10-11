@@ -21,11 +21,11 @@ memory — that helps one session on one machine, and users never see it.
 When working on one skill, do **NOT** modify the other skill or its tests
 (anything under another `skills/<name>/` or `tests/<name>/`).
 When **adding** a skill, the only existing files you may edit are:
-`tests/repo-structure.test.mjs` and `tests/versions.test.mjs` (the shipped set),
+`tests/repo-structure.test.mjs` (the shipped set),
 `package.json` (add a `test:<skill>` script) and `README.md`.
 
 ## Commands
-- `npm run verify` — **the whole CI chain in one command** (`check-versions`, `npm test`,
+- `npm run verify` — **the whole CI chain in one command** (`npm test`,
   `build:codex`). Run this before a push; `npm test` alone is not the chain — it skips the `tsc`
   typecheck. Needs the codex CLI on PATH (for `build:codex`'s prebuild).
 - **Read `verify`'s exit code, never its tail.** `npm run verify | tail -n` reports *tail's*
@@ -37,12 +37,9 @@ When **adding** a skill, the only existing files you may edit are:
   pins 24 for this reason — see `.github/workflows/ci.yml`).
 - One skill's suite: `node --test tests/<skill>/*.test.mjs`. The hermetic-vs-real-engine split is the `e2e-testing`
   skill's job — ask it before claiming anything was verified end-to-end.
-- **Any content change to a shipped skill needs a version bump — prose-only counts.** The version
-  is `metadata.version` in the skill's `SKILL.md` frontmatter, and its `CHANGELOG.md` gets a new
-  top entry with the same number (`tests/versions.test.mjs` checks the pair). Same version with
-  different content means nobody can tell an installed copy is stale. `fleet` once sat four
-  content commits past its last bump and kept routing image generation to a verb `antigravity`
-  had already retired. Dev notes, tests and `docs/` are not payload: no bump.
+- **Skills ship unversioned: no `metadata.version`, no `CHANGELOG.md`.** The commit message is the
+  change record, so write it for someone reading `git log -- skills/<name>/` to learn what changed
+  for users (behaviour, routing, what an agent should now do differently), not just which files moved.
 
 ## Conventions
 - New scripts: zero-dependency, pure ESM `.mjs`. Tests use only `node:test` +
@@ -86,7 +83,7 @@ When **adding** a skill, the only existing files you may edit are:
 
 ## Autonomy & approval boundaries
 - **Do without asking:** read/search the repo; run tests (`npm test`, per-skill suites,
-  the hermetic e2e — all offline, no API key); `build:codex` / `check-versions`; create a branch
+  the hermetic e2e — all offline, no API key); `build:codex`; create a branch
   and commit to it; edit files inside the current work-stream's scope.
 - **Confirm first** (outward, destructive, or scope-expanding):
   - **`git push`** to any remote — outward and effectively permanent; confirm every time.

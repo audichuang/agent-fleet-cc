@@ -17,11 +17,6 @@ import { ensureBrokerSession, loadBrokerSession } from "./broker-lifecycle.mjs";
 import { terminateProcessTree } from "./process.mjs";
 import { stripAnsi } from "./strings.mjs";
 
-// The skill's version lives in its SKILL.md frontmatter (metadata.version), the one file every
-// installer copies; there is no separate manifest to drift from it.
-const SKILL_MD_URL = new URL("../../SKILL.md", import.meta.url);
-export const SKILL_VERSION = /^\s+version:\s*"?([\w.+-]+)"?\s*$/m.exec(fs.readFileSync(SKILL_MD_URL, "utf8"))?.[1];
-
 export const BROKER_ENDPOINT_ENV = "CODEX_COMPANION_APP_SERVER_ENDPOINT";
 export const BROKER_BUSY_RPC_CODE = -32001;
 
@@ -29,7 +24,8 @@ export const BROKER_BUSY_RPC_CODE = -32001;
 const DEFAULT_CLIENT_INFO = {
   title: "Codex Plugin",
   name: "Claude Code",
-  version: SKILL_VERSION ?? "0.0.0"
+  // The skill ships unversioned (git history is the record); the protocol still wants a string.
+  version: "0.0.0"
 };
 
 /** @type {InitializeCapabilities} */
@@ -323,9 +319,11 @@ export class SpawnedCodexAppServerClient extends AppServerClientBase {
   }
 
   async initialize() {
-    // image_generation is stable-on in current catalogs, and off in some configs.
-    // --enable forces the tool on for this process so a generated file can come back.
-    this.proc = spawn("codex", ["app-server", "--enable", "image_generation"], {
+    // image_generation is stable-on in current catalogs, and off in some configs, so force it
+    // on for this process so a generated file can come back. Through `-c`, not `--enable`:
+    // `--enable` exits 1 on a key the CLI does not know ("Unknown feature flag"), so a CLI
+    // that retires the key would fail every run; `-c features.<key>` only warns.
+    this.proc = spawn("codex", ["app-server", "-c", "features.image_generation=true"], {
       cwd: this.cwd,
       env: this.options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],

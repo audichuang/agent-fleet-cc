@@ -47,6 +47,30 @@ companion's `Thread ready` (CLI) or `Attaching to thread` (desktop) progress lin
 - **The thread works in the launch checkout as it is.** The companion does not fetch or make a
   worktree. Fetch any commit the prompt names before launching, or Codex's `git show` fails.
 
+## A real-UI round
+
+A round that checks an app by hand from a protocol doc (a scorecard, a cell grid, "QA every
+tab") is the longest desktop run there is, and the user's own screen is its test rig.
+
+Before the launch:
+
+- **Fetch** every commit the round names and check it out where the app will run.
+- **Write the prompt from the recipe** (`codex-prompt-recipes.md`, Real-UI round): what to
+  operate, the doc to follow, where to write results, the not-run rule, and every UI action
+  the round needs authorized, in the prompt itself.
+- **Serve local pages over HTTP.** The app's browser opens only `http(s)://` URLs and refuses
+  `file://`, so a page in the checkout needs a local server first (`python3 -m http.server
+  <port>` in its directory, say); give Codex the `http://localhost:<port>/…` URL and stop the
+  server after the round.
+- **Set the cap.** A full round can take hours; put `CODEX_JOB_TIMEOUT_MS=<ms>` in front of
+  the launch line with room to spare.
+- **Tell the user what not to touch while it runs.** The round shares their screen, keyboard
+  focus and clipboard. Copying, a host command that writes the clipboard (an export, say),
+  and switching or resizing the app under test can each spoil a cell. Hold your own clipboard-writing or window-moving commands too.
+
+Launch once with `--backend desktop`, then follow it with the `wait` loop in `SKILL.md`. A
+round that "finishes" in minutes has usually stopped on a confirmation question (next section).
+
 ## Computer-use confirmations
 
 Full access covers files and commands, not UI actions. On the models that carry one (the
@@ -75,6 +99,7 @@ them to do the step themselves, they do it in the app first. Then continue the s
 | `version mismatch` | The installed app speaks a different IPC version than this skill. | Use `--backend cli` and report it; the skill needs an update for that app build. |
 | `did not load thread` | The app never took the thread, usually because a CLI process still holds it. | Wait for that run to end, then retry. |
 | `no new thread appeared` / `Could not press Enter` | With `--new-thread-via app`, the prompt was filled in but the companion could not confirm it was sent (focus moved, no Accessibility permission, no X11, or the thread was slow to appear). | The user checks the app: sends the prompt if it is still in the composer, or follows the run if it started. Do not rerun before that; a sent prompt would run twice. |
+| `file://` blocked, only HTTP(S) allowed | The app's browser refused a local file URL. The turn ended without opening the page. | Serve the file over HTTP (above) and continue the same thread with `--thread <id>`. |
 | `already running a turn` | The thread is busy in the app. | Wait, or let the user stop it in the app. |
 
 Report the failure as printed. Do not rerun the prompt on the CLI on your own: the user chose

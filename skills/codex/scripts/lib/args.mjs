@@ -10,6 +10,10 @@ export function parseArgs(argv, config = {}) {
   let helpRequested = false;
   // ...and whether it came before any prompt text, for callers that split one raw string.
   let helpBeforeText = false;
+  // Option-shaped tokens no option claimed. They stay positionals (a prompt may carry them),
+  // and the caller decides whether they were meant as options: `beforeText` says whether
+  // any prompt text came first.
+  const unknownOptions = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -55,6 +59,7 @@ export function parseArgs(argv, config = {}) {
         continue;
       }
 
+      unknownOptions.push({ token, beforeText: positionals.length === 0 });
       positionals.push(token);
       continue;
     }
@@ -77,10 +82,11 @@ export function parseArgs(argv, config = {}) {
       continue;
     }
 
+    unknownOptions.push({ token, beforeText: positionals.length === 0 });
     positionals.push(token);
   }
 
-  return { options, positionals, helpRequested, helpBeforeText };
+  return { options, positionals, helpRequested, helpBeforeText, unknownOptions };
 }
 
 export function splitRawArgumentString(raw) {
