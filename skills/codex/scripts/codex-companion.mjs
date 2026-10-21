@@ -110,7 +110,7 @@ function printUsage() {
       "Usage:",
       "  node scripts/codex-companion.mjs setup [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--json] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>]",
-      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--json] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>] [focus text]",
+      "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--json] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model>] [--effort <level>] [--focus-file <path> | focus text]",
       "  node scripts/codex-companion.mjs task [--background] [--json] [--write] [--resume-last|--resume|--fresh|--thread <id>] [--backend <auto|cli|desktop>] [--new-thread-via <cli|app>] [--model <model>] [--effort <level>] [--prompt-file <path> | prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
@@ -204,8 +204,8 @@ function parseCommandInput(argv, config = {}) {
 // desktop …` ran on the CLI, with no computer use and no warning. A token that is its own
 // argument, or one a raw string carries before any prompt text, was meant as an option.
 // One raw string ("why does foo --verbose crash") still keeps an inline flag as text, and
-// `--` or --prompt-file pass any text through.
-function rejectMistypedOptions(verb, parsed) {
+// `--` or the verb's text-file option (--prompt-file, --focus-file) pass any text through.
+function rejectMistypedOptions(verb, parsed, textFile = null) {
   const suspect = parsed.unknownOptions.find(({ token, beforeText }) =>
     /^-+[A-Za-z]/.test(token) && (!parsed.fromRawString || beforeText)
   );
@@ -216,11 +216,10 @@ function rejectMistypedOptions(verb, parsed) {
   const guess =
     parsed.knownOptions.find((option) => editDistance(option, key) <= 2) ??
     parsed.knownOptions.find((option) => key.length >= 3 && (option.startsWith(key) || key.startsWith(option)));
-  const hint = guess ? ` Did you mean \`--${guess}\`?` : "";
-  throw new Error(
-    `\`${verb}\` has no option \`${suspect.token}\`.${hint} Run \`${verb} --help\` for its options. ` +
-      "Text that has to start with a dash goes after `--` or in --prompt-file."
-  );
+  const fileGuess = guess ?? (key.endsWith("-file") ? textFile : null);
+  const hint = fileGuess ? ` Did you mean \`--${fileGuess}\`?` : "";
+  const textNote = textFile ? ` Text that has to start with a dash goes after \`--\` or in --${textFile}.` : "";
+  throw new Error(`\`${verb}\` has no option \`${suspect.token}\`.${hint} Run \`${verb} --help\` for its options.${textNote}`);
 }
 
 function editDistance(a, b) {
@@ -696,7 +695,7 @@ async function executeTaskRun(request) {
       excludeJobId: request.jobId
     });
     if (!latestThread) {
-      throw new Error("No previous Codex task thread was found for this repository.");
+      throw new Error(NO_TASK_THREAD_MESSAGE);
     }
     resumeThreadId = latestThread.id;
   }
@@ -895,6 +894,11 @@ export async function resolveTaskBackend(requested, threadId, deps = {}) {
   return threadId && (await (deps.isThreadOwnedByDesktop ?? isThreadOwnedByDesktop)(threadId)) ? "desktop" : "cli";
 }
 
+// Review threads are ephemeral, so a follow-up on review findings has nothing to resume.
+const NO_TASK_THREAD_MESSAGE =
+  "No previous Codex task thread was found for this repository. A review leaves no thread to resume: " +
+  "start a fresh `task` whose prompt restates the findings to act on.";
+
 function readTaskPrompt(cwd, options, positionals) {
   if (options["prompt-file"]) {
     return fs.readFileSync(path.resolve(cwd, options["prompt-file"]), "utf8");
@@ -902,6 +906,25 @@ function readTaskPrompt(cwd, options, positionals) {
 
   const positionalPrompt = positionals.join(" ");
   return positionalPrompt || readStdinIfPiped();
+}
+
+// Focus text is often a paragraph full of code spans; a file keeps the shell out of it.
+function readReviewFocus(cwd, options, positionals) {
+  const inline = positionals.join(" ").trim();
+  if (options["focus-file"] === undefined) {
+    return inline;
+  }
+  if (!String(options["focus-file"]).trim()) {
+    throw new Error("--focus-file needs a path (an unset variable leaves it empty).");
+  }
+  if (inline) {
+    throw new Error("Pass either --focus-file or inline focus text, not both.");
+  }
+  const focus = fs.readFileSync(path.resolve(cwd, options["focus-file"]), "utf8").trim();
+  if (!focus) {
+    throw new Error(`--focus-file ${options["focus-file"]} is empty: write the focus into it, or drop the flag.`);
+  }
+  return focus;
 }
 
 function requireTaskRequest(prompt, resumeLast) {
@@ -1071,20 +1094,24 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
 
 async function handleReviewCommand(argv, config) {
   const parsed = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "effort", "cwd", "expected-worktree", "expected-branch", "expected-base"],
+    valueOptions: [
+      "base", "scope", "model", "effort", "cwd", "expected-worktree", "expected-branch", "expected-base",
+      // The built-in review takes no focus, so only adversarial-review reads one from a file.
+      ...(config.textFile ? [config.textFile] : [])
+    ],
     booleanOptions: ["json", "background", "wait"],
     aliasMap: {
       m: "model"
     }
   });
-  rejectMistypedOptions(config.reviewName === "Review" ? "review" : "adversarial-review", parsed);
+  rejectMistypedOptions(config.verb, parsed, config.textFile);
   const { options, positionals } = parsed;
 
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const expected = parseExpectedTriplet(options);
   assertWorktreeAlignment({ cwd, expected });
-  const focusText = positionals.join(" ").trim();
+  const focusText = readReviewFocus(cwd, options, positionals);
   const target = resolveReviewTarget(cwd, {
     base: options.base,
     scope: options.scope
@@ -1136,6 +1163,7 @@ async function handleReviewCommand(argv, config) {
 
 async function handleReview(argv) {
   return handleReviewCommand(argv, {
+    verb: "review",
     reviewName: "Review",
     validateRequest: validateNativeReviewRequest
   });
@@ -1152,7 +1180,7 @@ async function handleTask(argv) {
       m: "model"
     }
   });
-  rejectMistypedOptions("task", parsed);
+  rejectMistypedOptions("task", parsed, "prompt-file");
   const { options, positionals } = parsed;
 
   const cwd = resolveCommandCwd(options);
@@ -1184,7 +1212,7 @@ async function handleTask(argv) {
   // job's backend field that cancel/watchdog read) is fixed before the job exists.
   const threadId = explicitThread ?? (resumeLast ? (await resolveLatestTrackedTaskThread(workspaceRoot))?.id ?? null : null);
   if (resumeLast && !threadId) {
-    throw new Error("No previous Codex task thread was found for this repository.");
+    throw new Error(NO_TASK_THREAD_MESSAGE);
   }
   const backend = await resolveTaskBackend(options.backend, threadId);
   const newThreadVia = resolveNewThreadVia(options["new-thread-via"]);
@@ -1726,7 +1754,9 @@ async function main() {
         break;
       case "adversarial-review":
         await handleReviewCommand(argv, {
-          reviewName: "Adversarial Review"
+          verb: "adversarial-review",
+          reviewName: "Adversarial Review",
+          textFile: "focus-file"
         });
         break;
       case "task":

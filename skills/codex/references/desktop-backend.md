@@ -6,6 +6,15 @@ the turn runs inside the user's Codex desktop app instead (ChatGPT.app on macOS,
 (`$CODEX_HOME/ipc/ipc.sock`) and follows the thread live, so the job record, `status`,
 `wait`, `logs`, `result` and `cancel` behave as they do for a CLI run.
 
+## Contents
+
+- [When it is the right backend](#when-it-is-the-right-backend)
+- [What happens on the user's machine](#what-happens-on-the-users-machine)
+- [A real-UI round](#a-real-ui-round)
+- [Computer-use confirmations](#computer-use-confirmations)
+- [Failures and what to tell the user](#failures-and-what-to-tell-the-user)
+- [Limits](#limits)
+
 ## When it is the right backend
 
 | The user wants… | Run |
@@ -115,4 +124,10 @@ the app for what only the app can do.
 - `--new-thread-via app` is the exception: the app starts that first turn itself, with the
   permissions selected in the app. Set full access there before the run if the task writes
   outside the project or uses the network (ssh, installs).
+- On Linux under GNOME, computer use may fail to capture or target windows ("could not target the
+  window", "could not capture or target GNOME"); Codex then drives the app another way (CDP,
+  X11 clicks) and says so in its report. Give the app's window a unique title before the round,
+  and read the report's method notes before accepting UI results.
+- `rejected: rm -f style commands are not permitted` in the log is Codex's own command guard,
+  not a sandbox block: Codex works around it, and it is not a failure to report.
 - Anything running as the user can talk to that socket.

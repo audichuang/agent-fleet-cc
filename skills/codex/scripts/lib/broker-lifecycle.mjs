@@ -247,6 +247,13 @@ export function isSessionStale(session, options = {}) {
   return !aliveCheck(pid);
 }
 
+// The recorded session, unless its broker pid is provably dead. A dead broker's
+// broker.json outlives it, and reading it as live sent setup to a vanished socket.
+export function loadLiveBrokerSession(cwd) {
+  const session = loadBrokerSession(cwd);
+  return session && !isSessionStale(session) ? session : null;
+}
+
 export async function ensureBrokerSession(cwd, options = {}) {
   const existing = loadBrokerSession(cwd);
   if (

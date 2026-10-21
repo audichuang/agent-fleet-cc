@@ -38,6 +38,11 @@ test("the skill backgrounds long runs on the companion and names the ten-minute 
   assert.match(skill, /ten minutes/i);
   assert.match(skill, /SIGTERM/);
   assert.match(skill, /run `status`/i);
+  // The skill used to say the killed run's "record is already on disk" and not to treat it
+  // as failed. The SIGTERM handler finalizes it as failed and the work is gone (aghub,
+  // 2026-10-08: two reviews killed at 9m50s after 8.4M tokens).
+  assert.doesNotMatch(skill, /record is already on disk/);
+  assert.match(skill, /recorded as failed and its answer is lost/);
   // A Monitor wait left at its five-minute default dies while the job succeeds.
   // The skill must not grow that recipe unless it also requires persistent: true.
   if (/Monitor/.test(skill)) {

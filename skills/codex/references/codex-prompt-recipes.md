@@ -10,6 +10,7 @@ the files itself. Trim any section a task does not need.
 - [Diagnosis](#diagnosis)
 - [Narrow Fix](#narrow-fix)
 - [Code review](#code-review)
+- [Re-review after fixes](#re-review-after-fixes)
 - [Document / design analysis](#document--design-analysis)
 - [Research / grounded answer](#research--grounded-answer)
 - [Rewrite / content](#rewrite--content)
@@ -85,6 +86,29 @@ unless the main logic can't be judged without them.
 # Files to read (absolute paths)
 - `/absolute/path/to/File.ext`
 Read each file yourself. Do NOT ask me to paste code.
+```
+
+## Re-review after fixes
+
+The focus text of an `adversarial-review` on a change that has already had rounds (pass it with
+`--focus-file`). An open "find what is wrong" focus finds one new issue per round on the same
+change: one session ran 13 rounds that way, one new reader of the same lock entry each time, and
+it converged in the round its prompt named the invariant and asked for every site to be checked.
+The review still answers in its JSON shape (findings plus a summary), so ask for the
+enumeration to land there.
+
+```text
+# Invariant
+<the one property the earlier findings were all instances of, e.g. "every reader of the
+lock entry treats a missing owner as unlocked">
+
+# Already fixed (do not re-report unless the fix itself is wrong)
+- <round N finding, file:line, how it was fixed>
+
+# Task
+Check EVERY site in this diff and its callers where the invariant must hold. Report one
+finding per site that violates it, plus anything the fixes above broke. In the summary, list
+every site you checked (file:line) and whether it holds, so a clean site is visible too.
 ```
 
 ## Document / design analysis
@@ -179,7 +203,8 @@ Check <app or page> on this machine by hand, following the protocol in
 `/absolute/path/to/protocol.md`, at commit <sha> (already checked out in <path>).
 
 # What to operate
-<the app, how it is launched, the window or URL, test account if any>
+<the app by its full path when several builds share a bundle id, how it is launched, the
+window or URL, test account if any>
 
 # Authorized UI actions
 You may, without asking: <change the theme / app settings X, delete test data under Y,
@@ -196,6 +221,9 @@ confirmation: mark the item not-run with the reason and move on.
 # Constraints
 - Do not edit product code or the user's real settings beyond the authorized list.
 - If the app crashes or the environment breaks, record it, restore what you can, and continue.
+- A second app that will not attach after two tries: mark its items not-run with the exact
+  error and carry on with the rest.
+- Do not write to memory or knowledge stores during the round; the report is the output.
 
 # Stop rules
 Stop when every protocol item has a verdict, then reply with the summary and the report paths.

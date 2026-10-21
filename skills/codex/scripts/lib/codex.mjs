@@ -39,7 +39,7 @@
  */
 import { readJsonFile } from "./fs.mjs";
 import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from "./app-server.mjs";
-import { loadBrokerSession } from "./broker-lifecycle.mjs";
+import { loadLiveBrokerSession } from "./broker-lifecycle.mjs";
 import {
   DesktopIpcClient,
   DesktopThread,
@@ -1153,7 +1153,10 @@ async function withAppServer(cwd, fn, connectOptions = {}) {
     await client.close();
     return result;
   } catch (error) {
-    const brokerRequested = client?.transport === "broker" || Boolean(process.env[BROKER_ENDPOINT_ENV]);
+    // reuseExistingBroker reads the recorded broker, whose socket may be gone or busy streaming
+    // another job: a read-only query does not need that broker, so its refusal is not the answer.
+    const brokerRequested =
+      client?.transport === "broker" || Boolean(process.env[BROKER_ENDPOINT_ENV]) || Boolean(connectOptions.reuseExistingBroker);
     const shouldRetryDirect =
       (client?.transport === "broker" && error?.rpcCode === BROKER_BUSY_RPC_CODE) ||
       (brokerRequested && (error?.code === "ENOENT" || error?.code === "ECONNREFUSED"));
@@ -1167,7 +1170,7 @@ async function withAppServer(cwd, fn, connectOptions = {}) {
       throw error;
     }
 
-    const directClient = await CodexAppServerClient.connect(cwd, { disableBroker: true });
+    const directClient = await CodexAppServerClient.connect(cwd, { env: connectOptions.env, disableBroker: true });
     try {
       return await fn(directClient);
     } finally {
@@ -1447,21 +1450,12 @@ function buildAppServerAuthStatus(accountResponse, configResponse) {
 }
 
 async function getCodexAuthStatusFromClient(client, cwd) {
-  try {
-    const accountResponse = await client.request("account/read", { refreshToken: false });
-    const configResponse = await client.request("config/read", {
-      includeLayers: false,
-      cwd
-    });
-
-    return buildAppServerAuthStatus(accountResponse, configResponse);
-  } catch (error) {
-    return buildAuthStatus({
-      loggedIn: false,
-      detail: error instanceof Error ? error.message : String(error),
-      source: "app-server"
-    });
-  }
+  const accountResponse = await client.request("account/read", { refreshToken: false });
+  const configResponse = await client.request("config/read", {
+    includeLayers: false,
+    cwd
+  });
+  return buildAppServerAuthStatus(accountResponse, configResponse);
 }
 
 export function getCodexAvailability(cwd) {
@@ -1485,7 +1479,7 @@ export function getCodexAvailability(cwd) {
 }
 
 export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) {
-  const endpoint = env?.[BROKER_ENDPOINT_ENV] ?? loadBrokerSession(cwd)?.endpoint ?? null;
+  const endpoint = env?.[BROKER_ENDPOINT_ENV] ?? loadLiveBrokerSession(cwd)?.endpoint ?? null;
   if (endpoint) {
     return {
       mode: "shared",
@@ -1518,23 +1512,17 @@ export async function getCodexAuthStatus(cwd, options = {}) {
     };
   }
 
-  let client = null;
   try {
-    client = await CodexAppServerClient.connect(cwd, {
+    return await withAppServer(cwd, (client) => getCodexAuthStatusFromClient(client, cwd), {
       env: options.env,
       reuseExistingBroker: true
     });
-    return await getCodexAuthStatusFromClient(client, cwd);
   } catch (error) {
     return buildAuthStatus({
       loggedIn: false,
       detail: error instanceof Error ? error.message : String(error),
       source: "app-server"
     });
-  } finally {
-    if (client) {
-      await client.close().catch(() => {});
-    }
   }
 }
 
@@ -1549,42 +1537,35 @@ export async function listSupportedModels(cwd, options = {}) {
     return { checked: false, models: [], detail: availability.detail };
   }
 
-  let client = null;
   try {
-    client = await CodexAppServerClient.connect(cwd, {
-      env: options.env,
-      reuseExistingBroker: true
-    });
-    const models = [];
-    let cursor = null;
-    // Catalogs are tiny (a handful of models). Cap the page loop so a server that
-    // ignores the cursor can never spin forever. ponytail: 10 pages is far past
-    // any real catalog.
-    for (let page = 0; page < 10; page += 1) {
-      const params = { includeHidden: true };
-      if (cursor) {
-        params.cursor = cursor;
+    return await withAppServer(cwd, async (client) => {
+      const models = [];
+      let cursor = null;
+      // Catalogs are tiny (a handful of models). Cap the page loop so a server that
+      // ignores the cursor can never spin forever. ponytail: 10 pages is far past
+      // any real catalog.
+      for (let page = 0; page < 10; page += 1) {
+        const params = { includeHidden: true };
+        if (cursor) {
+          params.cursor = cursor;
+        }
+        const response = await client.request("model/list", params);
+        for (const model of response?.data ?? []) {
+          models.push(model);
+        }
+        cursor = response?.nextCursor ?? null;
+        if (!cursor) {
+          break;
+        }
       }
-      const response = await client.request("model/list", params);
-      for (const model of response?.data ?? []) {
-        models.push(model);
-      }
-      cursor = response?.nextCursor ?? null;
-      if (!cursor) {
-        break;
-      }
-    }
-    return { checked: true, models, detail: null };
+      return { checked: true, models, detail: null };
+    }, { env: options.env, reuseExistingBroker: true });
   } catch (error) {
     return {
       checked: false,
       models: [],
       detail: error instanceof Error ? error.message : String(error)
     };
-  } finally {
-    if (client) {
-      await client.close().catch(() => {});
-    }
   }
 }
 

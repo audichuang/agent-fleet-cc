@@ -575,6 +575,9 @@ test("task --resume-last does not resume a task from another Claude session", ()
   });
   assert.equal(resume.status, 1);
   assert.match(resume.stderr, /No previous Codex task thread was found for this repository\./);
+  // aghub, 2026-10-20: `--resume-last` after an adversarial-review hit this error, and the
+  // message gave no next step. Review threads are ephemeral, so the way on is a fresh task.
+  assert.match(resume.stderr, /fresh `task` whose prompt restates the findings/);
 
   const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
   assert.equal(fakeState.lastTurnStart.threadId, "thr_1");

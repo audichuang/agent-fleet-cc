@@ -257,6 +257,11 @@ test("renderReviewResult marks a failure on the parse-error branch", () => {
   assert.match(output, /Codex review failed/);
   assert.match(output, /429 rate limit/, "the reason is distinct from the body, so state it");
   assert.match(output, /not json at all/, "the raw body is still shown below");
+  // A dead turn never had JSON to return. Saying it "did not return valid structured JSON"
+  // with a parse error quoting the turn's opening words read as a second, separate fault
+  // (snip-sync and aghub, 2026-10-12..21, on cyberPolicy and serverOverloaded failures).
+  assert.doesNotMatch(output, /structured JSON|Parse error/);
+  assert.doesNotMatch(output, /\n\n\n/, "one blank line between the failure and the last message");
 });
 
 test("renderReviewResult marks a failure on the invalid-shape branch", () => {
@@ -297,6 +302,7 @@ test("renderReviewResult adds no failure marker when there is no reason", () => 
   );
 
   assert.doesNotMatch(output, /Codex review failed/);
+  assert.match(output, /did not return valid structured JSON/, "a turn that finished with bad JSON still says so");
 });
 
 // Codex's independent review found this one, and it is the branch the earlier round had

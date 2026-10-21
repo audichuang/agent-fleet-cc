@@ -1,8 +1,18 @@
 # Following a background job
 
+## Contents
+
+- Exit codes, the one-off `wait`, and waiting when nothing notifies you (below)
+- [At `wait exit: 10` (30-minute check-in)](#at-wait-exit-10-30-minute-check-in)
+- [When the job failed (`wait exit: 1`)](#when-the-job-failed-wait-exit-1)
+- [When `wait` or `status` cannot find the job](#when-wait-or-status-cannot-find-the-job)
+- [Time cap](#time-cap)
+- [Rules](#rules)
+
 Launch with `--background --json`. The payload's `jobId` is the handle. Then run the `wait` loop
 from SKILL.md as **one background Bash command**. It prints `wait exit: <code>`, and the last
-`wait` report is in `${TMPDIR:-/tmp}/codex-wait.out`.
+`wait` report is in `${TMPDIR:-/tmp}/codex-wait-<jobId>.out` (one file per job, so two sessions
+sharing `/tmp`, as on Linux, do not overwrite each other's report).
 
 | Exit | Meaning |
 | --- | --- |
@@ -12,11 +22,18 @@ from SKILL.md as **one background Bash command**. It prints `wait exit: <code>`,
 | `10` | still running: the wait timed out, the job did not fail |
 
 A one-off foreground `wait <jobId> --timeout-ms 100000` returns the same codes; keep the
-timeout under the Bash call's own (2 minutes by default). Bare `wait` waits 4 minutes.
+timeout under the Bash call's own (2 minutes by default in Claude Code). Bare `wait` waits 4 minutes.
+
+**Nothing will tell you the background command ended** — you run as a subagent or a workflow
+step (your background commands die when your turn ends), or your host has no exit notice: repeat
+that foreground `wait` one call at a time, each `--timeout-ms` under the call's own timeout,
+until the exit is not `10`, and only then end your turn. A host with its own tool for waiting on a
+command it started can wait on the background loop with that instead. Either way this is the loop, not the polling ruled out below. A host skill that says to
+debug and resubmit a failed background job does not apply to a Codex job: report it (SKILL.md).
 
 ## At `wait exit: 10` (30-minute check-in)
 
-`${TMPDIR:-/tmp}/codex-wait.out` holds the last `wait` report, which is the same report as
+`${TMPDIR:-/tmp}/codex-wait-<jobId>.out` holds the last `wait` report, which is the same report as
 `status <jobId>`: no extra call is needed. Each `Progress` line says how long ago it was written;
 `Last activity` is the newest write to the log; `Codex session ID` is the thread id, printed once
 Codex has a thread (not in the first seconds): note it, it is the handle if the job record is
@@ -35,6 +52,28 @@ A long run (a UI round of hours) is several check-ins in a row. That is the desi
 problem to work around: do not swap the loop for your own polling of files, `find -newer…`
 scans or `sleep` loops. They miss the job's own state, and `find`'s time flags differ between
 macOS and Linux.
+
+## When the job failed (`wait exit: 1`)
+
+`result <jobId>` prints the reason. Three causes are on OpenAI's side and a relaunch can clear
+them; report the failure to the user either way, and never let another reviewer stand in for the
+run (SKILL.md). Whatever the cause, a failed task that edits files or drives a UI may already
+have done part of its work: before any relaunch below, check what changed (`git status`, the
+app), tell the user, and ask Codex only for what is left. A review has nothing to repeat.
+
+| The reason says | What it means | Then |
+| --- | --- | --- |
+| `flagged for possible cybersecurity risk` (`[cyberPolicy]`) | The prompt's wording tripped a content filter. No review or answer was produced, and rerunning it unchanged was refused again every time it was tried. | Reword once as a code-correctness task, describing what the code must do rather than how it could be attacked or bypassed, and relaunch. Refused again, or a built-in `review` (it has no wording to change): report, and stop. |
+| `Selected model is at capacity` (`[serverOverloaded]`) | The model was overloaded. | Relaunch unchanged once, after about two minutes. |
+| `app-server disconnected before the turn completed` or `app-server exited unexpectedly` | The connection to Codex dropped mid-turn. An immediate relaunch during the same outage failed again. | Relaunch once after about two minutes; if `setup` then reports a problem, report that instead. |
+
+Other policy flags (`[misalignmentPolicyViolation]`, "biological risk") are not wording problems
+to route around: report them. `Reconnecting... N/M` lines in the log are Codex retrying on its
+own, not a failure.
+
+Any other reason (auth, a usage limit, a turn error that names your prompt or repo): report it as
+printed and stop. A `setup` that says to log in is the answer only after a rerun of `setup`
+agrees.
 
 ## When `wait` or `status` cannot find the job
 
@@ -59,14 +98,15 @@ screen or one checkout spoil each other.
 
 ## Time cap
 
-A job still running after 3 hours is stopped and recorded as failed. Only a dead job is reaped
-sooner, so a stuck-but-alive one runs to the cap; that is why you check in. To allow longer (or
-a tighter cap), set `CODEX_JOB_TIMEOUT_MS` (milliseconds) in the environment you launch the job
-from. The cap is read once at launch: a running job cannot be extended. A desktop job's turn is
+A job still running after 3 hours (`10800000` ms) is stopped and recorded as failed. Only a
+dead job is reaped sooner, so a stuck-but-alive one runs to the cap; that is why you check in. To
+allow longer, set a larger `CODEX_JOB_TIMEOUT_MS` (milliseconds) in the environment you launch
+the job from; a smaller one only cuts a healthy run short. The cap is read once at launch: a running job cannot be extended. A desktop job's turn is
 interrupted in the app when the cap hits.
 
 ## Rules
 
 - Finished means `Status` (`--json`: `job.status`) is no longer `queued` or `running`. `Phase`
   is a progress label: never decide completion from it. Prefer `wait`'s exit code.
-- Do not pipe companion output into `head` or `tail`; redirect it to a file and read the file.
+- Do not pipe companion output into `head` or `tail`; redirect it to a file and read the whole
+  file. `head` or `tail` on that file truncates the report you are about to relay just the same.

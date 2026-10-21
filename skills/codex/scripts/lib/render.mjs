@@ -289,17 +289,20 @@ function reviewFailureLines(meta, body = "") {
 
 export function renderReviewResult(parsedResult, meta) {
   if (!parsedResult.parsed) {
-    const lines = [
-      `# Codex ${meta.reviewLabel}`,
-      "",
-      ...reviewFailureLines(meta, parsedResult.rawOutput),
-      "Codex did not return valid structured JSON.",
-      "",
-      `- Parse error: ${parsedResult.parseError}`
-    ];
+    // A failed turn never had JSON to return, so the parse error would only quote the
+    // turn's opening words back as a second fault.
+    const failure = reviewFailureLines(meta, parsedResult.rawOutput);
+    const lines = [`# Codex ${meta.reviewLabel}`, ""];
+    let rawLabel = "Last message before the failure:";
+    if (failure.length > 0) {
+      lines.push(...failure);
+    } else {
+      lines.push("Codex did not return valid structured JSON.", "", `- Parse error: ${parsedResult.parseError}`, "");
+      rawLabel = "Raw final message:";
+    }
 
     if (parsedResult.rawOutput) {
-      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+      lines.push(rawLabel, "", "```text", parsedResult.rawOutput, "```");
     }
 
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);

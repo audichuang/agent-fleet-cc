@@ -39,7 +39,11 @@ export function parseArgs(argv, config = {}) {
     }
 
     if (token.startsWith("--")) {
-      const [rawKey, inlineValue] = token.slice(2).split("=", 2);
+      // Split at the first "=" only: a path value may hold more of them.
+      const body = token.slice(2);
+      const equals = body.indexOf("=");
+      const rawKey = equals === -1 ? body : body.slice(0, equals);
+      const inlineValue = equals === -1 ? undefined : body.slice(equals + 1);
       const key = aliasMap[rawKey] ?? rawKey;
 
       if (booleanOptions.has(key)) {
