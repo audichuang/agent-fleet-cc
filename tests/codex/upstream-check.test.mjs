@@ -15,6 +15,7 @@ import {
   parseLastPin,
   parseNewestAuditedSha,
   rangeReport,
+  refMatchesVersion,
   resolvePinFrom
 } from "../../.claude/skills/codex-upstream-sync/scripts/upstream-check.mjs";
 
@@ -42,6 +43,14 @@ test("the last checked pin is the newest row that recorded one", () => {
   const doc = AUDIT_DOC.replace("(main; 42 commits)", "(main; installed 0.163.0, pin `origin/release/0.163.0-alpha.10.2` @ `30c1058df6`)");
   assert.deepEqual(parseLastPin(doc), { ref: "origin/release/0.163.0-alpha.10.2", sha: "30c1058df6" });
   assert.equal(parseLastPin(AUDIT_DOC), null);
+});
+
+test("a release ref matches its own version, not a longer numeric continuation", () => {
+  assert.ok(refMatchesVersion("origin/release/0.163.0-alpha.10.2", "0.163.0"));
+  assert.ok(refMatchesVersion("origin/release/0.163.0", "0.163.0"));
+  assert.ok(refMatchesVersion("release/99.0.0-alpha.1.2", "99.0.0-alpha.1"));
+  assert.ok(!refMatchesVersion("origin/release/99.0.0-alpha.10.1", "99.0.0-alpha.1"));
+  assert.ok(!refMatchesVersion("origin/release/0.163.01", "0.163.0"));
 });
 
 test("the installed version is read from codex --version", () => {
@@ -202,4 +211,35 @@ test("an additive params change is listed for the manual params read", () =>
     const newPin = commit({ "v2/TurnStartParams.json": { required: ["apiVersion", "threadId"] } }, "adds a required field");
     const report = rangeReport(git, oldPin, newPin, new Set());
     assert.deepEqual(report.schema.changed.map((f) => f.file), ["v2/TurnStartParams.json"]);
+  }));
+
+test("a runtime fix only the old release carried is reported as dropped", () =>
+  withCodexRepo(async ({ g, git }) => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const dir = g("rev-parse", "--show-toplevel");
+    const write = (rel, text) => {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), text);
+    };
+    write("codex-rs/app-server/src/config.rs", "fn accept_override() -> bool { false }\n");
+    g("add", "-A");
+    g("commit", "-qm", "fork point");
+    g("checkout", "-q", "-b", "release-old");
+    write("codex-rs/app-server/src/config.rs", "fn accept_override() -> bool { true }\n");
+    g("commit", "-qam", "old release accepts the override");
+    const oldPin = g("rev-parse", "HEAD");
+    g("checkout", "-q", "main");
+    write("codex-rs/app-server/src/other.rs", "fn unrelated() {}\n");
+    g("add", "-A");
+    g("commit", "-qm", "main moves on without the fix");
+    g("branch", "release-new");
+    const report = rangeReport(git, oldPin, "release-new", new Set());
+    assert.equal(report.dropped.length, 1, report.dropped.join("\n"));
+    assert.match(report.dropped[0], /old release accepts the override/);
+    assert.equal(report.breaking, true);
+    // Cherry-picked into the next release, it is no longer dropped.
+    g("checkout", "-q", "release-new");
+    g("-c", "core.editor=true", "cherry-pick", oldPin);
+    assert.deepEqual(rangeReport(git, oldPin, "release-new", new Set()).dropped, []);
   }));

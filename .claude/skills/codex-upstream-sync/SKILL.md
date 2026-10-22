@@ -39,7 +39,8 @@ this skill says when to escalate to them.
    `should-upgrade`, `cosmetic`, `none`). Done when every line of the pin section and the
    forward-look section has one.
    - *Pin sections* (one per candidate release branch) = what the installed binary gained since
-     the last checked pin. A schema
+     the last checked pin. A *dropped* commit (a fix only the old pin carried) is `breaking`
+     until you find its equivalent on the new pin or show the companion never relied on it. A schema
      deletion or a "companion names gone upstream" entry is `breaking` until you show otherwise.
      Read the deleted lines against the dependency checklist in the doc's Part 1 ("What the
      plugin sends/reads").

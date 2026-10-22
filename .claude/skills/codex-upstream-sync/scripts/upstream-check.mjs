@@ -58,6 +58,15 @@ export function parseLastPin(docText) {
   return m ? { ref: m[1], sha: m[2] } : null;
 }
 
+// `release/<version>` followed by nothing or a non-digit: 0.1.0-alpha.1 takes release/0.1.0-alpha.1.2
+// but not release/0.1.0-alpha.10.1, which the `<version>*` glob alone would also return.
+export function refMatchesVersion(ref, version) {
+  const at = ref.indexOf(`release/${version}`);
+  if (at < 0) return false;
+  const next = ref[at + `release/${version}`.length];
+  return next === undefined || !/[0-9]/.test(next);
+}
+
 export function parseCliVersion(text) {
   return text.match(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/)?.[1] ?? null;
 }
@@ -209,7 +218,8 @@ function findPin(git, version, tmp) {
   const want = new Map(rels.map((r, i) => [r, hashes[i]]));
   const refs = git("for-each-ref", "--format=%(refname:short)", `refs/remotes/origin/release/${version}*`, `refs/heads/release/${version}*`)
     .split("\n")
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((ref) => refMatchesVersion(ref, version));
   const matches = refs.filter((ref) => {
     const tree = git("ls-tree", "-r", ref, "--", SCHEMA_DIR).split("\n").filter(Boolean);
     if (tree.length !== want.size) return false;
@@ -245,6 +255,12 @@ export function rangeReport(git, from, ref, referenced, known = methodsAt(git, f
   const tagsOf = (r) => collectErrorInfoTags(git.show(r, `${SCHEMA_DIR}/ServerNotification.json`) ?? "{}");
   const tags = setDiff(tagsOf(base), tagsOf(ref));
   const commits = git("log", "--oneline", `${base}..${ref}`, "--", ...PROTOCOL_PATHS).split("\n").filter(Boolean);
+  // Commits only `from` carries, with no patch-equivalent on `ref` (a release-only fix the next
+  // release dropped). The endpoint diff of runtime code cannot name them; this can. Empty when
+  // `from` is an ancestor, as the forward look's `since` is.
+  const dropped = git("log", "--oneline", "--cherry-pick", "--left-only", `${base}...${ref}`, "--", ...PROTOCOL_PATHS)
+    .split("\n")
+    .filter(Boolean);
   const total = Number(git("rev-list", "--count", `${base}..${ref}`).trim());
   return {
     ref,
@@ -252,6 +268,7 @@ export function rangeReport(git, from, ref, referenced, known = methodsAt(git, f
     head: git("rev-parse", "--short=10", ref).trim(),
     total,
     commits,
+    dropped,
     schema: {
       files: numstat.length,
       add: numstat.reduce((s, x) => s + x.add, 0),
@@ -268,7 +285,8 @@ export function rangeReport(git, from, ref, referenced, known = methodsAt(git, f
       removed: variants.removed
     },
     errorInfoTags: tags,
-    breaking: schemaDeletions.length > 0 || missing.length > 0 || variants.removed.length > 0 || tags.removed.length > 0
+    breaking:
+      schemaDeletions.length > 0 || missing.length > 0 || variants.removed.length > 0 || tags.removed.length > 0 || dropped.length > 0
   };
 }
 
@@ -313,6 +331,8 @@ function printRange(label, r, limit = 40) {
     lines.push("  deleted lines:");
     for (const d of r.schema.deletions.slice(0, limit)) lines.push(`  ${d}`);
   }
+  lines.push(`dropped (on ${r.base} only, no equivalent here): ${r.dropped.length ? "" : "none"}`);
+  for (const c of r.dropped.slice(0, limit)) lines.push(`  ${c}`);
   lines.push(`app-server-protocol/src non-comment deletions: ${r.srcDeletions.length}`);
   for (const d of r.srcDeletions.slice(0, limit)) lines.push(`  ${d}`);
   lines.push(`methods: +${r.methods.added.length} [${r.methods.added.join(", ")}] −${r.methods.removed.length} [${r.methods.removed.join(", ")}]`);
