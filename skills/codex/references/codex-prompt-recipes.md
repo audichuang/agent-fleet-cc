@@ -105,6 +105,9 @@ lock entry treats a missing owner as unlocked">
 # Already fixed (do not re-report unless the fix itself is wrong)
 - <round N finding, file:line, how it was fixed>
 
+# Refuted (re-report only with evidence that answers the refutation)
+- <round N finding, file:line, the evidence that refuted it, e.g. the consumer contract or a run>
+
 # Task
 Check EVERY site in this diff and its callers where the invariant must hold. Report one
 finding per site that violates it, plus anything the fixes above broke. In the summary, list
