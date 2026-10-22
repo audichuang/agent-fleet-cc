@@ -28,10 +28,12 @@ this skill says when to escalate to them.
    ```bash
    node .claude/skills/codex-upstream-sync/scripts/upstream-check.mjs > <scratchpad>/upstream-check.log; echo $?
    ```
-   `--since <sha>` overrides the start point, which defaults to the commit on the newest
-   Audit-log row. `--json` gives the same report as data. Exit 0: nothing removed at the
-   installed pin. Exit 1: something the installed binary removed needs a verdict. Exit 2: the
-   check could not run, most often no release ref matching the installed binary until you fetch.
+   `--since <sha>` overrides the forward look's start (default: the newest Audit-log row's
+   commit) and `--pin-from <ref>` the pin sections' start (default: the newest recorded pin).
+   `--json` gives the same report as data. Exit 0: nothing removed at the installed pin.
+   Exit 1: something the installed binary removed needs a verdict. Exit 2: the check could not
+   run (no release ref matches the binary, or the recorded pin is not in the checkout); its
+   message says what to fetch.
 
 3. **Classify every item in the report**, using the doc's severity words (`breaking`,
    `should-upgrade`, `cosmetic`, `none`). Done when every line of the pin section and the
@@ -56,8 +58,9 @@ this skill says when to escalate to them.
 4. **Typecheck against the installed binary:** `npm run build:codex > <scratchpad>/build.log;
    echo $?`. Its prebuild regenerates types from the binary, so `tsc` catches drift in what the
    companion types. Its requests go through an untyped `client.request`, so neither this nor the
-   script proves request params: for each params schema the pin section lists as changed, read
-   it against what the companion sends (Part 1's checklist).
+   script proves request params: read every `*Params.json` the pin sections list as changed,
+   additions included (a new required field breaks a request without deleting a line), against
+   what the companion sends (Part 1's checklist).
 
 5. **Escalate** to the doc's two full audits and a real-engine smoke (the `e2e-testing` skill)
    when step 3 found anything `breaking` or `should-upgrade` at the pin, or a failure or error
@@ -81,11 +84,11 @@ a verdict in it.
   schema and takes every `release/<version>*` branch whose `schema/json` matches it file for
   file. Matching schemas do not prove matching source, so each candidate gets its own section
   and a break in any of them fails the run.
-- **Two baselines.** The forward look diffs main from `since`. The pin sections diff from the
-  last recorded pin instead, because `since` follows main: a change first seen as a forward look
-  is already behind `since` when it ships, and only the old pin still sees it as new. Both diffs
-  start at the merge-base with the ref, so later main additions a release branch lacks do not
-  read as deletions. With no recorded pin, the pin sections fall back to `since` and say so.
+- **Two baselines.** The forward look diffs main against `since`. The pin sections diff the last
+  recorded pin against each candidate, endpoint to endpoint: that is the installed contract's
+  own change, whatever either release's ancestry holds. `since` cannot stand in for it, since it
+  follows main and a change first seen as a forward look is already behind it when it ships, so
+  a missing or unreachable pin stops the run instead of falling back.
 - **Companion names.** It collects every string literal in `skills/codex/scripts` and keeps the
   ones upstream declared as a method at any commit in the Audit log. A name in that set that the
   pin no longer declares is a break. Using every logged commit rather than `since` alone means a

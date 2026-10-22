@@ -148,6 +148,15 @@ export function makeGit(codexDir) {
 }
 
 // Every method name declared at any of `refs`; refs the checkout lacks are skipped.
+// Where the pin sections start: --pin-from, else the last recorded pin. Without one that resolves
+// there is no installed baseline, and the check refuses rather than falling back to `since`.
+export function resolvePinFrom(lastPin, override, hasCommit) {
+  const ref = override ?? lastPin?.sha;
+  if (!ref) return { error: "no recorded pin in the Audit log; pass --pin-from <the release ref you last checked>" };
+  if (!hasCommit(ref)) return { error: `pin baseline ${ref} is not in the codex checkout; fetch it (or deepen a shallow clone), or pass --pin-from` };
+  return { sha: ref };
+}
+
 export function knownMethods(git, refs) {
   const out = new Set();
   for (const ref of refs) if (git.ok("cat-file", "-e", `${ref}^{commit}`)) for (const m of methodsAt(git, ref)) out.add(m);
@@ -213,13 +222,12 @@ function findPin(git, version, tmp) {
   return { ref: matches.at(-1) ?? null, how: "schema", matches };
 }
 
-// The diff runs from merge-base(from, ref). For the installed pin `from` is the last recorded pin,
-// so the range is everything the binary gained since the last checked one, wherever main stood;
-// for the forward look it is `since`. A release branch usually forks from main before either,
-// and the merge-base keeps later main additions the branch lacks from reading as deletions.
+// The diff runs endpoint to endpoint, `from` against `ref`: for the installed pin that is the last
+// checked pin against this one, so it is the contract change itself, whatever either release's
+// ancestry holds; for the forward look it is `since` against main, which descends from it.
 // `known` is every method declared at any audited commit, for the companion-name check.
 export function rangeReport(git, from, ref, referenced, known = methodsAt(git, from)) {
-  const base = git("merge-base", from, ref).trim();
+  const base = from;
   const numstat = git("diff", "--numstat", base, ref, "--", SCHEMA_DIR)
     .split("\n")
     .filter(Boolean)
@@ -248,6 +256,7 @@ export function rangeReport(git, from, ref, referenced, known = methodsAt(git, f
       files: numstat.length,
       add: numstat.reduce((s, x) => s + x.add, 0),
       del: numstat.reduce((s, x) => s + x.del, 0),
+      changed: numstat.map((x) => ({ file: x.file.slice(SCHEMA_DIR.length + 1), add: x.add, del: x.del })),
       filesWithDeletions: numstat.filter((x) => x.del > 0).map((x) => x.file),
       deletions: schemaDeletions
     },
@@ -299,8 +308,9 @@ function printRange(label, r, limit = 40) {
   for (const c of r.commits.slice(0, limit)) lines.push(`  ${c}`);
   if (r.commits.length > limit) lines.push(`  … ${r.commits.length - limit} more`);
   lines.push(`schema/json: ${r.schema.files} files, +${r.schema.add}/−${r.schema.del}`);
-  if (r.schema.filesWithDeletions.length) {
-    lines.push(`  files with deletions (read these): ${r.schema.filesWithDeletions.join(", ")}`);
+  for (const f of r.schema.changed) lines.push(`  ${f.file} +${f.add}/−${f.del}`);
+  if (r.schema.deletions.length) {
+    lines.push("  deleted lines:");
     for (const d of r.schema.deletions.slice(0, limit)) lines.push(`  ${d}`);
   }
   lines.push(`app-server-protocol/src non-comment deletions: ${r.srcDeletions.length}`);
@@ -324,12 +334,13 @@ function defaultCodexDir() {
 }
 
 function parseArgs(argv) {
-  const opts = { codex: process.env.CODEX_REPO || defaultCodexDir(), since: null, json: false };
+  const opts = { codex: process.env.CODEX_REPO || defaultCodexDir(), since: null, pinFrom: null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
     const value = () => inline ?? argv[++i];
     if (flag === "--codex") opts.codex = path.resolve(value());
     else if (flag === "--since") opts.since = value();
+    else if (flag === "--pin-from") opts.pinFrom = value();
     else if (flag === "--json") opts.json = true;
     else throw new Error(`unknown option: ${argv[i]}`);
   }
@@ -346,6 +357,9 @@ async function main() {
   const lastPin = parseLastPin(doc);
   if (!since) throw new Error("no --since and no commit on the newest Audit-log row");
   if (!git.ok("cat-file", "-e", `${since}^{commit}`)) throw new Error(`${since} is not in ${opts.codex}; fetch it first`);
+  const resolved = resolvePinFrom(lastPin, opts.pinFrom, (ref) => git.ok("cat-file", "-e", `${ref}^{commit}`));
+  if (resolved.error) throw new Error(resolved.error);
+  const pinFrom = resolved.sha;
 
   const versionText = sh("codex", ["--version"]).stdout.trim();
   const version = parseCliVersion(versionText);
@@ -356,7 +370,6 @@ async function main() {
     const main = git.ok("rev-parse", "--verify", "-q", "refs/remotes/origin/main") ? "origin/main" : "HEAD";
     const referenced = companionLiterals();
     const known = knownMethods(git, [since, ...audited, main]);
-    const pinFrom = lastPin && git.ok("cat-file", "-e", `${lastPin.sha}^{commit}`) ? lastPin.sha : since;
     // A schema match does not pin the source: byte-identical release branches can differ in
     // error variants or behaviour, so every candidate is reported and any break fails the run.
     const pinReports = pin.matches.map((ref) => rangeReport(git, pinFrom, ref, referenced, known));
@@ -390,11 +403,7 @@ async function main() {
           : `last fetch: ${fetchAge.toFixed(1)} h ago${fetchAge > 24 ? " — STALE, fetch first" : ""}`
       );
       out.push(`installed: ${versionText}`);
-      out.push(
-        lastPin && pinFrom === lastPin.sha
-          ? `last checked pin: ${lastPin.ref} @ ${lastPin.sha}`
-          : `last checked pin: ${lastPin ? `${lastPin.sha} not in the checkout` : "none recorded"} — pin ranges start from ${since} instead`
-      );
+      out.push(`last checked pin: ${opts.pinFrom ? `${pinFrom} (--pin-from)` : `${lastPin.ref} @ ${pinFrom}`}`);
       out.push(
         pin.ref
           ? `pin: ${pin.matches.join(", ")} (by ${pin.how}${pin.matches.length > 1 ? "; schema-identical candidates, each reported below" : ""})`

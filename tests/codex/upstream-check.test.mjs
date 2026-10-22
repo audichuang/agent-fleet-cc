@@ -14,7 +14,8 @@ import {
   parseErrorVariants,
   parseLastPin,
   parseNewestAuditedSha,
-  rangeReport
+  rangeReport,
+  resolvePinFrom
 } from "../../.claude/skills/codex-upstream-sync/scripts/upstream-check.mjs";
 
 const AUDIT_DOC = `# Audit
@@ -116,7 +117,16 @@ test("only content deletions count, not file headers or comments", () => {
   assert.deepEqual(contentDeletions(diff), ['-  "removed": 1,']);
 });
 
-test("a release branch forked before the audited commit is diffed from the merge-base", async () => {
+test("the pin baseline is the recorded pin or --pin-from, and never falls back", () => {
+  const has = (ref) => ref !== "missing000";
+  assert.deepEqual(resolvePinFrom({ ref: "release/x", sha: "30c1058df6" }, null, has), { sha: "30c1058df6" });
+  assert.deepEqual(resolvePinFrom({ ref: "release/x", sha: "30c1058df6" }, "abc1234", has), { sha: "abc1234" });
+  assert.match(resolvePinFrom(null, null, has).error, /no recorded pin/);
+  assert.match(resolvePinFrom({ ref: "release/x", sha: "missing000" }, null, has).error, /not in the codex checkout/);
+});
+
+// A throwaway codex checkout: `commit(files, message)` writes schema files and commits them.
+async function withCodexRepo(fn) {
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
@@ -127,114 +137,69 @@ test("a release branch forked before the audited commit is diffed from the merge
     assert.equal(r.status, 0, r.stderr);
     return r.stdout.trim();
   };
-  const write = (methods) => {
-    const p = path.join(dir, "codex-rs/app-server-protocol/schema/json/ClientRequest.json");
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(JSON.parse(schema(...methods)), null, 2));
+  const commit = (files, message) => {
+    for (const [rel, value] of Object.entries(files)) {
+      const p = path.join(dir, "codex-rs/app-server-protocol/schema/json", rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(value, null, 2));
+    }
+    g("add", "-A");
+    g("commit", "-qm", message);
+    return g("rev-parse", "HEAD");
   };
   try {
     g("init", "-q", "-b", "main");
-    write(["turn/start"]);
-    g("add", "-A");
-    g("commit", "-qm", "fork point");
-    g("branch", "release");
-    write(["turn/start", "thread/sample"]);
-    g("commit", "-qam", "main adds a method");
-    const since = g("rev-parse", "HEAD");
-
-    const atRelease = rangeReport(makeGit(dir), since, "release", new Set(["turn/start"]));
-    assert.deepEqual(atRelease.schema.deletions, [], "main-only additions are not deletions on the branch");
-    assert.equal(atRelease.breaking, false);
-
-    g("checkout", "-q", "release");
-    write([]);
-    g("commit", "-qam", "release drops turn/start");
-    const dropped = rangeReport(makeGit(dir), since, "release", new Set(["turn/start"]));
-    assert.deepEqual(dropped.missing, ["turn/start"]);
-    assert.equal(dropped.breaking, true);
+    return await fn({ g, commit, git: makeGit(dir) });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
+}
 
-test("a removal recorded as a forward look is still caught once it ships", async () => {
-  const fs = await import("node:fs");
-  const os = await import("node:os");
-  const path = await import("node:path");
-  const { spawnSync } = await import("node:child_process");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "upstream-check-"));
-  const g = (...args) => {
-    const r = spawnSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
-    assert.equal(r.status, 0, r.stderr);
-    return r.stdout.trim();
-  };
-  const write = (methods) => {
-    const p = path.join(dir, "codex-rs/app-server-protocol/schema/json/ServerNotification.json");
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(JSON.parse(schema(...methods)), null, 2));
-  };
-  try {
-    g("init", "-q", "-b", "main");
-    write(["turn/completed", "turn/started"]);
-    g("add", "-A");
-    g("commit", "-qm", "first audited pass");
-    const first = g("rev-parse", "HEAD");
-    write(["turn/started"]);
-    g("commit", "-qam", "main drops turn/completed (seen as a forward look, row recorded here)");
-    const second = g("rev-parse", "HEAD");
-    g("branch", "release", second); // the next release ships the removal
-    const git = makeGit(dir);
+const notification = (methods) => JSON.parse(schema(...methods));
+const payload = (field) => ({ properties: { [field]: { type: "object" } }, required: [field] });
+
+test("a removal recorded as a forward look is still caught once it ships", () =>
+  withCodexRepo(({ g, commit, git }) => {
+    const first = commit({ "ServerNotification.json": notification(["turn/completed", "turn/started"]) }, "first audited pass");
+    const second = commit({ "ServerNotification.json": notification(["turn/started"]) }, "main drops turn/completed");
+    g("branch", "release", second);
     const referenced = new Set(["turn/completed", "turn/started"]);
-
-    // Starting from the newer row alone, the removal is invisible: base and since both lack it.
+    // Starting from the newer row alone, the removal is invisible.
     assert.deepEqual(rangeReport(git, second, "release", referenced).missing, []);
     // The audit log's commits keep it in view; a commit the checkout lacks is skipped.
-    const known = knownMethods(git, [second, first, "0123456789"]);
-    const report = rangeReport(git, second, "release", referenced, known);
+    const report = rangeReport(git, second, "release", referenced, knownMethods(git, [second, first, "0123456789"]));
     assert.deepEqual(report.missing, ["turn/completed"]);
     assert.equal(report.breaking, true);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("a payload change first seen as a forward look is caught once it ships", async () => {
-  const fs = await import("node:fs");
-  const os = await import("node:os");
-  const path = await import("node:path");
-  const { spawnSync } = await import("node:child_process");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "upstream-check-"));
-  const g = (...args) => {
-    const r = spawnSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
-    assert.equal(r.status, 0, r.stderr);
-    return r.stdout.trim();
-  };
-  const write = (field) => {
-    const p = path.join(dir, "codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json");
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify({ properties: { [field]: { type: "object" } }, required: [field] }, null, 2));
-  };
-  try {
-    g("init", "-q", "-b", "main");
-    write("turn");
-    g("add", "-A");
-    g("commit", "-qm", "installed release forks here");
-    g("branch", "release-old");
-    const oldPin = g("rev-parse", "release-old");
-    write("result");
-    g("commit", "-qam", "main renames turn -> result (forward look; the row moves --since here)");
-    const since = g("rev-parse", "HEAD");
-    g("branch", "release-new"); // the next installed release carries the rename
-    const git = makeGit(dir);
-    const referenced = new Set();
-
-    // From the moved --since the rename is behind the base: a false clean.
-    assert.equal(rangeReport(git, since, "release-new", referenced).breaking, false);
-    // From the last checked pin it is a deletion at the new pin.
-    const report = rangeReport(git, oldPin, "release-new", referenced);
+test("a payload change first seen as a forward look is caught once it ships", () =>
+  withCodexRepo(({ g, commit, git }) => {
+    const oldPin = commit({ "v2/TurnCompletedNotification.json": payload("turn") }, "installed release forks here");
+    const since = commit({ "v2/TurnCompletedNotification.json": payload("result") }, "main renames turn -> result");
+    g("branch", "release-new", since);
+    // From the moved --since there is nothing to see; from the last checked pin it is a deletion.
+    assert.equal(rangeReport(git, since, "release-new", new Set()).breaking, false);
+    const report = rangeReport(git, oldPin, "release-new", new Set());
     assert.equal(report.breaking, true);
     assert.ok(report.schema.deletions.some((l) => l.includes('"turn"')), report.schema.deletions.join("\n"));
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
+  }));
+
+test("a release-only change the next release lacks is a removal between the two pins", () =>
+  withCodexRepo(({ g, commit, git }) => {
+    commit({ "v2/TurnCompletedNotification.json": payload("result") }, "fork point");
+    g("checkout", "-q", "-b", "release-old");
+    const oldPin = commit({ "v2/TurnCompletedNotification.json": payload("turn") }, "old release patches in turn");
+    g("checkout", "-q", "main");
+    g("branch", "release-new");
+    const report = rangeReport(git, oldPin, "release-new", new Set());
+    assert.equal(report.breaking, true);
+    assert.ok(report.schema.deletions.some((l) => l.includes('"turn"')), report.schema.deletions.join("\n"));
+  }));
+
+test("an additive params change is listed for the manual params read", () =>
+  withCodexRepo(({ commit, git }) => {
+    const oldPin = commit({ "v2/TurnStartParams.json": { required: ["threadId"] } }, "old");
+    const newPin = commit({ "v2/TurnStartParams.json": { required: ["apiVersion", "threadId"] } }, "adds a required field");
+    const report = rangeReport(git, oldPin, newPin, new Set());
+    assert.deepEqual(report.schema.changed.map((f) => f.file), ["v2/TurnStartParams.json"]);
+  }));
