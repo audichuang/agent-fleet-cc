@@ -20,11 +20,13 @@ this skill says when to escalate to them.
 1. **Fetch the codex checkout.** It is `../codex` beside this repo's main checkout (the script
    finds it from a worktree too), or `$CODEX_REPO` when a machine keeps it elsewhere. `git -C <codex> fetch -q origin`, then
    `git -C <codex> merge -q --ff-only origin/main` when its worktree is clean. The script reads
-   refs only and never fetches, so a stale checkout gives a stale answer.
+   refs only and never fetches, so a stale checkout gives a stale answer; its report opens with
+   the last fetch's age. When you cannot run git there (a sandboxed worktree), ask the user to
+   fetch and stop until they have.
 
 2. **Run the check and keep its exit code.**
    ```bash
-   node .claude/skills/codex-upstream-sync/scripts/upstream-check.mjs > <log>; echo $?
+   node .claude/skills/codex-upstream-sync/scripts/upstream-check.mjs > <scratchpad>/upstream-check.log; echo $?
    ```
    `--since <sha>` overrides the start point, which defaults to the commit on the newest
    Audit-log row. `--json` gives the same report as data. Exit 0: nothing removed at the
@@ -50,9 +52,10 @@ this skill says when to escalate to them.
    - *Model catalog*: the configured default model must be listed. Model names and effort levels
      stay out of shipped prose (AGENTS.md conventions).
 
-4. **When the installed version changed since the newest row**, run `npm run verify > <log>;
-   echo $?`. Its `build:codex` regenerates types from the installed binary, so `tsc` turns red
-   on request shapes the companion builds that the binary no longer accepts.
+4. **Typecheck against the installed binary:** `npm run build:codex > <scratchpad>/build.log;
+   echo $?`. Its prebuild regenerates types from the binary, so `tsc` turns red on a request
+   shape the binary does not accept, including one the companion adopted since the last row.
+   The script checks names only, so this step runs on every pass.
 
 5. **Escalate** to the doc's two full audits and a real-engine smoke (the `e2e-testing` skill)
    when step 3 found anything `breaking` or `should-upgrade` at the pin, or a failure or error
@@ -60,7 +63,9 @@ this skill says when to escalate to them.
 
 6. **Record the pass.** Paste the report's row skeleton at the top of the Audit log and fill in
    the verdict, the anchors you read, and what was **not run**. A no-drift pass gets a row too:
-   the next run's `--since` comes from it. A doc-only row may be committed straight to `main`;
+   the next run's `--since` comes from it. When main has no commits past `--since` and the
+   installed version matches the newest row, there is nothing new to record: report that
+   instead of adding a row. A doc-only row may be committed straight to `main`;
    a companion fix follows AGENTS.md's review gate and touches only `skills/codex/` and
    `tests/codex/`. Pushing either waits for the user's go.
 
@@ -70,13 +75,14 @@ a verdict in it.
 ## How the script decides
 
 - **Pin.** A `rust-v<version>` tag when one exists. Otherwise it exports the installed binary's
-  schema and picks the `release/<version>*` branch whose `schema/json` matches it file for file.
-  Several branches often match; their schemas are identical, so any of them gives the same
-  diff.
+  schema and takes every `release/<version>*` branch whose `schema/json` matches it file for
+  file. Matching schemas do not prove matching source, so each candidate is checked and the
+  worst one is reported.
 - **Merge-base.** A release branch usually forked from main before the audited commit, so the
   pin section diffs from `merge-base(since, pin)`. Diffing from `since` would report every later
   main addition as a deletion.
 - **Companion names.** It collects every string literal in `skills/codex/scripts` and keeps the
-  ones upstream declared as a method at `since`. A name in that set that the pin no longer
-  declares is a break. The set is derived from code, so it cannot drift from what the companion
-  actually sends and handles.
+  ones upstream declared as a method at any commit in the Audit log. A name in that set that the
+  pin no longer declares is a break. Using every logged commit rather than `since` alone means a
+  removal first seen as a forward look stays caught after its row moves `--since` past it. The
+  set is derived from code, so it cannot drift from what the companion sends and handles.

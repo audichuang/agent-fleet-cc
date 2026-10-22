@@ -6,12 +6,15 @@ import {
   collectSchemaMethods,
   contentDeletions,
   extractNameLiterals,
+  knownMethods,
   makeGit,
   missingNames,
   parseCliVersion,
+  parseAuditedShas,
   parseErrorVariants,
   parseNewestAuditedSha,
-  rangeReport
+  rangeReport,
+  worstReport
 } from "../../.claude/skills/codex-upstream-sync/scripts/upstream-check.mjs";
 
 const AUDIT_DOC = `# Audit
@@ -31,6 +34,15 @@ test("the newest audited commit is the first log row that names one", () => {
   const catalogOnlyFirst = AUDIT_DOC.replace("| 2026-10-22 | `c2d5ea52e1` (main; 42 commits)", "| 2026-10-22 | installed CLI 0.163.0");
   assert.equal(parseNewestAuditedSha(catalogOnlyFirst), "a6839a4812");
   assert.equal(parseNewestAuditedSha("# no log here"), null);
+  assert.deepEqual(parseAuditedShas(AUDIT_DOC), ["c2d5ea52e1", "a6839a4812"]);
+});
+
+test("the worst pin candidate decides", () => {
+  const ok = { ref: "release/1.0-a", breaking: false };
+  const bad = { ref: "release/1.0-b", breaking: true };
+  assert.equal(worstReport([bad, ok]), bad);
+  assert.equal(worstReport([ok]), ok);
+  assert.equal(worstReport([]), null);
 });
 
 test("the installed version is read from codex --version", () => {
@@ -142,6 +154,47 @@ test("a release branch forked before the audited commit is diffed from the merge
     const dropped = rangeReport(makeGit(dir), since, "release", new Set(["turn/start"]));
     assert.deepEqual(dropped.missing, ["turn/start"]);
     assert.equal(dropped.breaking, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a removal recorded as a forward look is still caught once it ships", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { spawnSync } = await import("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "upstream-check-"));
+  const g = (...args) => {
+    const r = spawnSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  const write = (methods) => {
+    const p = path.join(dir, "codex-rs/app-server-protocol/schema/json/ServerNotification.json");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(JSON.parse(schema(...methods)), null, 2));
+  };
+  try {
+    g("init", "-q", "-b", "main");
+    write(["turn/completed", "turn/started"]);
+    g("add", "-A");
+    g("commit", "-qm", "first audited pass");
+    const first = g("rev-parse", "HEAD");
+    write(["turn/started"]);
+    g("commit", "-qam", "main drops turn/completed (seen as a forward look, row recorded here)");
+    const second = g("rev-parse", "HEAD");
+    g("branch", "release", second); // the next release ships the removal
+    const git = makeGit(dir);
+    const referenced = new Set(["turn/completed", "turn/started"]);
+
+    // Starting from the newer row alone, the removal is invisible: base and since both lack it.
+    assert.deepEqual(rangeReport(git, second, "release", referenced).missing, []);
+    // The audit log's commits keep it in view; a commit the checkout lacks is skipped.
+    const known = knownMethods(git, [second, first, "0123456789"]);
+    const report = rangeReport(git, second, "release", referenced, known);
+    assert.deepEqual(report.missing, ["turn/completed"]);
+    assert.equal(report.breaking, true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
