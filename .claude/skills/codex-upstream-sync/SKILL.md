@@ -36,7 +36,8 @@ this skill says when to escalate to them.
 3. **Classify every item in the report**, using the doc's severity words (`breaking`,
    `should-upgrade`, `cosmetic`, `none`). Done when every line of the pin section and the
    forward-look section has one.
-   - *Pin section* = what the installed binary carries beyond the audited history. A schema
+   - *Pin sections* (one per candidate release branch) = what the installed binary gained since
+     the last checked pin. A schema
      deletion or a "companion names gone upstream" entry is `breaking` until you show otherwise.
      Read the deleted lines against the dependency checklist in the doc's Part 1 ("What the
      plugin sends/reads").
@@ -53,16 +54,18 @@ this skill says when to escalate to them.
      stay out of shipped prose (AGENTS.md conventions).
 
 4. **Typecheck against the installed binary:** `npm run build:codex > <scratchpad>/build.log;
-   echo $?`. Its prebuild regenerates types from the binary, so `tsc` turns red on a request
-   shape the binary does not accept, including one the companion adopted since the last row.
-   The script checks names only, so this step runs on every pass.
+   echo $?`. Its prebuild regenerates types from the binary, so `tsc` catches drift in what the
+   companion types. Its requests go through an untyped `client.request`, so neither this nor the
+   script proves request params: for each params schema the pin section lists as changed, read
+   it against what the companion sends (Part 1's checklist).
 
 5. **Escalate** to the doc's two full audits and a real-engine smoke (the `e2e-testing` skill)
    when step 3 found anything `breaking` or `should-upgrade` at the pin, or a failure or error
    path changed. Both spend another engine's quota: ask the user first.
 
 6. **Record the pass.** Paste the report's row skeleton at the top of the Audit log and fill in
-   the verdict, the anchors you read, and what was **not run**. A no-drift pass gets a row too:
+   the verdict, the anchors you read, and what was **not run**. Keep its ``pin `<ref>` @ `<sha>` ``
+   text as written: the next pass's pin sections start from it. A no-drift pass gets a row too:
    the next run's `--since` comes from it. When main has no commits past `--since` and the
    installed version matches the newest row, there is nothing new to record: report that
    instead of adding a row. A doc-only row may be committed straight to `main`;
@@ -76,11 +79,13 @@ a verdict in it.
 
 - **Pin.** A `rust-v<version>` tag when one exists. Otherwise it exports the installed binary's
   schema and takes every `release/<version>*` branch whose `schema/json` matches it file for
-  file. Matching schemas do not prove matching source, so each candidate is checked and the
-  worst one is reported.
-- **Merge-base.** A release branch usually forked from main before the audited commit, so the
-  pin section diffs from `merge-base(since, pin)`. Diffing from `since` would report every later
-  main addition as a deletion.
+  file. Matching schemas do not prove matching source, so each candidate gets its own section
+  and a break in any of them fails the run.
+- **Two baselines.** The forward look diffs main from `since`. The pin sections diff from the
+  last recorded pin instead, because `since` follows main: a change first seen as a forward look
+  is already behind `since` when it ships, and only the old pin still sees it as new. Both diffs
+  start at the merge-base with the ref, so later main additions a release branch lacks do not
+  read as deletions. With no recorded pin, the pin sections fall back to `since` and say so.
 - **Companion names.** It collects every string literal in `skills/codex/scripts` and keeps the
   ones upstream declared as a method at any commit in the Audit log. A name in that set that the
   pin no longer declares is a break. Using every logged commit rather than `since` alone means a

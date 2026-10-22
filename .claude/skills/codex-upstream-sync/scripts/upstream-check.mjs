@@ -49,6 +49,15 @@ export function parseNewestAuditedSha(docText) {
   return parseAuditedShas(docText)[0] ?? null;
 }
 
+// The installed release the newest row that recorded one was checked against, written by the row
+// skeleton as "pin `<ref>` @ `<sha>`". The pin section starts there, not at `since`: `since`
+// follows main, so a change first seen as a forward look is behind it by the time it ships.
+export function parseLastPin(docText) {
+  const log = docText.split(/^## Audit log\s*$/m)[1] ?? "";
+  const m = log.match(/^\|\s*\d{4}-\d{2}-\d{2}.*?pin `([^`]+)` @ `([0-9a-f]{7,40})`/m);
+  return m ? { ref: m[1], sha: m[2] } : null;
+}
+
 export function parseCliVersion(text) {
   return text.match(/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/)?.[1] ?? null;
 }
@@ -145,12 +154,6 @@ export function knownMethods(git, refs) {
   return out;
 }
 
-// A schema match does not pin the source: byte-identical release branches can still differ in
-// error variants or behaviour. Every candidate is checked, and the worst one decides.
-export function worstReport(reports) {
-  return reports.find((r) => r.breaking) ?? reports.at(-1) ?? null;
-}
-
 function methodsAt(git, ref) {
   const out = new Set();
   for (const f of METHOD_SCHEMAS) {
@@ -210,14 +213,13 @@ function findPin(git, version, tmp) {
   return { ref: matches.at(-1) ?? null, how: "schema", matches };
 }
 
-// `since` is the last audited main commit. A release branch usually forked from main before it,
-// so the diff starts at their merge-base: that is exactly what the ref carries that main at
-// `since` did not (cherry-picks, release bumps). Diffing from `since` itself would report every
-// later main addition the branch lacks as a deletion.
-// The name check does not lean on that moving base: `known` is every method declared at any
-// audited commit, so a removal first seen as a forward look is still caught once it ships.
-export function rangeReport(git, since, ref, referenced, known = methodsAt(git, since)) {
-  const base = git("merge-base", since, ref).trim();
+// The diff runs from merge-base(from, ref). For the installed pin `from` is the last recorded pin,
+// so the range is everything the binary gained since the last checked one, wherever main stood;
+// for the forward look it is `since`. A release branch usually forks from main before either,
+// and the merge-base keeps later main additions the branch lacks from reading as deletions.
+// `known` is every method declared at any audited commit, for the companion-name check.
+export function rangeReport(git, from, ref, referenced, known = methodsAt(git, from)) {
+  const base = git("merge-base", from, ref).trim();
   const numstat = git("diff", "--numstat", base, ref, "--", SCHEMA_DIR)
     .split("\n")
     .filter(Boolean)
@@ -338,8 +340,10 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!fs.existsSync(path.join(opts.codex, "codex-rs"))) throw new Error(`no codex checkout at ${opts.codex} (pass --codex or set CODEX_REPO)`);
   const git = makeGit(opts.codex);
-  const audited = parseAuditedShas(fs.readFileSync(AUDIT_DOC, "utf8"));
+  const doc = fs.readFileSync(AUDIT_DOC, "utf8");
+  const audited = parseAuditedShas(doc);
   const since = opts.since ?? audited[0];
+  const lastPin = parseLastPin(doc);
   if (!since) throw new Error("no --since and no commit on the newest Audit-log row");
   if (!git.ok("cat-file", "-e", `${since}^{commit}`)) throw new Error(`${since} is not in ${opts.codex}; fetch it first`);
 
@@ -352,8 +356,10 @@ async function main() {
     const main = git.ok("rev-parse", "--verify", "-q", "refs/remotes/origin/main") ? "origin/main" : "HEAD";
     const referenced = companionLiterals();
     const known = knownMethods(git, [since, ...audited, main]);
-    const pinReports = pin.matches.map((ref) => rangeReport(git, since, ref, referenced, known));
-    const atPin = worstReport(pinReports);
+    const pinFrom = lastPin && git.ok("cat-file", "-e", `${lastPin.sha}^{commit}`) ? lastPin.sha : since;
+    // A schema match does not pin the source: byte-identical release branches can differ in
+    // error variants or behaviour, so every candidate is reported and any break fails the run.
+    const pinReports = pin.matches.map((ref) => rangeReport(git, pinFrom, ref, referenced, known));
     const atMain = rangeReport(git, since, main, referenced, known);
     const fetchAge = lastFetchHours(git);
     const catalog = modelCatalog(resolveDefaultModel());
@@ -361,13 +367,14 @@ async function main() {
     const result = {
       codexRepo: opts.codex,
       since,
+      lastPin,
+      pinFrom,
       installed: versionText,
       lastFetchHours: fetchAge,
-      pinCandidates: pinReports.map((r) => ({ ref: r.ref, head: r.head, breaking: r.breaking })),
       version,
       pin,
       companionMethodNames: [...referenced].filter((n) => knownAtPin.has(n)).sort(),
-      atPin,
+      pinReports,
       atMain,
       catalog
     };
@@ -384,12 +391,17 @@ async function main() {
       );
       out.push(`installed: ${versionText}`);
       out.push(
+        lastPin && pinFrom === lastPin.sha
+          ? `last checked pin: ${lastPin.ref} @ ${lastPin.sha}`
+          : `last checked pin: ${lastPin ? `${lastPin.sha} not in the checkout` : "none recorded"} — pin ranges start from ${since} instead`
+      );
+      out.push(
         pin.ref
-          ? `pin: ${atPin.ref} (by ${pin.how}${pin.matches.length > 1 ? `; ${pin.matches.length} schema-identical candidates, all checked, worst shown; breaking in: ${pinReports.filter((r) => r.breaking).map((r) => r.ref).join(", ") || "none"}` : ""})`
+          ? `pin: ${pin.matches.join(", ")} (by ${pin.how}${pin.matches.length > 1 ? "; schema-identical candidates, each reported below" : ""})`
           : `pin: NONE — no rust-v${version} tag and no release/${version}* branch matches the exported schema. Fetch, or pass a ref by hand.`
       );
       out.push(`companion method names declared at the pin: ${result.companionMethodNames.length}`);
-      if (atPin) out.push(printRange("At the installed pin", atPin));
+      for (const r of pinReports) out.push(printRange("At the installed pin", r));
       out.push(printRange(`Forward look (${main}, not shipped yet)`, atMain));
       out.push(
         catalog.present
@@ -397,12 +409,12 @@ async function main() {
           : `\n## Model catalog\n${catalog.file} missing — run any codex command once, or skip`
       );
       out.push(
-        `\n## Audit-log row skeleton\n| ${new Date().toISOString().slice(0, 10)} | \`${atMain.head}\` (main; ${atMain.total} commits past \`${since}\`; installed ${versionText}, pin \`${atPin?.ref ?? "?"}\`) | skill (unversioned) | **<verdict>.** <what changed that the companion touches, with anchors>. **Not run:** <…> |`
+        `\n## Audit-log row skeleton\n| ${new Date().toISOString().slice(0, 10)} | \`${atMain.head}\` (main; ${atMain.total} commits past \`${since}\`; installed ${versionText}, pin \`${pin.ref ?? "?"}\` @ \`${pinReports.at(-1)?.head ?? "?"}\`) | skill (unversioned) | **<verdict>.** <what changed that the companion touches, with anchors>. **Not run:** <…> |`
       );
       console.log(out.join("\n"));
     }
-    if (!atPin) return 2;
-    return atPin.breaking ? 1 : 0;
+    if (!pinReports.length) return 2;
+    return pinReports.some((r) => r.breaking) ? 1 : 0;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

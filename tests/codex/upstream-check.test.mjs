@@ -12,9 +12,9 @@ import {
   parseCliVersion,
   parseAuditedShas,
   parseErrorVariants,
+  parseLastPin,
   parseNewestAuditedSha,
-  rangeReport,
-  worstReport
+  rangeReport
 } from "../../.claude/skills/codex-upstream-sync/scripts/upstream-check.mjs";
 
 const AUDIT_DOC = `# Audit
@@ -37,12 +37,10 @@ test("the newest audited commit is the first log row that names one", () => {
   assert.deepEqual(parseAuditedShas(AUDIT_DOC), ["c2d5ea52e1", "a6839a4812"]);
 });
 
-test("the worst pin candidate decides", () => {
-  const ok = { ref: "release/1.0-a", breaking: false };
-  const bad = { ref: "release/1.0-b", breaking: true };
-  assert.equal(worstReport([bad, ok]), bad);
-  assert.equal(worstReport([ok]), ok);
-  assert.equal(worstReport([]), null);
+test("the last checked pin is the newest row that recorded one", () => {
+  const doc = AUDIT_DOC.replace("(main; 42 commits)", "(main; installed 0.163.0, pin `origin/release/0.163.0-alpha.10.2` @ `30c1058df6`)");
+  assert.deepEqual(parseLastPin(doc), { ref: "origin/release/0.163.0-alpha.10.2", sha: "30c1058df6" });
+  assert.equal(parseLastPin(AUDIT_DOC), null);
 });
 
 test("the installed version is read from codex --version", () => {
@@ -195,6 +193,47 @@ test("a removal recorded as a forward look is still caught once it ships", async
     const report = rangeReport(git, second, "release", referenced, known);
     assert.deepEqual(report.missing, ["turn/completed"]);
     assert.equal(report.breaking, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a payload change first seen as a forward look is caught once it ships", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { spawnSync } = await import("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "upstream-check-"));
+  const g = (...args) => {
+    const r = spawnSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  const write = (field) => {
+    const p = path.join(dir, "codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ properties: { [field]: { type: "object" } }, required: [field] }, null, 2));
+  };
+  try {
+    g("init", "-q", "-b", "main");
+    write("turn");
+    g("add", "-A");
+    g("commit", "-qm", "installed release forks here");
+    g("branch", "release-old");
+    const oldPin = g("rev-parse", "release-old");
+    write("result");
+    g("commit", "-qam", "main renames turn -> result (forward look; the row moves --since here)");
+    const since = g("rev-parse", "HEAD");
+    g("branch", "release-new"); // the next installed release carries the rename
+    const git = makeGit(dir);
+    const referenced = new Set();
+
+    // From the moved --since the rename is behind the base: a false clean.
+    assert.equal(rangeReport(git, since, "release-new", referenced).breaking, false);
+    // From the last checked pin it is a deletion at the new pin.
+    const report = rangeReport(git, oldPin, "release-new", referenced);
+    assert.equal(report.breaking, true);
+    assert.ok(report.schema.deletions.some((l) => l.includes('"turn"')), report.schema.deletions.join("\n"));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
