@@ -1,19 +1,13 @@
 ---
 name: e2e-testing
 description: >-
-  Complete end-to-end testing for the agent-fleet-cc skills repo (codex). Use this whenever you need to verify engine
-  behavior end-to-end, run or write E2E tests, run the real-engine smoke check,
-  confirm a control-plane fix actually works against the live CLIs, prove a test
-  is a true regression, or answer "did you actually run it end-to-end?". Triggers
-  on: e2e, end-to-end, smoke test, test:e2e, real engine test, "verify the fix
-  works", "test against real codex", launch/wait/logs/cancel exit
-  codes, before-release verification, and any doubt about whether testing was
-  hermetic (fake engine) vs real. Reach for this skill BEFORE claiming any
-  end-to-end verification is done — there are two distinct layers and it is easy
-  to conflate them. Scope: this is about TESTING the engines' job lifecycle
-  (launch/wait/logs/cancel/status) in THIS repo — not generic uses of the phrase
-  "end-to-end" (e.g. end-to-end encryption) and not plain unit tests of a single
-  function.
+  End-to-end testing of the codex companion's job lifecycle
+  (launch/wait/logs/cancel/status) in this repo: the hermetic e2e suite and the
+  real-engine smoke against live codex. Use it to run or write E2E tests, to check
+  that a control-plane fix works against the live CLI, to prove a test is a true
+  regression, before a release, and before claiming anything was verified
+  end-to-end — the two layers are easy to conflate. Not for other senses of
+  "end-to-end" (encryption) or single-function unit tests.
 ---
 
 # Complete E2E Testing for agent-fleet-cc
@@ -131,7 +125,8 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
 - **A UTF-8 `logs --follow` regression must split a codepoint ACROSS polls.** A
   completed-job test reads the whole file in one shot and never splits — a false
   positive. Use async `spawn` on a *running* job, append the first byte of a
-  multibyte char, wait > `POLL_MS` (1000ms), append the rest in the next poll,
+  multibyte char, wait longer than the follow interval (`--poll-interval-ms`,
+  default 500 ms), append the rest in the next poll,
   then flip to `completed`. Old code emits `�`; fixed code (one `StringDecoder`
   carried across polls) emits the intact character.
 
@@ -141,11 +136,12 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
   with a readiness/status check showing `0` running.
 
 - **`pgrep -f` / `pkill -f` SELF-MATCH footgun.** The pattern string appears in
-  your own command line, so `pgrep -f "_worker.mjs"` returns your own shell's PID;
-  `pkill -f "_worker.mjs"` (or `kill $(pgrep …)`) then kills your shell — it dies
+  your own command line, so `pgrep -f "task-worker"` returns your own shell's PID;
+  `pkill -f "task-worker"` (or `kill $(pgrep …)`) then kills your shell — it dies
   with exit 144 and you chase a ghost. Match on something that can't appear in the
   pgrep command, or `pgrep` then `kill` only PIDs whose `ps -o cmd=` is an actual
-  `node …/_worker.mjs`, never a `/bin/bash -c`.
+  `node …/codex-companion.mjs task-worker` (or `…/codex-watchdog.mjs`), never a
+  `/bin/bash -c`.
 
 - **Real smoke leaves harmless terminal job records** in the companion data
   dir (`~/.local/state/codex-companion/state/`). They're inert; prune

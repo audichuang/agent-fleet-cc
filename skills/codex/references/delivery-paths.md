@@ -13,7 +13,7 @@ the same whichever path you pick — the work is identical once it reaches the e
 | `task --resume-last` | same, plus nothing | A follow-up on the same Codex thread. Codex remembers; the host restates nothing. |
 | `/subtask` (conversation fork) | inherits the whole conversation | The task genuinely depends on the conversation ("fix the bug we just diagnosed"). Restating the design would cost more than inheriting it. |
 
-**The host runs the companion.** There is no `/codex:*` slash command and no Codex subagent (`codex:codex-rescue` was removed in 2.0.0). A batch of independent checks is N companion calls from the main thread.
+**The host runs the companion.** There is no `/codex:*` slash command and no Codex subagent. A batch of independent checks is N companion calls from the main thread.
 
 **A check does not need the conversation.** If the request is already spelled out, the top two rows are the answer. Reach for the fork on a *continuation*, when restating the design would cost more than inheriting the thread.
 
@@ -32,7 +32,7 @@ Version-dependent and easy to mix up. Checked against Claude Code 2.1.223:
 | `context: fork` (skill frontmatter) | **no** — "It won't have access to your conversation history" | yes |
 | `Agent(subagent_type: "fork")` | **yes** — "inherits your context" | yes |
 
-Before 2.1.212, `/fork` was the in-session fork that `/subtask` is now. The last two rows are the
+The last two rows are the
 pair that actually gets confused: near-identical spelling, opposite answer in column one.
 
 **Do not put `context: fork` on the skill.** A forked general-purpose subagent has no `Agent` tool,
