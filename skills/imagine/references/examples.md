@@ -50,7 +50,7 @@ then:
 node …/imagine.mjs --prompt-file /abs/path/prompt.txt --aspect 1:1 --model grok-imagine-image-2.0
 ```
 
-Runs the recipe straight through with zero motion: medium → subject → setting → framing → light (with direction and the shadow it casts) → palette → material → finish. Authored rather than adapted — the corpus contains no product-photography prompt. 1:1 is xAI's own stated use case for 'Social media, thumbnails', and a square frame keeps the object centred rather than recomposed around it. 'no other text' is the scoped negation that stops the model inventing packaging labels. Note what is absent: no quality-booster stack, and no resolution word — resolution=1k to iterate, 2k for the keeper.
+Runs the recipe straight through with zero motion: medium → subject → setting → framing → light (with direction and the shadow it casts) → palette → material → finish. Authored rather than adapted — the corpus contains no product-photography prompt. 1:1 is xAI's own stated use case for 'Social media, thumbnails', and a square frame keeps the object centred rather than recomposed around it. 'no other text' is the scoped negation that stops the model inventing packaging labels. Note what is absent: no quality-booster stack, and no resolution word — resolution is a flag, chosen before the call.
 
 ## Environmental portrait
 
@@ -82,7 +82,7 @@ then:
 node …/imagine.mjs --prompt-file /abs/path/prompt.txt --aspect 2:3 --model grok-imagine-image-2.0
 ```
 
-Authored; no corpus prompt renders a quoted literal string, so this is built entirely on Runware's text-rendering guide. Every literal word is quoted, given a typographic role, and given a position — the three things that separate rendered copy from invented copy. Both strings are short (a few words each), which is the documented reliability threshold. 1k renders short quoted strings as legibly as 2k (measured, `prompt-craft.md`); use 2k for the print-grain detail. 2:3 is a standard print poster ratio and is on both of xAI's aspect lists. The print-process detail (halftone grain, misregistration) is the finish clause doing the work a 'vintage' adjective could not.
+Authored; no corpus prompt renders a quoted literal string, so this is built entirely on Runware's text-rendering guide. Every literal word is quoted, given a typographic role, and given a position — the three things that separate rendered copy from invented copy. Both strings are short (a few words each), which is the documented reliability threshold. 1k renders short quoted strings as legibly as 2k (measured, `prompt-craft.md`). 2:3 is a standard print poster ratio and is on both of xAI's aspect lists. The print-process detail (halftone grain, misregistration) is the finish clause doing the work a 'vintage' adjective could not.
 
 ## Landing page hero mockup
 
