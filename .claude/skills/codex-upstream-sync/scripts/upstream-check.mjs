@@ -6,7 +6,8 @@
 //
 //   node .claude/skills/codex-upstream-sync/scripts/upstream-check.mjs [--codex <dir>] [--since <sha>] [--json]
 //
-// --codex defaults to $CODEX_REPO, then the sibling ../codex of this repo.
+// --codex defaults to $CODEX_REPO, then the sibling ../codex of this repo's main checkout (so a
+// run from a linked worktree under .claude/worktrees still finds it).
 // --since defaults to the commit on the newest row of docs/codex-protocol-sync-audit.md's Audit log.
 //
 // Exit 0: no drift at the installed pin. Exit 1: drift at the pin that needs a reviewer (a schema
@@ -292,8 +293,15 @@ function printRange(label, r, limit = 40) {
   return lines.join("\n");
 }
 
+// The main checkout's parent, not this file's: a linked worktree's ../codex is not the sibling.
+function defaultCodexDir() {
+  const r = sh("git", ["-C", REPO, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  const mainCheckout = r.status === 0 ? path.dirname(r.stdout.trim()) : REPO;
+  return path.resolve(mainCheckout, "../codex");
+}
+
 function parseArgs(argv) {
-  const opts = { codex: process.env.CODEX_REPO || path.resolve(REPO, "../codex"), since: null, json: false };
+  const opts = { codex: process.env.CODEX_REPO || defaultCodexDir(), since: null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
     const value = () => inline ?? argv[++i];

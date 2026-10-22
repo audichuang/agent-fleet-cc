@@ -3,8 +3,8 @@ name: codex-upstream-sync
 description: >-
   Checks that the codex skill is still compatible with the Codex CLI: the installed binary and
   what upstream main is about to ship. Use when a new codex-cli version is installed, when
-  upstream codex has new commits since the last Audit-log row, before landing a codex skill
-  change, or when asked whether the skill works with the latest Codex.
+  upstream codex has new commits since the last Audit-log row, or when asked whether the
+  skill works with the latest Codex.
 ---
 
 # Codex upstream sync
@@ -17,8 +17,8 @@ this skill says when to escalate to them.
 
 ## Steps
 
-1. **Fetch the codex checkout.** It is the sibling `../codex` of this repo, or `$CODEX_REPO`
-   (the Ubuntu box keeps it elsewhere). `git -C <codex> fetch -q origin`, then
+1. **Fetch the codex checkout.** It is `../codex` beside this repo's main checkout (the script
+   finds it from a worktree too), or `$CODEX_REPO` when a machine keeps it elsewhere. `git -C <codex> fetch -q origin`, then
    `git -C <codex> merge -q --ff-only origin/main` when its worktree is clean. The script reads
    refs only and never fetches, so a stale checkout gives a stale answer.
 
@@ -60,8 +60,9 @@ this skill says when to escalate to them.
 
 6. **Record the pass.** Paste the report's row skeleton at the top of the Audit log and fill in
    the verdict, the anchors you read, and what was **not run**. A no-drift pass gets a row too:
-   the next run's `--since` comes from it. A doc-only row may go straight to `main`; a companion
-   fix follows AGENTS.md's review gate and touches only `skills/codex/` and `tests/codex/`.
+   the next run's `--since` comes from it. A doc-only row may be committed straight to `main`;
+   a companion fix follows AGENTS.md's review gate and touches only `skills/codex/` and
+   `tests/codex/`. Pushing either waits for the user's go.
 
 The pass is complete when the new row's commit is the fetched main and every reported item has
 a verdict in it.
