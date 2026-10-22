@@ -139,9 +139,9 @@ debugging; internalize the *why* so you adapt rather than copy blindly.
   your own command line, so `pgrep -f "task-worker"` returns your own shell's PID;
   `pkill -f "task-worker"` (or `kill $(pgrep …)`) then kills your shell — it dies
   with exit 144 and you chase a ghost. Match on something that can't appear in the
-  pgrep command, or `pgrep` then `kill` only PIDs whose `ps -o cmd=` is an actual
+  pgrep command, or `pgrep` then `kill` only PIDs whose `ps -o command=` is an actual
   `node …/codex-companion.mjs task-worker` (or `…/codex-watchdog.mjs`), never a
-  `/bin/bash -c`.
+  shell's `-c` command line.
 
 - **Real smoke leaves harmless terminal job records** in the companion data
   dir (`~/.local/state/codex-companion/state/`). They're inert; prune
