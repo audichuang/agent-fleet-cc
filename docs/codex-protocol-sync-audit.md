@@ -14,6 +14,10 @@ rebuild.
 
 ## How to keep this current
 
+**The routine pass is the `codex-upstream-sync` skill** (`.claude/skills/codex-upstream-sync/`): its
+script automates steps 1–1c and the Part 1 method-name check, and prints the Audit-log row to
+fill in. The steps below are what it does, plus the full audits it escalates to.
+
 When you want to re-check after new Codex commits land:
 
 1. **Find what changed upstream** since the baseline below:
@@ -68,8 +72,8 @@ breaks) → `cosmetic` (additive, ignored fine) → `none`. Health: `bug` → `s
 | Codex CLI HEAD | `99660ab3c7` (main @ 2026-08-23; installed binary codex-cli **0.149.0** — still no `rust-v0.149.0` tag, only `release/0.149.0-alpha.*` branches (the nearest tag is `rust-v0.150.0-alpha.7`), so keep pinning diffs to main) |
 | Last re-check | 2026-08-23 (wire-schema diff `646f7c0a91`→main, deletion-only read of the 6 files that have any; durable-checklist re-assertion; `build:codex` against types regenerated from the installed 0.149.0 binary). **Second pass same day**, doc-only, no new diff: an independent Codex review found the managed-auto-review anchor overstated, so every `model_auto_review.rs` pin in the checklist was re-read at `99660ab3c7` and proof was split from inference — see the newest Audit-log row. |
 | Last FULL 11-dimension audit | 2026-07-21 @ `d5998e7452` (codex-cli 0.144.6) → `codex@1.3.2` |
-| Plugin version now | `codex@1.6.0` (was `1.5.0` through the 2026-08-23 first pass; bumped when the failed-turn fix landed — `npm run check-version`) |
-| Codex repo checked | `/home/audichuang/research/codex` |
+| Plugin version now | unversioned since `9cd3c69` (skills ship without version numbers; the commit message is the change record) |
+| Codex repo checked | the sibling `../codex` checkout, or `$CODEX_REPO` (the path differs per machine) |
 
 > **2026-08-09 re-check (`57f42a8113` → main `646f7c0a91`, 80 commits, 20 on protocol paths;
 > installed CLI 0.146.1 → **0.147.0**):** **No drift — no plugin change needed.** Cheapest possible

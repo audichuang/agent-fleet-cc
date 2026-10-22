@@ -148,6 +148,6 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 ## 細節指向
 - 交付路徑選型(直接 `task` · `--resume-last` · conversation fork)含 fork 命名
   陷阱:`skills/codex/references/delivery-paths.md`。
-- protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。
+- protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。例行檢查(新版 codex-cli、upstream 有新 commit)走 `.claude/skills/codex-upstream-sync/`:腳本做 diff,agent 分類並寫 Audit log 列。
 - 寫 GPT-6.1 prompt:`skills/codex/references/prompting.md`;worktree 驗證合約見
   `lib/worktree-guard.mjs`。
