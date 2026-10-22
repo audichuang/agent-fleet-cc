@@ -82,7 +82,7 @@ then:
 node …/imagine.mjs --prompt-file /abs/path/prompt.txt --aspect 2:3 --model grok-imagine-image-2.0
 ```
 
-Authored; no corpus prompt renders a quoted literal string, so this is built entirely on Runware's text-rendering guide. Every literal word is quoted, given a typographic role, and given a position — the three things that separate rendered copy from invented copy. Both strings are short (a few words each), which is the documented reliability threshold. Pair with resolution="2k": fine or crowded glyphs degrade at 1k. 2:3 is a standard print poster ratio and is on both of xAI's aspect lists. The print-process detail (halftone grain, misregistration) is the finish clause doing the work a 'vintage' adjective could not.
+Authored; no corpus prompt renders a quoted literal string, so this is built entirely on Runware's text-rendering guide. Every literal word is quoted, given a typographic role, and given a position — the three things that separate rendered copy from invented copy. Both strings are short (a few words each), which is the documented reliability threshold. 1k renders short quoted strings as legibly as 2k (measured, `prompt-craft.md`); use 2k for the print-grain detail. 2:3 is a standard print poster ratio and is on both of xAI's aspect lists. The print-process detail (halftone grain, misregistration) is the finish clause doing the work a 'vintage' adjective could not.
 
 ## Landing page hero mockup
 
@@ -162,4 +162,4 @@ then:
 node …/imagine.mjs --prompt-file /abs/path/prompt.txt --aspect 3:2 --model grok-imagine-image-2.0
 ```
 
-Authored. Diagrams are the hardest image case because they are typography plus geometry, so this leans on both text rules at once: quoted labels with a stated role and position, and short strings. Run it at resolution="2k" — small glyphs are exactly what 1k loses. It also carries the only kind of negation with published support: two concrete, scoped exclusions ('no gradients and no drop shadows', 'no other text') rather than a broad style manifesto. Expect to iterate; no source claims any model gets label placement right first try.
+Authored. Diagrams are the hardest image case because they are typography plus geometry, so this leans on both text rules at once: quoted labels with a stated role and position, and short strings. 1k holds short labels legibly (measured, `prompt-craft.md`); move to 2k when the line work itself is dense. It also carries the only kind of negation with published support: two concrete, scoped exclusions ('no gradients and no drop shadows', 'no other text') rather than a broad style manifesto. Expect to iterate; no source claims any model gets label placement right first try.
