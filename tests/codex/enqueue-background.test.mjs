@@ -202,3 +202,24 @@ test("spawnWatchdog closes the opened log fd even when the spawn throws (no fd l
   );
   assert.equal(closedFd, 99, "the inherited log fd is closed in finally even on spawn failure");
 });
+
+// The launch JSON is the caller's only look at a job before it runs. A review launched
+// from the main checkout instead of the worktree it meant (Ubuntu, 2026-10-23: three
+// reviews of the wrong branch) and a desktop launch checked with `sleep; status` both
+// needed a field the record already had: say where it runs and on which backend.
+test("enqueueBackgroundTask's launch payload names the checkout and the desktop backend", () => {
+  const workspace = makeTempDir();
+  const launch = (job) =>
+    enqueueBackgroundTask(workspace, job, { kind: "task" }, {
+      spawnWorker: () => ({ pid: 1 }),
+      spawnWatchdog: () => ({ pid: 2 })
+    }).payload;
+
+  const desktop = launch({ id: "task-desk", workspaceRoot: workspace, title: "t", summary: "s", backend: "desktop" });
+  assert.equal(desktop.workspaceRoot, workspace);
+  assert.equal(desktop.backend, "desktop");
+
+  const cli = launch({ id: "task-cli", workspaceRoot: workspace, title: "t", summary: "s" });
+  assert.equal(cli.workspaceRoot, workspace);
+  assert.equal("backend" in cli, false, "a CLI job's record has no backend field, so neither does its launch line");
+});

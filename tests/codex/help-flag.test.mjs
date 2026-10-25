@@ -57,3 +57,39 @@ for (const raw of ["--fresh --help", "--json --help"]) {
     assert.match(result.stdout, /^Usage:/);
   });
 }
+
+// Ubuntu, 2026-10-23: agents reviewing a worktree grepped the companion source for `--cwd`
+// and `--expected-*`, then tripped the all-or-none rule, because --help named neither.
+test("--help names --cwd and the all-or-none --expected-* triplet", () => {
+  const result = spawnSync(process.execPath, [SCRIPT, "task", "--help"], { encoding: "utf8", env: { ...process.env, PATH: "" } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--cwd <dir>/);
+  assert.match(result.stdout, /--expected-worktree <path> --expected-branch <name> --expected-base <ref>/);
+  assert.match(result.stdout, /all three or none/);
+});
+
+// The skill's prose is what agents copy flags from, and --help is what they check them
+// against. A flag the docs name that --help does not was the source of the `--cwd` hunt
+// above; the other way round, a doc that names a flag the companion dropped sends every
+// agent into "has no option". Only flags of other tools, and flags the docs name to say
+// they do not exist, are exempt.
+test("every --flag the skill's docs name is one --help lists", async () => {
+  const fs = await import("node:fs");
+  const skillDir = path.dirname(path.dirname(SCRIPT));
+  const NOT_COMPANION_FLAGS = new Set([
+    "--help", // the help flag itself
+    "--timeout" // SKILL.md names it to say there is none (`--timeout-ms` is the flag)
+  ]);
+  const docs = [
+    path.join(skillDir, "SKILL.md"),
+    ...fs.readdirSync(path.join(skillDir, "references")).map((name) => path.join(skillDir, "references", name))
+  ];
+  const help = spawnSync(process.execPath, [SCRIPT, "--help"], { encoding: "utf8", env: { ...process.env, PATH: "" } }).stdout;
+  const listed = new Set(help.match(/--[a-z][a-z0-9-]*/g));
+  for (const file of docs) {
+    for (const [flag] of fs.readFileSync(file, "utf8").matchAll(/(?<![\w-])--[a-z][a-z0-9-]*/g)) {
+      if (NOT_COMPANION_FLAGS.has(flag)) continue;
+      assert.ok(listed.has(flag), `${path.relative(skillDir, file)} names ${flag}, which --help does not list`);
+    }
+  }
+});

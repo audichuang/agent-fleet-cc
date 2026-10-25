@@ -116,7 +116,11 @@ function printUsage() {
       "  node scripts/codex-companion.mjs wait <job-id> [--timeout-ms <ms>] [--poll-interval-ms <ms>] [--json]",
       "  node scripts/codex-companion.mjs logs [job-id] [--follow] [--json]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
-      "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
+      "  node scripts/codex-companion.mjs cancel [job-id] [--json]",
+      "",
+      "Every verb takes [--cwd <dir>]: the git checkout to work on (default: the current directory).",
+      "Every verb but setup also takes [--expected-worktree <path> --expected-branch <name> --expected-base <ref>]:",
+      "all three or none; the verb refuses to run unless the checkout, branch and base match."
     ].join("\n")
   );
 }
@@ -1084,6 +1088,11 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
       status: "queued",
       title: job.title,
       summary: job.summary,
+      // The launch line is the caller's one look before the job runs: the checkout it will
+      // run in (a review from the main checkout instead of the worktree meant reviewed the
+      // wrong branch) and, for the app, the backend, so no `sleep; status` is needed.
+      workspaceRoot: job.workspaceRoot,
+      ...(job.backend ? { backend: job.backend } : {}),
       logFile,
       signalFile
     },

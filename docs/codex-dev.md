@@ -44,7 +44,9 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   `app`(`codex://threads/new?prompt&path` 深層連結 + 在 App 視窗按 Enter,再從 rollout 檔以首則訊息找出 thread id)。使用者文件在 `skills/codex/references/desktop-backend.md`;
   協定契約、實測證據與 app 更新後的重驗步驟在 `docs/codex-desktop-ipc-audit.md`,為何這樣設計在 `docs/adr/0004`。
 - `scripts/lib/worktree-guard.mjs` — **條件式** expected-triplet 驗證(給齊 expected-worktree /
-  branch / base 才 assert;現行 verb 都沒帶 → 實質 no-op)。
+  branch / base 才 assert;沒帶就是 no-op)。SKILL.md 與 `--help` 都教呼叫端:worktree 用 `--cwd`,
+  要硬擋錯 checkout 時三個一起給。背景 launch 的 JSON 帶 `workspaceRoot`(與 desktop 的 `backend`),
+  呼叫端在 wait 之前就看得到 job 跑在哪個 checkout。
 
 ## 進來改要遵守
 - **沒有 `commands/`。** host 依 skill 呼叫 companion verb(`review` / `adversarial-review` /

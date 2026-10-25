@@ -8,6 +8,8 @@ import path from "node:path";
 import { writeJobFile, saveState } from "../../skills/codex/scripts/lib/state.mjs";
 import { resolveWorkspaceRoot } from "../../skills/codex/scripts/lib/workspace.mjs";
 import { buildSingleJobSnapshot } from "../../skills/codex/scripts/lib/job-control.mjs";
+import "./helpers.mjs";
+import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
 
 const COMPANION = path.resolve("skills/codex/scripts/codex-companion.mjs");
 
@@ -330,4 +332,29 @@ test("wait --expected-worktree blocks cross-workspace lookup (non-zero exit, no 
     `expected non-zero (job not found) but got ${r.status}; stdout: ${r.stdout}; stderr: ${r.stderr}`);
   assert.doesNotMatch(r.stdout + r.stderr, new RegExp(foreignJobId.replace(/-/g, "\\-") + ".*completed", "i"),
     "foreign job must not appear as completed in output");
+});
+
+// A review launched from the main checkout reviews the main checkout's branch, however the
+// prompt names the worktree. `--cwd` points it at the worktree, and the launch JSON's
+// workspaceRoot is how the caller sees which one it got before the job runs.
+test("review --background --cwd <worktree>: the launch JSON names the worktree, not the shell's checkout", () => {
+  const { dir } = makeRepo();
+  const wt = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wtguard-wt-")), "wt");
+  spawnSync("git", ["worktree", "add", "-q", "-b", "fix", wt], { cwd: dir, encoding: "utf8" });
+  fs.writeFileSync(path.join(wt, "f"), "2");
+  fs.writeFileSync(path.join(dir, "f"), "3");
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "wtguard-bin-"));
+  installFakeCodex(binDir);
+  const env = { ...buildEnv(binDir), CODEX_COMPANION_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "pd-")) };
+  const launch = (args) => spawnSync(process.execPath, [COMPANION, "review", "--background", "--json", "--scope", "working-tree", ...args], { cwd: dir, encoding: "utf8", env });
+
+  const here = launch([]);
+  assert.equal(here.status, 0, here.stderr);
+  assert.equal(fs.realpathSync(JSON.parse(here.stdout).workspaceRoot), fs.realpathSync(dir));
+
+  const there = launch(["--cwd", wt]);
+  assert.equal(there.status, 0, there.stderr);
+  const payload = JSON.parse(there.stdout);
+  assert.equal(fs.realpathSync(payload.workspaceRoot), fs.realpathSync(wt));
+  spawnSync(process.execPath, [COMPANION, "wait", payload.jobId, "--cwd", wt, "--timeout-ms", "15000"], { encoding: "utf8", env });
 });
