@@ -119,8 +119,9 @@ function printUsage() {
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]",
       "",
       "Every verb takes [--cwd <dir>]: the git checkout to work on (default: the current directory).",
+      "A new run starts there; a thread continued with --thread or --resume-last may keep the folder it started in.",
       "Every verb but setup also takes [--expected-worktree <path> --expected-branch <name> --expected-base <ref>]:",
-      "all three or none; the verb refuses to run unless the checkout, branch and base match."
+      "all three or none; the verb refuses to run unless the --cwd checkout, branch and base match."
     ].join("\n")
   );
 }
@@ -1090,11 +1091,12 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
       summary: job.summary,
       // The launch line is the caller's one look before the job runs: the checkout it will
       // run in (a review from the main checkout instead of the worktree meant reviewed the
-      // wrong branch) and, for the app, the backend, so no `sleep; status` is needed. A
-      // continued app thread keeps the folder it was started in (the continuation inherits
-      // the thread's settings and sends no cwd), and --resume-last can pick a thread another
-      // checkout started, so a desktop continuation has no checkout to promise.
-      ...(job.backend === "desktop" && request.threadId ? {} : { workspaceRoot: job.workspaceRoot }),
+      // wrong branch) and, for the app, the backend, so no `sleep; status` is needed. Only a
+      // new run is known to start there: a continued thread can keep the folder it was
+      // started in (an app continuation sends no cwd, a thread still loaded in a broker
+      // ignores the resume's cwd, and --resume-last can pick a thread another checkout
+      // started), so a continuation promises no checkout.
+      ...(request.threadId ? {} : { workspaceRoot: job.workspaceRoot }),
       ...(job.backend ? { backend: job.backend } : {}),
       logFile,
       signalFile
