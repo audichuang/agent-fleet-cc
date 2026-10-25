@@ -1090,10 +1090,11 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
       summary: job.summary,
       // The launch line is the caller's one look before the job runs: the checkout it will
       // run in (a review from the main checkout instead of the worktree meant reviewed the
-      // wrong branch) and, for the app, the backend, so no `sleep; status` is needed. An app
-      // thread named by --thread keeps the folder it was started in (the continuation
-      // inherits the thread's settings and sends no cwd), so there is no checkout to promise.
-      ...(job.backend === "desktop" && request.threadId && !request.resumeLast ? {} : { workspaceRoot: job.workspaceRoot }),
+      // wrong branch) and, for the app, the backend, so no `sleep; status` is needed. A
+      // continued app thread keeps the folder it was started in (the continuation inherits
+      // the thread's settings and sends no cwd), and --resume-last can pick a thread another
+      // checkout started, so a desktop continuation has no checkout to promise.
+      ...(job.backend === "desktop" && request.threadId ? {} : { workspaceRoot: job.workspaceRoot }),
       ...(job.backend ? { backend: job.backend } : {}),
       logFile,
       signalFile

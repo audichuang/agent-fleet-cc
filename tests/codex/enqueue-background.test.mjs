@@ -224,10 +224,12 @@ test("enqueueBackgroundTask's launch payload names the checkout and the desktop 
   assert.equal("backend" in cli, false, "a CLI job's record has no backend field, so neither does its launch line");
 });
 
-// Codex review of the change above: `task --backend desktop --cwd B --thread <thread from A>`
-// runs in A, because the app continuation inherits the thread's settings and sends no cwd.
-// A workspaceRoot of B would promise the wrong checkout, so that launch names none.
-test("enqueueBackgroundTask names no checkout for an app thread continued by --thread", () => {
+// Codex review of the change above, two rounds: `task --backend desktop --cwd B --thread
+// <thread from A>` runs in A, because the app continuation inherits the thread's settings and
+// sends no cwd; and that job, stored under B, makes a later desktop `--resume-last --cwd B`
+// continue A's thread too. A workspaceRoot of B would promise the wrong checkout either way,
+// so no desktop continuation names one.
+test("enqueueBackgroundTask names no checkout for a continued app thread", () => {
   const workspace = makeTempDir();
   const launch = (job, request) =>
     enqueueBackgroundTask(workspace, job, request, {
@@ -236,24 +238,24 @@ test("enqueueBackgroundTask names no checkout for an app thread continued by --t
     }).payload;
   const threadId = "019a0000-0000-7000-8000-000000000001";
 
-  const named = launch(
-    { id: "task-thread", workspaceRoot: workspace, title: "t", summary: "s", backend: "desktop" },
-    { kind: "task", backend: "desktop", threadId, resumeLast: false }
-  );
-  assert.equal("workspaceRoot" in named, false);
-  assert.equal(named.backend, "desktop");
+  for (const resumeLast of [false, true]) {
+    const continued = launch(
+      { id: `task-desk-${resumeLast}`, workspaceRoot: workspace, title: "t", summary: "s", backend: "desktop" },
+      { kind: "task", backend: "desktop", threadId, resumeLast }
+    );
+    assert.equal("workspaceRoot" in continued, false, `desktop continuation (resumeLast=${resumeLast})`);
+    assert.equal(continued.backend, "desktop");
+  }
 
-  // --resume-last finds this checkout's own last thread, so the checkout still holds.
-  const resumed = launch(
-    { id: "task-resume", workspaceRoot: workspace, title: "t", summary: "s", backend: "desktop" },
-    { kind: "task", backend: "desktop", threadId, resumeLast: true }
+  // A new app thread is started with this cwd, and the CLI resume sends cwd: both hold.
+  const fresh = launch(
+    { id: "task-desk-new", workspaceRoot: workspace, title: "t", summary: "s", backend: "desktop" },
+    { kind: "task", backend: "desktop", resumeLast: false }
   );
-  assert.equal(resumed.workspaceRoot, workspace);
-
-  // The CLI resume sends cwd, so a CLI --thread runs in the checkout it names.
+  assert.equal(fresh.workspaceRoot, workspace);
   const cli = launch(
     { id: "task-cli-thread", workspaceRoot: workspace, title: "t", summary: "s" },
-    { kind: "task", backend: "cli", threadId, resumeLast: false }
+    { kind: "task", backend: "cli", threadId, resumeLast: true }
   );
   assert.equal(cli.workspaceRoot, workspace);
 });
