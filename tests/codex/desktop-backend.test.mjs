@@ -721,9 +721,13 @@ test("the new thread is found by its first user message, newer than the moment w
   const now = new Date();
   const dir = path.join(home, "sessions", String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0"));
   fs.mkdirSync(dir, { recursive: true });
-  const write = (id, text, mtimeMs) => {
+  const write = (id, text, mtimeMs, mintedMs = mtimeMs) => {
     const file = path.join(dir, `rollout-2026-10-03T00-00-00-${id}.jsonl`);
-    fs.writeFileSync(file, `${JSON.stringify({ type: "response_item", payload: { role: "user", content: [{ type: "input_text", text }] } })}\n`);
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({ type: "session_meta", payload: { id, timestamp: new Date(mintedMs).toISOString() } })}\n` +
+        `${JSON.stringify({ type: "response_item", payload: { role: "user", content: [{ type: "input_text", text }] } })}\n`
+    );
     fs.utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
   };
   const since = Date.now() - 1_000;
@@ -734,6 +738,60 @@ test("the new thread is found by its first user message, newer than the moment w
   const found = await findThreadStartedWithPrompt(prompt, { since, env: { CODEX_HOME: home }, timeoutMs: 0 });
   assert.equal(found, "33333333-3333-3333-3333-333333333333");
   assert.equal(await findThreadStartedWithPrompt("never sent", { since, env: { CODEX_HOME: home }, timeoutMs: 0 }), null);
+});
+
+// Codex review, round 4: the finder took any rollout WRITTEN after `since` whose first user
+// message matched. A thread another checkout started earlier with the same prompt is still
+// being written while it runs, so it was picked; the job then followed that thread's answer
+// and the one we sent went untracked. Only a thread minted after `since` is ours, and two of
+// them are refused rather than guessed between.
+function sessionsDir(home) {
+  const now = new Date();
+  const dir = path.join(home, "sessions", String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0"));
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function writeRollout(dir, id, text, { mintedMs, mtimeMs = Date.now(), meta = true }) {
+  const file = path.join(dir, `rollout-2026-10-25T00-00-00-${id}.jsonl`);
+  const lines = [
+    ...(meta ? [{ type: "session_meta", payload: { id, timestamp: new Date(mintedMs).toISOString(), cwd: "/elsewhere" } }] : []),
+    { type: "response_item", payload: { role: "user", content: [{ type: "input_text", text }] } }
+  ];
+  fs.writeFileSync(file, lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
+  fs.utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
+}
+
+test("a thread minted before the launch is not ours, however recently it was written", async () => {
+  const home = makeTempDir("codex-home-");
+  const dir = sessionsDir(home);
+  const since = Date.now() - 1_000;
+  const prompt = "run the release checklist";
+  writeRollout(dir, "44444444-4444-4444-4444-444444444444", prompt, { mintedMs: since - 600_000 }); // another checkout's run, still writing
+  assert.equal(await findThreadStartedWithPrompt(prompt, { since, env: { CODEX_HOME: home }, timeoutMs: 0 }), null);
+
+  writeRollout(dir, "55555555-5555-5555-5555-555555555555", prompt, { mintedMs: Date.now() });
+  assert.equal(await findThreadStartedWithPrompt(prompt, { since, env: { CODEX_HOME: home }, timeoutMs: 0 }), "55555555-5555-5555-5555-555555555555");
+});
+
+test("two threads minted after the launch with the prompt are refused, not guessed between", async () => {
+  const home = makeTempDir("codex-home-");
+  const dir = sessionsDir(home);
+  const since = Date.now() - 1_000;
+  const prompt = "run the release checklist";
+  writeRollout(dir, "66666666-6666-6666-6666-666666666666", prompt, { mintedMs: Date.now() });
+  writeRollout(dir, "77777777-7777-7777-7777-777777777777", prompt, { mintedMs: Date.now() });
+  await assert.rejects(
+    findThreadStartedWithPrompt(prompt, { since, env: { CODEX_HOME: home }, timeoutMs: 0 }),
+    /2 new Codex desktop threads started with this prompt.*Check the app/s
+  );
+});
+
+test("a rollout with no session_meta line has no mint time and is not taken", async () => {
+  const home = makeTempDir("codex-home-");
+  const dir = sessionsDir(home);
+  const since = Date.now() - 1_000;
+  writeRollout(dir, "88888888-8888-8888-8888-888888888888", "hello", { mintedMs: Date.now(), meta: false });
+  assert.equal(await findThreadStartedWithPrompt("hello", { since, env: { CODEX_HOME: home }, timeoutMs: 0 }), null);
 });
 
 function fakeSpawn(script) {

@@ -466,7 +466,12 @@ function sessionDirsToScan(codexHome, now) {
 }
 
 // The app writes each thread's rollout to $CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<id>.jsonl
-// as soon as the first turn starts; the first user message identifies ours.
+// as soon as the first turn starts; the first user message identifies ours. A file's mtime
+// only says it was written lately, and a thread another checkout started earlier with the
+// same prompt is written to all through its run: it was picked, and the job followed that
+// thread's answer while ours went untracked. So the thread must be MINTED after `since`
+// (`session_meta.timestamp`, the rollout's first line; the desktop audit's B12), and two
+// such threads with the prompt are refused rather than guessed between.
 /** @param {string} prompt @param {{ since?: number, env?: NodeJS.ProcessEnv, timeoutMs?: number, pollMs?: number, now?: () => number }} [options] */
 export async function findThreadStartedWithPrompt(prompt, {
   since = 0,
@@ -479,6 +484,7 @@ export async function findThreadStartedWithPrompt(prompt, {
   const needle = JSON.stringify(prompt.trim().slice(0, 200)).slice(1, -1);
   const deadline = now() + timeoutMs;
   for (;;) {
+    const found = new Set();
     for (const dir of sessionDirsToScan(codexHome, now())) {
       let names = [];
       try {
@@ -496,14 +502,35 @@ export async function findThreadStartedWithPrompt(prompt, {
           const head = Buffer.alloc(256 * 1024);
           const read = fs.readSync(fd, head, 0, head.length, 0);
           fs.closeSync(fd);
-          if (head.subarray(0, read).toString("utf8").includes(needle)) return match[1];
+          const text = head.subarray(0, read).toString("utf8");
+          if (!(threadMintedAt(text) >= since) || !text.includes(needle)) continue;
+          found.add(match[1]);
         } catch {
           continue;
         }
       }
     }
+    if (found.size > 1) {
+      throw new Error(
+        `${found.size} new Codex desktop threads started with this prompt (${[...found].join(", ")}), so which one is this job's is unknown. Check the app: follow the one you sent, or stop the extra one. Rerunning without checking can run the task again.`
+      );
+    }
+    if (found.size === 1) return [...found][0];
     if (now() > deadline) return null;
     await sleep(pollMs);
+  }
+}
+
+// When the rollout's thread was minted: its first line is `session_meta`, whose payload
+// carries the creation timestamp. NaN when that line is missing or unreadable, which no
+// `>= since` admits.
+function threadMintedAt(text) {
+  const firstLine = text.slice(0, text.indexOf("\n") === -1 ? text.length : text.indexOf("\n"));
+  try {
+    const entry = JSON.parse(firstLine);
+    return entry?.type === "session_meta" ? Date.parse(entry.payload?.timestamp) : Number.NaN;
+  } catch {
+    return Number.NaN;
   }
 }
 
