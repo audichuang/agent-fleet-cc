@@ -43,3 +43,28 @@ test("interruptAppServerTurn no-ops instead of spawning a throwaway app-server w
   const fakeState = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : null;
   assert.ok(!fakeState?.appServerStarts, "the guard must return before any app-server is spawned");
 });
+
+test("interruptAppServerTurn with ownBrokerOnly ignores the caller's broker endpoint", async () => {
+  // cancel of a job found in another checkout: the inherited endpoint is the caller's
+  // broker, which does not own that job's turn. With no broker recorded for the job's
+  // own workspace, it must no-op rather than send the interrupt to the caller's broker.
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir);
+  const previousPath = process.env.PATH;
+  const previousEndpoint = process.env[BROKER_ENDPOINT_ENV];
+  process.env[BROKER_ENDPOINT_ENV] = "unix:/nonexistent/caller-broker.sock";
+  process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
+  try {
+    const result = await interruptAppServerTurn(repo, { threadId: "thr_1", turnId: "turn_1", ownBrokerOnly: true });
+    assert.equal(result.attempted, false, "the caller's broker must not be contacted");
+    assert.match(result.detail, /no shared Codex broker session/);
+  } finally {
+    process.env.PATH = previousPath;
+    if (previousEndpoint === undefined) {
+      delete process.env[BROKER_ENDPOINT_ENV];
+    } else {
+      process.env[BROKER_ENDPOINT_ENV] = previousEndpoint;
+    }
+  }
+});

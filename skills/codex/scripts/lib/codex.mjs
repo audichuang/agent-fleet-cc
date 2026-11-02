@@ -1599,7 +1599,10 @@ export async function listSupportedModels(cwd, options = {}) {
   }
 }
 
-export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = null }) {
+// ownBrokerOnly: interrupt on the broker recorded for `cwd`'s workspace, ignoring a
+// CODEX_COMPANION_APP_SERVER_ENDPOINT inherited from the caller. cancel sets it for a job
+// found in another checkout, whose turn lives on that checkout's broker, not the caller's.
+export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = null, ownBrokerOnly = false }) {
   // A desktop job's turn lives in the Codex desktop app, not on the broker: stop it
   // there, and never let a caller fall through to reaping a broker for it.
   if (backend === "desktop") {
@@ -1629,7 +1632,10 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
   // the turn — the RPC then necessarily errors and we would report "interrupt failed"
   // as if a live turn had resisted. Guard is local on purpose: the auth-status and
   // model-list callers legitimately want that spawn fallback.
-  if (getSessionRuntimeStatus(process.env, cwd).mode !== "shared") {
+  const brokerEndpoint = ownBrokerOnly
+    ? loadLiveBrokerSession(cwd)?.endpoint ?? null
+    : getSessionRuntimeStatus(process.env, cwd).endpoint;
+  if (!brokerEndpoint) {
     return {
       attempted: false,
       interrupted: false,
@@ -1640,7 +1646,7 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
 
   let client = null;
   try {
-    client = await CodexAppServerClient.connect(cwd, { reuseExistingBroker: true });
+    client = await CodexAppServerClient.connect(cwd, { brokerEndpoint, reuseExistingBroker: true });
     await client.request("turn/interrupt", { threadId, turnId });
     return {
       attempted: true,
