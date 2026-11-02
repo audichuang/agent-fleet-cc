@@ -64,7 +64,8 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 - **從對話紀錄找優化前,先把每個事件對照「規則何時進 repo」與「各機器何時同步」。** 規則用
   `git log -S'<規則原文>' -- skills/codex/` 查日期,安裝版本比對各機 `~/.aghub/codex/SKILL.md` 的 md5 與日期;
   早於這兩個日期的事件是規則的成因,不是規則無效的證據。2026-10-25 那輪分析回報的缺口有兩項 10/22 已修,
-  另一項說 SKILL.md 沒寫三輪上限,其實寫了。次數要當下限看:工具輸出被截斷、skill eval session 要排除。
+  另一項說 SKILL.md 沒寫三輪上限,其實寫了。次數要當下限看:工具輸出被截斷、skill eval session 要排除。排除 eval session 要看每筆事件的 `cwd`(含 `-workspace`、`skillgenie-eval`),不能只看 jsonl 的路徑:
+  2026-11-02 那輪用路徑過濾,漏進一個 cwd 在 eval 工作區的 session。
 - **`task` / review 的多餘位置參數就是 prompt / focus 文字,所以打錯的 option 曾經默默變成文字**:`task --backnd
   desktop …` 照樣 exit 0 跑在 CLI(2026-10-11 實測)。`rejectMistypedOptions` 現在擋下「自成一個 argv」或「單一原始
   字串裡出現在任何文字之前」的未知 option,並用編輯距離猜正確名稱;一整串引號 prompt 裡夾的 `--verbose` 仍是文字,
