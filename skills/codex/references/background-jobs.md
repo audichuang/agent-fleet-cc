@@ -24,12 +24,11 @@ sharing `/tmp`, as on Linux, do not overwrite each other's report).
 A one-off foreground `wait <jobId> --timeout-ms 100000` returns the same codes; keep the
 timeout under the Bash call's own (2 minutes by default in Claude Code). Bare `wait` waits 4 minutes.
 
-**Nothing will tell you the background command ended** — you run as a subagent or a workflow
-step (your background commands die when your turn ends), or your host has no exit notice: repeat
-that foreground `wait` one call at a time, each `--timeout-ms` under the call's own timeout,
-until the exit is not `10`, and only then end your turn. A host with its own tool for waiting on a
-command it started can wait on the background loop with that instead. Either way this is the loop, not the polling ruled out below. A host skill that says to
-debug and resubmit a failed background job does not apply to a Codex job: report it (SKILL.md).
+**Nothing will tell you the background command ended** (a subagent, a workflow step, an Agent
+SDK session): SKILL.md says how to run the loop by hand in the foreground. A host with its own
+tool for waiting on a command it started can wait on the background loop with that instead.
+Either way this is the loop, not the polling ruled out below. A host skill that says to debug and
+resubmit a failed background job does not apply to a Codex job: report it (SKILL.md).
 
 ## At `wait exit: 10` (30-minute check-in)
 
@@ -115,5 +114,5 @@ interrupted in the app when the cap hits.
 
 - Finished means `Status` (`--json`: `job.status`) is no longer `queued` or `running`. `Phase`
   is a progress label: never decide completion from it. Prefer `wait`'s exit code.
-- Do not pipe companion output into `head` or `tail`; redirect it to a file and read the whole
-  file. `head` or `tail` on that file truncates the report you are about to relay just the same.
+- Read companion output whole (SKILL.md, Launching and following a job): no `head`, `tail` or
+  `sed -n` on it or on the file it was redirected to.
