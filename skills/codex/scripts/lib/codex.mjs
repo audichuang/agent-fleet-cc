@@ -1197,8 +1197,26 @@ async function startThread(client, cwd, options = {}) {
   return response;
 }
 
-async function resumeThread(client, threadId, cwd, options = {}) {
-  return client.request("thread/resume", buildResumeParams(threadId, cwd, options));
+// thread/resume refuses an archived thread with "session <id> is archived. Run `codex
+// unarchive <id>` to unarchive it first." (app-server thread_processor.rs). The caller
+// named this thread to continue it, so unarchive and retry once, as the TUI's own
+// unarchive prompt does, rather than send the host to the raw CLI (2026-10-30/31).
+export function isArchivedThreadError(error) {
+  return / is archived\. Run `codex unarchive /.test(String(error?.message ?? error ?? ""));
+}
+
+export async function resumeThread(client, threadId, cwd, options = {}) {
+  const params = buildResumeParams(threadId, cwd, options);
+  try {
+    return await client.request("thread/resume", params);
+  } catch (error) {
+    if (!isArchivedThreadError(error)) {
+      throw error;
+    }
+    emitProgress(options.onProgress, `Thread ${threadId} was archived; unarchiving it to continue.`, "starting");
+    await client.request("thread/unarchive", { threadId });
+    return client.request("thread/resume", params);
+  }
 }
 
 function buildResultStatus(turnState) {
@@ -1458,6 +1476,18 @@ async function getCodexAuthStatusFromClient(client, cwd) {
   return buildAppServerAuthStatus(accountResponse, configResponse);
 }
 
+// A binary that hangs at startup is installed: telling the host to reinstall sends it
+// the wrong way, so a probe timeout carries its own reason.
+export function codexUnavailableError(availability) {
+  const detail = String(availability?.detail ?? "").trim();
+  if (/did not answer within/.test(detail)) {
+    return new Error(`Codex CLI did not start: ${detail}.`);
+  }
+  return new Error(
+    `Codex CLI is not installed or is missing required runtime support${detail ? ` (${detail})` : ""}. Install it with \`npm install -g @openai/codex\`, then rerun \`setup\`.`
+  );
+}
+
 export function getCodexAvailability(cwd) {
   const versionStatus = binaryAvailable("codex", ["--version"], { cwd });
   if (!versionStatus.available) {
@@ -1633,7 +1663,7 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
 export async function runAppServerReview(cwd, options = {}) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
+    throw codexUnavailableError(availability);
   }
 
   return withAppServer(cwd, async (client) => {
@@ -1689,7 +1719,7 @@ export async function runAppServerReview(cwd, options = {}) {
 export async function runAppServerTurn(cwd, options = {}) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
+    throw codexUnavailableError(availability);
   }
 
   return withAppServer(cwd, async (client) => {
@@ -1700,7 +1730,8 @@ export async function runAppServerTurn(cwd, options = {}) {
       const response = await resumeThread(client, options.resumeThreadId, cwd, {
         model: options.model,
         sandbox: options.sandbox,
-        ephemeral: false
+        ephemeral: false,
+        onProgress: options.onProgress
       });
       threadId = response.thread.id;
     } else {
@@ -2019,7 +2050,7 @@ export async function interruptDesktopTurn({ threadId, turnId }, options = {}) {
 export async function findLatestTaskThread(cwd) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
+    throw codexUnavailableError(availability);
   }
 
   return withAppServer(cwd, async (client) => {

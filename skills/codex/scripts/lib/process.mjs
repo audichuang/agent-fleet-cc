@@ -10,6 +10,8 @@ export function runCommand(command, args = [], options = {}) {
     input: options.input,
     maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe",
+    timeout: options.timeout,
+    killSignal: options.timeout ? "SIGKILL" : undefined,
     // Never run through a shell. spawnSync with shell:true concatenates the
     // args array into the command line WITHOUT escaping (Node DEP0190), so a
     // user-controlled value (e.g. a git `--base` ref or a changed-file path)
@@ -49,10 +51,23 @@ export function runCommandChecked(command, args = [], options = {}) {
   return result;
 }
 
+// A probe that never returns blocks every command behind it with no output: a Homebrew
+// codex once hung in dyld startup and a background launch sat silent for 10+ minutes
+// (2026-10-30). Cap the probe so the caller gets a reason instead.
+export const BINARY_PROBE_TIMEOUT_MS = 30_000;
+
 export function binaryAvailable(command, versionArgs = ["--version"], options = {}) {
-  const result = runCommand(command, versionArgs, options);
-  if (result.error && /** @type {NodeJS.ErrnoException} */ (result.error).code === "ENOENT") {
+  const timeout = options.timeout ?? BINARY_PROBE_TIMEOUT_MS;
+  const result = runCommand(command, versionArgs, { ...options, timeout });
+  const code = result.error ? /** @type {NodeJS.ErrnoException} */ (result.error).code : null;
+  if (code === "ENOENT") {
     return { available: false, detail: "not found" };
+  }
+  if (code === "ETIMEDOUT") {
+    return {
+      available: false,
+      detail: `\`${[command, ...versionArgs].join(" ")}\` did not answer within ${Math.round(timeout / 1000)}s; the ${command} binary first on PATH hangs at startup (check \`command -v ${command}\`)`
+    };
   }
   if (result.error) {
     return { available: false, detail: result.error.message };

@@ -19,6 +19,8 @@ import type {
   ThreadSetNameResponse,
   ThreadStartParams as RawThreadStartParams,
   ThreadStartResponse,
+  ThreadUnarchiveParams,
+  ThreadUnarchiveResponse,
   Turn,
   TurnInterruptParams,
   TurnInterruptResponse,
@@ -58,6 +60,7 @@ export interface AppServerMethodMap {
   initialize: { params: InitializeParams; result: InitializeResponse };
   "thread/start": { params: ThreadStartParams; result: ThreadStartResponse };
   "thread/resume": { params: ThreadResumeParams; result: ThreadResumeResponse };
+  "thread/unarchive": { params: ThreadUnarchiveParams; result: ThreadUnarchiveResponse };
   "thread/name/set": { params: ThreadSetNameParams; result: ThreadSetNameResponse };
   "thread/list": { params: ThreadListParams; result: ThreadListResponse };
   "review/start": { params: ReviewStartParams; result: ReviewStartResponse };

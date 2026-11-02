@@ -15,6 +15,7 @@ import {
     describeTurnError,
     findLatestTaskThread,
     getCodexAuthStatus,
+    codexUnavailableError,
     getCodexAvailability,
     getSessionRuntimeStatus,
     interruptAppServerTurn,
@@ -422,7 +423,7 @@ export function buildAdversarialReviewPrompt(context, focusText) {
 function ensureCodexAvailable(cwd) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
-    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `setup`.");
+    throw codexUnavailableError(availability);
   }
 }
 
@@ -1456,7 +1457,12 @@ async function handleCancel(argv) {
   const expected = parseExpectedTriplet(options);
   assertWorktreeAlignment({ cwd, expected }); // C4: assert-before-query — never cancel a job in the wrong worktree
   const reference = positionals[0] ?? "";
-  const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env, allowCrossWorkspace: !expected });
+  const { workspaceRoot, job, crossWorkspace } = resolveCancelableJob(cwd, reference, {
+    env: process.env,
+    allowCrossWorkspace: !expected
+  });
+  // A job found in another checkout runs on that checkout's broker session.
+  const jobCwd = crossWorkspace ? workspaceRoot : cwd;
   const existing = readStoredJob(workspaceRoot, job.id) ?? {};
   // Turn identity now lives in events.ndjson (Option A: progress -> events), not the
   // per-job record, so recover the current ids from there for the turn interrupt.
@@ -1503,7 +1509,7 @@ async function handleCancel(argv) {
     // then signal the worker using the PER-JOB pid the CAS just read
     // (result.stored.pid) — authoritative over the index snapshot's job.pid, which can
     // be stale or absent. Only signal a pid still alive (never a recycled one).
-    interrupt = await interruptAppServerTurn(cwd, { threadId, turnId, ...((existing.backend ?? job.backend) ? { backend: existing.backend ?? job.backend } : {}) });
+    interrupt = await interruptAppServerTurn(jobCwd, { threadId, turnId, ...((existing.backend ?? job.backend) ? { backend: existing.backend ?? job.backend } : {}) });
     if (interrupt.interrupted) {
       appendLogLine(job.logFile, `Requested Codex turn interrupt for ${turnId} on ${threadId}.`);
     } else if (interrupt.attempted) {

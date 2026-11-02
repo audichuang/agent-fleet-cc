@@ -446,7 +446,9 @@ export function resolveResultJob(cwd, reference, options = {}) {
   throw new Error("No finished Codex jobs found for this repository yet.");
 }
 
-// allowCrossWorkspace accepted for caller-uniformity; already workspace-scoped (no cross-workspace fallback here)
+// An exact id not found locally falls back to the cross-workspace lookup unless
+// allowCrossWorkspace is false, like status/result/wait: a job launched from another
+// checkout must stay cancellable by the id its launch JSON printed.
 export function resolveCancelableJob(cwd, reference, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
@@ -457,9 +459,36 @@ export function resolveCancelableJob(cwd, reference, options = {}) {
     // Match against the FULL list with an active-only predicate (not a pre-filtered
     // list): that is what lets the matcher tell an already-finished job apart from an
     // unknown id, so a just-completed job is reported as finished, not as missing.
-    const selected = matchJobReference(jobs, reference, isActive);
+    let selected;
+    let localError = null;
+    try {
+      selected = matchJobReference(jobs, reference, isActive);
+    } catch (error) {
+      localError = error;
+    }
+    const finished = selected ? null : jobs.find((job) => job.id === reference || job.id.startsWith(reference));
+    if (!selected && !finished && options.allowCrossWorkspace !== false) {
+      const found = findJobByIdAcrossWorkspaces(cwd, reference);
+      if (found) {
+        if (!isActive(found.job)) {
+          throw new Error(`Job ${found.job.id} is already ${found.job.status}; nothing to cancel.`);
+        }
+        const foreignRoot = found.job.workspaceRoot ?? null;
+        // Every write cancel makes (the CAS, done signal, turn identity) re-derives the
+        // state dir from the workspace root, so only accept a root that maps back to
+        // the dir the job was found in; otherwise say where to run it.
+        if (!foreignRoot || resolveStateDir(foreignRoot) !== found.workspaceStateDir) {
+          throw new Error(
+            `Job ${found.job.id} belongs to another checkout${foreignRoot ? ` (${foreignRoot})` : ""}; rerun cancel from there.`
+          );
+        }
+        return { workspaceRoot: foreignRoot, job: found.job, crossWorkspace: true };
+      }
+    }
+    if (localError) {
+      throw localError;
+    }
     if (!selected) {
-      const finished = jobs.find((job) => job.id === reference || job.id.startsWith(reference));
       throw new Error(
         finished
           ? `Job ${finished.id} is already ${finished.status}; nothing to cancel.`

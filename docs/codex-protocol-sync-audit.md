@@ -213,6 +213,8 @@ The plugin speaks Codex **app-server v2** over JSON-RPC (`scripts/lib/app-server
 `scripts/lib/codex.mjs`). If Codex renames/removes any of these, it is breaking drift:
 
 - **Requests sent:** `initialize`, `initialized` (notify), `thread/start`, `thread/resume`,
+  `thread/unarchive` (`{ threadId }`, only after `thread/resume` refuses with "session <id> is
+  archived. Run `codex unarchive …`" — that wording is matched, app-server `thread_processor.rs`),
   `thread/name/set`, `thread/list`, `turn/start`, `turn/interrupt`, `review/start`,
   `account/read`, `config/read`, `model/list`.
 - **initialize capabilities:** `{ experimentalApi:false, requestAttestation:false,

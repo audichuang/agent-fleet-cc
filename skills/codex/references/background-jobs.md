@@ -67,6 +67,13 @@ app), tell the user, and ask Codex only for what is left. A review has nothing t
 | `Selected model is at capacity` (`[serverOverloaded]`), or `Policy-restricted capacity is unavailable` (`[policyCapacityUnavailable]`) | The model was overloaded. | Relaunch unchanged once, after about two minutes. |
 | `app-server disconnected before the turn completed` or `app-server exited unexpectedly` | The connection to Codex dropped mid-turn. An immediate relaunch during the same outage failed again. | Relaunch once after about two minutes; if `setup` then reports a problem, report that instead. |
 
+"About two minutes" is a pause before the one relaunch, not a polling loop. Run it as its own
+background command (`sleep 120` with nothing chained after it) and relaunch when your host
+reports that it exited; Claude Code refuses a foreground `sleep 120; <command>` and a busy-wait
+dressed up as one (`until [ $SECONDS … ]; do sleep 5; done`) is the same thing. Where nothing will
+report a background exit (a subagent or workflow step), relaunch at once instead: it is still the
+one relaunch, and a second failure is reported, not retried.
+
 Other policy flags (`[misalignmentPolicyViolation]`, "biological risk") are not wording problems
 to route around: report them. `Reconnecting... N/M` lines in the log are Codex retrying on its
 own, not a failure.

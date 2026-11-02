@@ -1,7 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isProcessAlive, runCommand, terminateProcessTree } from "../../skills/codex/scripts/lib/process.mjs";
+import { binaryAvailable, isProcessAlive, runCommand, terminateProcessTree } from "../../skills/codex/scripts/lib/process.mjs";
 
 test("runCommand never runs through a shell and forwards args as a literal array (no shell injection)", () => {
   // Regression for the Windows shell:true + array-args path that let a
@@ -101,4 +104,31 @@ test("isProcessAlive rejects malformed pid values without throwing", () => {
 
 test("isProcessAlive accepts numeric strings that parse to a live pid", () => {
   assert.equal(isProcessAlive(String(process.pid)), true);
+});
+
+test("binaryAvailable gives up on a probe that never answers and says which binary hung", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-hang-"));
+  const fake = path.join(dir, "codex");
+  fs.writeFileSync(fake, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+  const started = Date.now();
+  const status = binaryAvailable(fake, ["--version"], { timeout: 500 });
+  assert.ok(Date.now() - started < 10_000, "the probe must return near its timeout, not when the binary exits");
+  assert.equal(status.available, false);
+  assert.match(status.detail, /did not answer within 1s; the .*codex binary first on PATH hangs at startup/);
+});
+
+test("binaryAvailable still reports a probe that answers in time", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-ok-"));
+  const fake = path.join(dir, "codex");
+  fs.writeFileSync(fake, "#!/bin/sh\necho codex-cli 9.9.9\n", { mode: 0o755 });
+  assert.deepEqual(binaryAvailable(fake, ["--version"], { timeout: 5000 }), { available: true, detail: "codex-cli 9.9.9" });
+});
+
+test("codexUnavailableError keeps a hang's reason and does not send the host to reinstall", async () => {
+  const { codexUnavailableError } = await import("../../skills/codex/scripts/lib/codex.mjs");
+  const hung = codexUnavailableError({ available: false, detail: "`codex --version` did not answer within 30s; the codex binary first on PATH hangs at startup (check `command -v codex`)" });
+  assert.match(hung.message, /^Codex CLI did not start: `codex --version` did not answer within 30s/);
+  assert.doesNotMatch(hung.message, /npm install/);
+  const missing = codexUnavailableError({ available: false, detail: "not found" });
+  assert.match(missing.message, /not installed or is missing required runtime support \(not found\)\. Install it/);
 });

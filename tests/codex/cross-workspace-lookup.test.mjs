@@ -9,7 +9,8 @@ import {
   collectCandidateStateRoots,
   findJobByIdAcrossWorkspaces
 } from "../../skills/codex/scripts/lib/state.mjs";
-import { buildSingleJobSnapshot } from "../../skills/codex/scripts/lib/job-control.mjs";
+import { buildSingleJobSnapshot, resolveCancelableJob } from "../../skills/codex/scripts/lib/job-control.mjs";
+import { resolveStateDir } from "../../skills/codex/scripts/lib/state.mjs";
 
 const STATE_ROOT = path.join(process.env.CODEX_COMPANION_DATA, "state");
 
@@ -119,4 +120,49 @@ test("buildSingleJobSnapshot with no reference stays workspace-scoped (no cross-
     updatedAt: "2026-01-01T00:00:00.000Z"
   });
   assert.throws(() => buildSingleJobSnapshot(localCwd, undefined), /No job found|No .*job/i);
+});
+
+// cancel <id> from another checkout (2026-10-26: `No job found` left a review running).
+function seedJobForWorkspace(workspaceRoot, job) {
+  const jobDir = path.join(resolveStateDir(workspaceRoot), "jobs", job.id);
+  fs.mkdirSync(jobDir, { recursive: true });
+  fs.writeFileSync(path.join(jobDir, "job.json"), JSON.stringify({ workspaceRoot, ...job }));
+}
+
+test("resolveCancelableJob finds an active job launched from another checkout by its full id", () => {
+  const localCwd = makeTempDir();
+  const otherRoot = makeTempDir();
+  seedJobForWorkspace(otherRoot, { id: "review-cancel-foreign-1", status: "running", pid: process.pid });
+  const resolved = resolveCancelableJob(localCwd, "review-cancel-foreign-1");
+  assert.equal(resolved.job.id, "review-cancel-foreign-1");
+  assert.equal(resolved.workspaceRoot, otherRoot, "writes must target the job's own checkout");
+  assert.equal(resolved.crossWorkspace, true);
+});
+
+test("resolveCancelableJob stays workspace-scoped when allowCrossWorkspace is false", () => {
+  const localCwd = makeTempDir();
+  const otherRoot = makeTempDir();
+  seedJobForWorkspace(otherRoot, { id: "review-cancel-foreign-2", status: "running", pid: process.pid });
+  assert.throws(
+    () => resolveCancelableJob(localCwd, "review-cancel-foreign-2", { allowCrossWorkspace: false }),
+    /No job found/
+  );
+});
+
+test("resolveCancelableJob reports a finished foreign job as finished, not as missing", () => {
+  const localCwd = makeTempDir();
+  const otherRoot = makeTempDir();
+  seedJobForWorkspace(otherRoot, { id: "review-cancel-foreign-3", status: "completed" });
+  assert.throws(() => resolveCancelableJob(localCwd, "review-cancel-foreign-3"), /already completed; nothing to cancel/);
+});
+
+test("resolveCancelableJob refuses a foreign job whose root does not map back to the dir it was found in", () => {
+  const localCwd = makeTempDir();
+  seedJobInWorkspaceDir("projF-3333333333333333", {
+    id: "review-cancel-foreign-4",
+    workspaceRoot: "/home/user/projF",
+    status: "running",
+    pid: process.pid
+  });
+  assert.throws(() => resolveCancelableJob(localCwd, "review-cancel-foreign-4"), /belongs to another checkout \(\/home\/user\/projF\); rerun cancel from there/);
 });
