@@ -1656,8 +1656,8 @@ export async function runAppServerReview(cwd, options = {}) {
       () =>
         client.request("review/start", {
           threadId: sourceThreadId,
-          // Inline only: the review runs on this thread. Upstream deprecated "detached"
-          // (a separate review thread) and schedules it for removal.
+          // Inline only: the review runs on this thread. "detached" (a separate review
+          // thread) was removed upstream in #57667; "inline" is the only accepted value.
           delivery: "inline",
           target: options.target
         }),

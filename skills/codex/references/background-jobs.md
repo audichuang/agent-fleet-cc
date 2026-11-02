@@ -64,7 +64,7 @@ app), tell the user, and ask Codex only for what is left. A review has nothing t
 | The reason says | What it means | Then |
 | --- | --- | --- |
 | `flagged for possible cybersecurity risk` (`[cyberPolicy]`) | The prompt's wording tripped a content filter. No review or answer was produced, and rerunning it unchanged was refused again every time it was tried. | Reword once as a code-correctness task, describing what the code must do rather than how it could be attacked or bypassed, and relaunch. Refused again, or a built-in `review` (it has no wording to change): report, and stop. |
-| `Selected model is at capacity` (`[serverOverloaded]`) | The model was overloaded. | Relaunch unchanged once, after about two minutes. |
+| `Selected model is at capacity` (`[serverOverloaded]`), or `Policy-restricted capacity is unavailable` (`[policyCapacityUnavailable]`) | The model was overloaded. | Relaunch unchanged once, after about two minutes. |
 | `app-server disconnected before the turn completed` or `app-server exited unexpectedly` | The connection to Codex dropped mid-turn. An immediate relaunch during the same outage failed again. | Relaunch once after about two minutes; if `setup` then reports a problem, report that instead. |
 
 Other policy flags (`[misalignmentPolicyViolation]`, "biological risk") are not wording problems
