@@ -94,57 +94,38 @@ async function withEnv(binDir, endpoint, fn) {
   }
 }
 
-test("a cross-checkout interrupt reaches the job's workspace broker even when the caller inherited another endpoint", async () => {
-  const jobRepo = makeTempDir();
+test("interruptAppServerTurn uses the recorded broker endpoint over the caller's own broker", async () => {
+  const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeCodex(binDir);
   const callerBroker = await startFakeBroker("someone-else");
-  const jobBroker = await startFakeBroker("thr_job");
-  saveBrokerSession(jobRepo, { endpoint: jobBroker.endpoint, pid: process.pid });
+  const recordedBroker = await startFakeBroker("thr_job");
+  saveBrokerSession(repo, { endpoint: callerBroker.endpoint, pid: process.pid });
   try {
     const result = await withEnv(binDir, callerBroker.endpoint, () =>
-      interruptAppServerTurn(jobRepo, { threadId: "thr_job", turnId: "turn_1", crossWorkspace: true })
+      interruptAppServerTurn(repo, { threadId: "thr_job", turnId: "turn_1", brokerEndpoint: recordedBroker.endpoint })
     );
     assert.equal(result.interrupted, true, result.detail);
-    assert.equal(jobBroker.interrupts.length, 1);
+    assert.equal(recordedBroker.interrupts.length, 1);
     assert.equal(callerBroker.interrupts.length, 0);
   } finally {
     await callerBroker.close();
-    await jobBroker.close();
+    await recordedBroker.close();
   }
 });
 
-test("a cross-checkout interrupt falls back to the inherited endpoint when the job ran on it", async () => {
-  // `task --cwd B --background` from A's shell: the job is recorded in B but its turn
-  // runs on A's broker (the inherited endpoint), and B has no broker of its own.
-  const jobRepo = makeTempDir();
+test("interruptAppServerTurn without a recorded endpoint keeps using the session's broker", async () => {
+  const repo = makeTempDir();
   const binDir = makeTempDir();
   installFakeCodex(binDir);
-  const inheritedBroker = await startFakeBroker("thr_job");
+  const sessionBroker = await startFakeBroker("thr_job");
   try {
-    const result = await withEnv(binDir, inheritedBroker.endpoint, () =>
-      interruptAppServerTurn(jobRepo, { threadId: "thr_job", turnId: "turn_1", crossWorkspace: true })
+    const result = await withEnv(binDir, sessionBroker.endpoint, () =>
+      interruptAppServerTurn(repo, { threadId: "thr_job", turnId: "turn_1" })
     );
     assert.equal(result.interrupted, true, result.detail);
-    assert.equal(inheritedBroker.interrupts.length, 1);
+    assert.equal(sessionBroker.interrupts.length, 1);
   } finally {
-    await inheritedBroker.close();
-  }
-});
-
-test("a cross-checkout interrupt reports failure when no candidate broker holds the thread", async () => {
-  const jobRepo = makeTempDir();
-  const binDir = makeTempDir();
-  installFakeCodex(binDir);
-  const other = await startFakeBroker("someone-else");
-  try {
-    const result = await withEnv(binDir, other.endpoint, () =>
-      interruptAppServerTurn(jobRepo, { threadId: "thr_job", turnId: "turn_1", crossWorkspace: true })
-    );
-    assert.equal(result.attempted, true);
-    assert.equal(result.interrupted, false);
-    assert.match(result.detail, /thread not found/);
-  } finally {
-    await other.close();
+    await sessionBroker.close();
   }
 });

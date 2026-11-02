@@ -1832,6 +1832,60 @@ test("cancel sends turn interrupt to the shared app-server before killing a brok
   });
 });
 
+test("cancel interrupts on the broker the job recorded, even from a shell that never had it", async () => {
+  // Review rounds 1-3 (2026-11-02): which broker holds a job's turn depends on the LAUNCH
+  // environment. Launched with --cwd B from A's shell (A's endpoint inherited), the turn runs
+  // on A's broker; a cancel from a third directory with no endpoint in its env cannot
+  // reconstruct that, so the worker records the endpoint and cancel uses it.
+  const repoA = makeTempDir();
+  const repoB = makeTempDir();
+  const elsewhere = makeTempDir();
+  const binDir = makeTempDir();
+  const fakeStatePath = path.join(binDir, "fake-codex-state.json");
+  installFakeCodex(binDir, "interruptible-slow-task");
+  for (const repo of [repoA, repoB]) {
+    initGitRepo(repo);
+    fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+    run("git", ["add", "README.md"], { cwd: repo });
+    run("git", ["commit", "-m", "init"], { cwd: repo });
+  }
+  fs.writeFileSync(path.join(repoA, "README.md"), "hello again\n");
+
+  const env = buildEnv(binDir);
+  // Start A's shared broker with a quick review, then take its endpoint as the inherited one.
+  const warm = run("node", [SCRIPT, "review"], { cwd: repoA, env });
+  assert.equal(warm.status, 0, warm.stderr);
+  const endpointA = loadBrokerSession(repoA)?.endpoint;
+  assert.ok(endpointA, "the review must leave A's broker recorded");
+
+  const launched = run(
+    "node",
+    [SCRIPT, "task", "--background", "--json", "--cwd", repoB, "investigate the flaky worker timeout"],
+    { cwd: repoA, env: { ...env, CODEX_COMPANION_APP_SERVER_ENDPOINT: endpointA } }
+  );
+  assert.equal(launched.status, 0, launched.stderr);
+  const jobId = JSON.parse(launched.stdout).jobId;
+
+  const stateDirB = resolveStateDir(repoB);
+  const identity = await waitFor(() => {
+    const current = readCurrentTurnIdentity(stateDirB, jobId);
+    return current.threadId && current.turnId ? current : null;
+  }, { timeoutMs: 15000 });
+  assert.equal(identity.brokerEndpoint, endpointA, "the job must record the broker its turn runs on");
+
+  const cancelResult = run("node", [SCRIPT, "cancel", jobId, "--json"], { cwd: elsewhere, env });
+  assert.equal(cancelResult.status, 0, cancelResult.stderr);
+  const cancelPayload = JSON.parse(cancelResult.stdout);
+  assert.equal(cancelPayload.status, "cancelled");
+  assert.equal(cancelPayload.turnInterrupted, true, "the interrupt must reach A's broker");
+
+  await waitFor(() => JSON.parse(fs.readFileSync(fakeStatePath, "utf8")).lastInterrupt ?? null);
+  assert.deepEqual(JSON.parse(fs.readFileSync(fakeStatePath, "utf8")).lastInterrupt, {
+    threadId: identity.threadId,
+    turnId: identity.turnId
+  });
+});
+
 test("commands lazily start and reuse one shared app-server after first use", async () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();

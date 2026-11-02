@@ -87,6 +87,8 @@ function normalizeProgressEvent(value) {
       phase: typeof value.phase === "string" && value.phase.trim() ? value.phase.trim() : null,
       threadId: typeof value.threadId === "string" && value.threadId.trim() ? value.threadId.trim() : null,
       turnId: typeof value.turnId === "string" && value.turnId.trim() ? value.turnId.trim() : null,
+      brokerEndpoint:
+        typeof value.brokerEndpoint === "string" && value.brokerEndpoint.trim() ? value.brokerEndpoint.trim() : null,
       stderrMessage: value.stderrMessage == null ? null : String(value.stderrMessage).trim(),
       logTitle: typeof value.logTitle === "string" && value.logTitle.trim() ? value.logTitle.trim() : null,
       logBody: value.logBody == null ? null : String(value.logBody).trimEnd()
@@ -98,6 +100,7 @@ function normalizeProgressEvent(value) {
     phase: null,
     threadId: null,
     turnId: null,
+    brokerEndpoint: null,
     stderrMessage: String(value ?? "").trim(),
     logTitle: null,
     logBody: null
@@ -143,6 +146,7 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
   let lastPhase = null;
   let lastThreadId = null;
   let lastTurnId = null;
+  let lastBrokerEndpoint = null;
 
   return (event) => {
     const normalized = normalizeProgressEvent(event);
@@ -164,6 +168,12 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
     if (normalized.turnId && normalized.turnId !== lastTurnId) {
       lastTurnId = normalized.turnId;
       fields.turnId = normalized.turnId;
+      changed = true;
+    }
+
+    if (normalized.brokerEndpoint && normalized.brokerEndpoint !== lastBrokerEndpoint) {
+      lastBrokerEndpoint = normalized.brokerEndpoint;
+      fields.brokerEndpoint = normalized.brokerEndpoint;
       changed = true;
     }
 

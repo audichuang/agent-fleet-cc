@@ -44,19 +44,21 @@ export function readProgressSnapshot(stateDir, jobId) {
   let threadId = null;
   let turnId = null;
   let phase = null;
+  let brokerEndpoint = null;
   for (const event of readEvents(jobDir(stateDir, jobId))) {
     if (event.type !== "engine-event") continue;
     if (event.threadId) threadId = event.threadId;
     if (event.turnId) turnId = event.turnId;
     if (event.phase) phase = event.phase;
+    if (event.brokerEndpoint) brokerEndpoint = event.brokerEndpoint;
   }
-  return { threadId, turnId, phase };
+  return { threadId, turnId, phase, brokerEndpoint };
 }
 
 // The interrupt readers (watchdog/cancel/crash-net/timeout) need only the identity.
 export function readCurrentTurnIdentity(stateDir, jobId) {
-  const { threadId, turnId } = readProgressSnapshot(stateDir, jobId);
-  return { threadId, turnId };
+  const { threadId, turnId, brokerEndpoint } = readProgressSnapshot(stateDir, jobId);
+  return { threadId, turnId, brokerEndpoint };
 }
 
 // The job's status, treating the terminal.lock as authoritative over job.json

@@ -1145,6 +1145,14 @@ export async function captureTurn(client, threadId, startRequest, options = {}) 
   }
 }
 
+// The broker a job's turn runs on, recorded with its thread id so a cancel from another
+// process interrupts that broker. Which one it is depends on the launch's environment
+// (an inherited CODEX_COMPANION_APP_SERVER_ENDPOINT or the workspace's own broker), which a
+// canceller cannot reconstruct. A direct (spawned) app-server dies with the worker: nothing to record.
+function brokerEndpointOf(client) {
+  return client?.transport === "broker" && client.endpoint ? { brokerEndpoint: client.endpoint } : {};
+}
+
 async function withAppServer(cwd, fn, connectOptions = {}) {
   let client = null;
   try {
@@ -1599,12 +1607,10 @@ export async function listSupportedModels(cwd, options = {}) {
   }
 }
 
-// crossWorkspace: the job was found in another checkout. The job record does not say which
-// broker its turn ran on: the job's own workspace broker, or a
-// CODEX_COMPANION_APP_SERVER_ENDPOINT the launch inherited (`task --cwd B` from A's shell).
-// So try both, the job's workspace first. A broker that does not hold the thread answers
-// "thread not found" (app-server turn_processor.rs load_thread), so a wrong guess has no effect.
-export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = null, crossWorkspace = false }) {
+// brokerEndpoint: the broker the job recorded when its thread was ready (cancel passes it).
+// It is the only broker that holds the turn, so it is used alone; without one (a job from
+// before endpoints were recorded, or a direct app-server) the session's broker is used.
+export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = null, brokerEndpoint: recordedEndpoint = null }) {
   // A desktop job's turn lives in the Codex desktop app, not on the broker: stop it
   // there, and never let a caller fall through to reaping a broker for it.
   if (backend === "desktop") {
@@ -1634,11 +1640,8 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
   // the turn — the RPC then necessarily errors and we would report "interrupt failed"
   // as if a live turn had resisted. Guard is local on purpose: the auth-status and
   // model-list callers legitimately want that spawn fallback.
-  const candidates = crossWorkspace
-    ? [loadLiveBrokerSession(cwd)?.endpoint, process.env[BROKER_ENDPOINT_ENV]]
-    : [getSessionRuntimeStatus(process.env, cwd).endpoint];
-  const endpoints = [...new Set(candidates.filter(Boolean))];
-  if (endpoints.length === 0) {
+  const brokerEndpoint = recordedEndpoint ?? getSessionRuntimeStatus(process.env, cwd).endpoint;
+  if (!brokerEndpoint) {
     return {
       attempted: false,
       interrupted: false,
@@ -1647,30 +1650,26 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
     };
   }
 
-  let failure = null;
-  for (const brokerEndpoint of endpoints) {
-    let client = null;
-    try {
-      client = await CodexAppServerClient.connect(cwd, { brokerEndpoint, reuseExistingBroker: true });
-      await client.request("turn/interrupt", { threadId, turnId });
-      return {
-        attempted: true,
-        interrupted: true,
-        transport: client.transport,
-        detail: `Interrupted ${turnId} on ${threadId}.`
-      };
-    } catch (error) {
-      failure = {
-        attempted: true,
-        interrupted: false,
-        transport: client?.transport ?? null,
-        detail: error instanceof Error ? error.message : String(error)
-      };
-    } finally {
-      await client?.close().catch(() => {});
-    }
+  let client = null;
+  try {
+    client = await CodexAppServerClient.connect(cwd, { brokerEndpoint, reuseExistingBroker: true });
+    await client.request("turn/interrupt", { threadId, turnId });
+    return {
+      attempted: true,
+      interrupted: true,
+      transport: client.transport,
+      detail: `Interrupted ${turnId} on ${threadId}.`
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      interrupted: false,
+      transport: client?.transport ?? null,
+      detail: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    await client?.close().catch(() => {});
   }
-  return failure;
 }
 
 export async function runAppServerReview(cwd, options = {}) {
@@ -1690,7 +1689,8 @@ export async function runAppServerReview(cwd, options = {}) {
     });
     const sourceThreadId = thread.thread.id;
     emitProgress(options.onProgress, `Thread ready (${sourceThreadId}).`, "starting", {
-      threadId: sourceThreadId
+      threadId: sourceThreadId,
+      ...brokerEndpointOf(client)
     });
 
     const turnState = await captureTurn(
@@ -1759,7 +1759,8 @@ export async function runAppServerTurn(cwd, options = {}) {
     }
 
     emitProgress(options.onProgress, `Thread ready (${threadId}).`, "starting", {
-      threadId
+      threadId,
+      ...brokerEndpointOf(client)
     });
 
     const prompt = options.prompt?.trim() || options.defaultPrompt || "";

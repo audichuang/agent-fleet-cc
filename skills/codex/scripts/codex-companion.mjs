@@ -1466,7 +1466,7 @@ async function handleCancel(argv) {
   const existing = readStoredJob(workspaceRoot, job.id) ?? {};
   // Turn identity now lives in events.ndjson (Option A: progress -> events), not the
   // per-job record, so recover the current ids from there for the turn interrupt.
-  const { threadId, turnId } = readCurrentTurnIdentity(resolveStateDir(workspaceRoot), job.id);
+  const { threadId, turnId, brokerEndpoint } = readCurrentTurnIdentity(resolveStateDir(workspaceRoot), job.id);
 
   const completedAt = nowIso();
   const cancelPatch = {
@@ -1509,7 +1509,7 @@ async function handleCancel(argv) {
     // then signal the worker using the PER-JOB pid the CAS just read
     // (result.stored.pid) — authoritative over the index snapshot's job.pid, which can
     // be stale or absent. Only signal a pid still alive (never a recycled one).
-    interrupt = await interruptAppServerTurn(jobCwd, { threadId, turnId, crossWorkspace: Boolean(crossWorkspace), ...((existing.backend ?? job.backend) ? { backend: existing.backend ?? job.backend } : {}) });
+    interrupt = await interruptAppServerTurn(jobCwd, { threadId, turnId, brokerEndpoint, ...((existing.backend ?? job.backend) ? { backend: existing.backend ?? job.backend } : {}) });
     if (interrupt.interrupted) {
       appendLogLine(job.logFile, `Requested Codex turn interrupt for ${turnId} on ${threadId}.`);
     } else if (interrupt.attempted) {
