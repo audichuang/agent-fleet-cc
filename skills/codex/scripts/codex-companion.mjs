@@ -1509,7 +1509,7 @@ async function handleCancel(argv) {
     // then signal the worker using the PER-JOB pid the CAS just read
     // (result.stored.pid) — authoritative over the index snapshot's job.pid, which can
     // be stale or absent. Only signal a pid still alive (never a recycled one).
-    interrupt = await interruptAppServerTurn(jobCwd, { threadId, turnId, ownBrokerOnly: Boolean(crossWorkspace), ...((existing.backend ?? job.backend) ? { backend: existing.backend ?? job.backend } : {}) });
+    interrupt = await interruptAppServerTurn(jobCwd, { threadId, turnId, crossWorkspace: Boolean(crossWorkspace), ...((existing.backend ?? job.backend) ? { backend: existing.backend ?? job.backend } : {}) });
     if (interrupt.interrupted) {
       appendLogLine(job.logFile, `Requested Codex turn interrupt for ${turnId} on ${threadId}.`);
     } else if (interrupt.attempted) {

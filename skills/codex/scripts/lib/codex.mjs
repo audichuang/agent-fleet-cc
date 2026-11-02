@@ -1599,10 +1599,12 @@ export async function listSupportedModels(cwd, options = {}) {
   }
 }
 
-// ownBrokerOnly: interrupt on the broker recorded for `cwd`'s workspace, ignoring a
-// CODEX_COMPANION_APP_SERVER_ENDPOINT inherited from the caller. cancel sets it for a job
-// found in another checkout, whose turn lives on that checkout's broker, not the caller's.
-export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = null, ownBrokerOnly = false }) {
+// crossWorkspace: the job was found in another checkout. The job record does not say which
+// broker its turn ran on: the job's own workspace broker, or a
+// CODEX_COMPANION_APP_SERVER_ENDPOINT the launch inherited (`task --cwd B` from A's shell).
+// So try both, the job's workspace first. A broker that does not hold the thread answers
+// "thread not found" (app-server turn_processor.rs load_thread), so a wrong guess has no effect.
+export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = null, crossWorkspace = false }) {
   // A desktop job's turn lives in the Codex desktop app, not on the broker: stop it
   // there, and never let a caller fall through to reaping a broker for it.
   if (backend === "desktop") {
@@ -1632,10 +1634,11 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
   // the turn — the RPC then necessarily errors and we would report "interrupt failed"
   // as if a live turn had resisted. Guard is local on purpose: the auth-status and
   // model-list callers legitimately want that spawn fallback.
-  const brokerEndpoint = ownBrokerOnly
-    ? loadLiveBrokerSession(cwd)?.endpoint ?? null
-    : getSessionRuntimeStatus(process.env, cwd).endpoint;
-  if (!brokerEndpoint) {
+  const candidates = crossWorkspace
+    ? [loadLiveBrokerSession(cwd)?.endpoint, process.env[BROKER_ENDPOINT_ENV]]
+    : [getSessionRuntimeStatus(process.env, cwd).endpoint];
+  const endpoints = [...new Set(candidates.filter(Boolean))];
+  if (endpoints.length === 0) {
     return {
       attempted: false,
       interrupted: false,
@@ -1644,26 +1647,30 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId, backend = 
     };
   }
 
-  let client = null;
-  try {
-    client = await CodexAppServerClient.connect(cwd, { brokerEndpoint, reuseExistingBroker: true });
-    await client.request("turn/interrupt", { threadId, turnId });
-    return {
-      attempted: true,
-      interrupted: true,
-      transport: client.transport,
-      detail: `Interrupted ${turnId} on ${threadId}.`
-    };
-  } catch (error) {
-    return {
-      attempted: true,
-      interrupted: false,
-      transport: client?.transport ?? null,
-      detail: error instanceof Error ? error.message : String(error)
-    };
-  } finally {
-    await client?.close().catch(() => {});
+  let failure = null;
+  for (const brokerEndpoint of endpoints) {
+    let client = null;
+    try {
+      client = await CodexAppServerClient.connect(cwd, { brokerEndpoint, reuseExistingBroker: true });
+      await client.request("turn/interrupt", { threadId, turnId });
+      return {
+        attempted: true,
+        interrupted: true,
+        transport: client.transport,
+        detail: `Interrupted ${turnId} on ${threadId}.`
+      };
+    } catch (error) {
+      failure = {
+        attempted: true,
+        interrupted: false,
+        transport: client?.transport ?? null,
+        detail: error instanceof Error ? error.message : String(error)
+      };
+    } finally {
+      await client?.close().catch(() => {});
+    }
   }
+  return failure;
 }
 
 export async function runAppServerReview(cwd, options = {}) {
