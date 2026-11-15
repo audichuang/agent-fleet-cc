@@ -20,7 +20,8 @@ test("slash commands are gone; the skill is how the host calls Codex", () => {
   assert.match(skill, /`adversarial-review`/);
   assert.match(skill, /`task`/);
   assert.match(skill, /task --resume-last/);
-  assert.match(skill, /Return the companion stdout verbatim/i);
+  assert.match(skill, /Read the companion stdout in full/i);
+  assert.match(skill, /none dropped, merged or softened/i);
   assert.match(skill, /Do not pass `gpt-6-sol` or `gpt-6-luna`/);
   assert.match(skill, /Do not pass a service tier/);
   assert.match(skill, /gpt-6-astra/);
