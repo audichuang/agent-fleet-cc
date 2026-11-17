@@ -8,14 +8,16 @@
     "node": ">=22.3"
   },
   "scripts": {
+    "preverify": "npm run check:devdeps",
     "verify": "npm test && npm run build:codex",
+    "check:devdeps": "node -e \"require('fs').existsSync('node_modules/.bin/tsc') || (console.error('typescript is not installed here (a fresh git worktree has no node_modules). Run: npm ci'), process.exit(1))\"",
     "test": "npm run test:structure && npm run test:codex && npm run test:imagine && npm run test:e2e",
     "test:structure": "node --test tests/*.test.mjs",
     "test:codex": "node --test tests/codex/*.test.mjs \"tests/codex/shared/*.test.mjs\"",
     "test:codex:smoke": "node --test tests/codex/worktree-guard-foreign-broker.smoke.mjs",
     "test:e2e": "node --test tests/codex/e2e-cli.test.mjs",
     "test:imagine": "node --test tests/imagine/*.test.mjs",
-    "prebuild:codex": "mkdir -p skills/codex/.generated/app-server-types && codex app-server generate-ts --out skills/codex/.generated/app-server-types",
+    "prebuild:codex": "npm run check:devdeps && mkdir -p skills/codex/.generated/app-server-types && codex app-server generate-ts --out skills/codex/.generated/app-server-types",
     "build:codex": "tsc -p tsconfig.app-server.json"
   },
   "devDependencies": {

@@ -27,7 +27,10 @@ When **adding** a skill, the only existing files you may edit are:
 ## Commands
 - `npm run verify` — **the whole CI chain in one command** (`npm test`,
   `build:codex`). Run this before a push; `npm test` alone is not the chain — it skips the `tsc`
-  typecheck. Needs the codex CLI on PATH (for `build:codex`'s prebuild).
+  typecheck. Needs the codex CLI on PATH (for `build:codex`'s prebuild) and the devDependencies
+  installed: **a fresh `git worktree` has no `node_modules`, so run `npm ci` there first**.
+  `verify` checks for `tsc` up front and stops with that hint; before the check it ran the whole
+  test suite and only then died on `sh: tsc: command not found` (exit 127).
 - **Read `verify`'s exit code, never its tail.** `npm run verify | tail -n` reports *tail's*
   exit code, so a chain that failed prints a plausible-looking tail and exits 0 — a red run
   reads as green, and it has been reported as green here more than once. Run
