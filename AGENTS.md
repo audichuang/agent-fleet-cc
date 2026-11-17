@@ -49,6 +49,9 @@ When **adding** a skill, the only existing files you may edit are:
   `node:assert/strict`, and are hermetic — fake binaries, redirected `CODEX_COMPANION_DATA` and `HOME`,
   no network. Prefer injectable seams (spawn / env / fs) over calling them directly so
   tests need no real binaries.
+- **skillgenie's `must_keep.py` writes `evals/must_keep.json` into the skill directory,** which the
+  payload rule above forbids. Run it on a copy of the skill under `/tmp`, or waive the lint FAIL and
+  give the reason in your report.
 - **Prove a new or tightened test bites, both ways:** delete the behaviour it guards and watch it
   go red, then feed it the input it must accept and watch it stay green. `git log` holds more than
   one fix for a test that was green for the wrong reason. A guard that has to *guess* — at shell

@@ -54,7 +54,10 @@ this skill says when to escalate to them.
      skill's failure table (`skills/codex/references/background-jobs.md`) should name it and
      whether a wire `codexErrorInfo` tag came with it.
    - *Model catalog*: the configured default model must be listed. Model names and effort levels
-     stay out of shipped prose (AGENTS.md conventions).
+     stay out of shipped prose (AGENTS.md conventions). On a model launch day the catalog is
+     refetched within hours and its order changes, so re-read `fetched_at` before you decide or
+     record anything. Move the default only once the new slug is priority 1, and after a real
+     `task`, a `review` and a run with no `--model` succeed on this account.
 
 4. **Typecheck against the installed binary:** `npm run build:codex > <scratchpad>/build.log;
    echo $?`. Its prebuild regenerates types from the binary, so `tsc` catches drift in what the
@@ -95,3 +98,7 @@ a verdict in it.
   pin no longer declares is a break. Using every logged commit rather than `since` alone means a
   removal first seen as a forward look stays caught after its row moves `--since` past it. The
   set is derived from code, so it cannot drift from what the companion sends and handles.
+- **Terminal errors.** Read from `retry_policy()`'s unguarded `=> RetryPolicy::Never` arms, or
+  `retry_delay`'s `=> None` arm where that function does not exist. The parse fails silently: if
+  every new variant comes back "retryable or unclassified", suspect that upstream reshaped the
+  function, and check `error.rs` before you trust the verdict.
