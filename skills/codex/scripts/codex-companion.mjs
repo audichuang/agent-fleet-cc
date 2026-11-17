@@ -794,11 +794,21 @@ function buildTaskRunMetadata({ prompt, resumeLast = false }) {
   };
 }
 
+// What to run after a background launch. Verbs and the id only: the caller just ran the
+// companion, so it knows the path, and an exact id is found from any checkout.
+export function followUpHint(jobId) {
+  return (
+    `Wait with \`wait ${jobId}\`: exit 10 means it is still running (not a failure), so run it again; 0 means done. ` +
+    `Then run \`result ${jobId} > <file>\` and read the whole file. Do not poll job files or pipe output into head or tail.`
+  );
+}
+
 export function renderQueuedTaskLaunch(payload) {
   // Human line + a machine-readable sentinel so a consumer scanning stdout can
   // reliably detect the dispatch and capture the job id without parsing prose.
   return (
-    `${payload.title} started in the background as ${payload.jobId}. Check \`status ${payload.jobId}\` for progress.\n` +
+    `${payload.title} started in the background as ${payload.jobId}.\n` +
+    `${followUpHint(payload.jobId)}\n` +
     `[[codex-task status=dispatched id=${payload.jobId}]]\n`
   );
 }
@@ -1100,7 +1110,11 @@ function enqueueBackgroundTask(cwd, job, request, deps = {}) {
       ...(request.threadId ? {} : { workspaceRoot: job.workspaceRoot }),
       ...(job.backend ? { backend: job.backend } : {}),
       logFile,
-      signalFile
+      // Hosts that never loaded the skill copied the old `signalFile` from here into
+      // `until [ -f … ]` loops (no exit status, no check-in, killed at the Bash ceiling) and
+      // piped `result` into head/tail. The launch line is the one output every caller reads,
+      // so it says how to follow the job. Kept last: a launch cut by `| tail` still shows it.
+      next: followUpHint(job.id)
     },
     logFile,
     signalFile

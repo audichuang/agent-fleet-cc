@@ -7,7 +7,7 @@ import { resolveJobDoneFile, resolveJobFile } from "../../skills/codex/scripts/l
 import { readStoredJobWithRetry } from "../../skills/codex/scripts/lib/job-control.mjs";
 import { enqueueBackgroundTask, spawnDetachedTaskWorker, spawnWatchdog } from "../../skills/codex/scripts/codex-companion.mjs";
 
-test("enqueueBackgroundTask exposes the signal file and launches the watchdog", () => {
+test("enqueueBackgroundTask returns the signal file (not in the payload) and launches the watchdog", () => {
   const workspace = makeTempDir();
   const job = { id: "task-bg", workspaceRoot: workspace, title: "Codex task", summary: "do x" };
 
@@ -23,7 +23,7 @@ test("enqueueBackgroundTask exposes the signal file and launches the watchdog", 
     }
   });
 
-  assert.equal(result.payload.signalFile, resolveJobDoneFile(workspace, "task-bg"));
+  assert.equal("signalFile" in result.payload, false);
   assert.equal(result.signalFile, resolveJobDoneFile(workspace, "task-bg"));
   assert.deepEqual(calls.worker, [[workspace, "task-bg"]]);
   assert.deepEqual(calls.watchdog, [[workspace, "task-bg"]]);
@@ -70,7 +70,7 @@ test("enqueueBackgroundTask still launches the task when the watchdog fails to s
 
   assert.equal(workerLaunched, true);
   assert.equal(result.payload.status, "queued");
-  assert.equal(result.payload.signalFile, resolveJobDoneFile(workspace, "task-bg2"));
+  assert.equal(result.signalFile, resolveJobDoneFile(workspace, "task-bg2"));
 });
 
 // The detached background worker was spawned with stdio:"ignore", so a crash

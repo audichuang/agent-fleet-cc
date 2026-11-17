@@ -10,4 +10,7 @@ test("renderQueuedTaskLaunch emits a machine-readable dispatch sentinel with the
   assert.match(out, /started in the background as task-abc123/);
   // machine-readable sentinel line for consumers that scan stdout
   assert.match(out, /\[\[codex-task status=dispatched id=task-abc123\]\]/);
+  // the follow-up a host that never loaded the skill reads, instead of `status` polling
+  assert.match(out, /Wait with `wait task-abc123`/);
+  assert.doesNotMatch(out, /Check `status/);
 });
