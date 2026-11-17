@@ -111,14 +111,26 @@ export function collectErrorInfoTags(serverNotificationText) {
   return out;
 }
 
-// CodexErrorDetails variants, and which of them sit in retry_delay's terminal (`=> None`) arm.
+// CodexErrorDetails variants, and which of them upstream never retries. Up to 0.169 that was
+// retry_delay's `=> None` arm; main then moved the match into retry_policy(), whose terminal arms
+// end in `=> RetryPolicy::Never`. A guarded arm (`X(e) if … =>`) is only conditionally terminal,
+// so it does not count.
 export function parseErrorVariants(errorRs) {
   const variants = new Set();
   const body = errorRs.match(/pub enum CodexErrorDetails \{\n([\s\S]*?)\n\}/)?.[1] ?? "";
   for (const m of body.matchAll(/^ {4}([A-Z][A-Za-z0-9]*)\b/gm)) variants.add(m[1]);
   const terminal = new Set();
-  const retry = errorRs.split(/fn retry_delay\b/)[1]?.split("=> None")[0] ?? "";
-  for (const m of retry.matchAll(/CodexErrorDetails::([A-Z][A-Za-z0-9]*)/g)) terminal.add(m[1]);
+  const policy = errorRs.split(/fn retry_policy\b/)[1];
+  if (policy !== undefined) {
+    const pattern = /CodexErrorDetails::[A-Z]\w*(?:\s*\{\s*\.\.\s*\}|\s*\([^()]*\))?/.source;
+    const neverArm = new RegExp(`((?:\\|?\\s*${pattern}\\s*)+)=>\\s*\\{?\\s*RetryPolicy::Never\\b`, "g");
+    for (const arm of policy.matchAll(neverArm)) {
+      for (const m of arm[1].matchAll(/CodexErrorDetails::([A-Z][A-Za-z0-9]*)/g)) terminal.add(m[1]);
+    }
+  } else {
+    const retry = errorRs.split(/fn retry_delay\b/)[1]?.split("=> None")[0] ?? "";
+    for (const m of retry.matchAll(/CodexErrorDetails::([A-Z][A-Za-z0-9]*)/g)) terminal.add(m[1]);
+  }
   return { variants, terminal };
 }
 

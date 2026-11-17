@@ -112,6 +112,54 @@ test("error variants are split into terminal and the rest", () => {
   assert.deepEqual([...terminal].sort(), ["CyberPolicy", "GatewayLoginRequired"]);
 });
 
+// The shape upstream main moved to (after 0.169): retry_delay delegates to retry_policy(), and the
+// terminal arms end in `=> RetryPolicy::Never`. A guarded arm is only conditionally terminal.
+const ERROR_RS_POLICY = `pub enum CodexErrorDetails {
+    CyberPolicy { message: String },
+    ServerOverloaded,
+    GatewayLoginRequired(String),
+    UnexpectedStatus(UnexpectedResponseError),
+    LandlockRuleset(String),
+    WebsocketMessageTooLarge,
+}
+
+impl CodexErr {
+    pub fn retry_delay(&self, retry_count: u64) -> Option<Duration> {
+        match self.retry_policy() {
+            RetryPolicy::Never => None,
+            RetryPolicy::ServerDirected => self.server_retry_delay(),
+        }
+    }
+
+    fn retry_policy(&self) -> RetryPolicy {
+        match self.details() {
+            CodexErrorDetails::UnexpectedStatus(error)
+                if is_runtime_auth_denial(
+                    error.status,
+                ) =>
+            {
+                RetryPolicy::Never
+            }
+            CodexErrorDetails::CyberPolicy { .. }
+            | CodexErrorDetails::GatewayLoginRequired(_) => RetryPolicy::Never,
+            CodexErrorDetails::ServerOverloaded => RetryPolicy::ServerDirected,
+            CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,
+            CodexErrorDetails::UnexpectedStatus(_) => RetryPolicy::Backoff,
+            #[cfg(target_os = "linux")]
+            CodexErrorDetails::LandlockRuleset(_) => {
+                RetryPolicy::Never
+            }
+        }
+    }
+}
+`;
+
+test("terminal variants are read from retry_policy's Never arms when upstream uses it", () => {
+  const { variants, terminal } = parseErrorVariants(ERROR_RS_POLICY);
+  assert.equal(variants.size, 6);
+  assert.deepEqual([...terminal].sort(), ["CyberPolicy", "GatewayLoginRequired", "LandlockRuleset"]);
+});
+
 test("wire error tags include string and object variants", () => {
   const text = JSON.stringify({
     definitions: {
