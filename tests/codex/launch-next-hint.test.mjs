@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
 import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
+import { followUpHint } from "../../skills/codex/scripts/codex-companion.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SCRIPT = path.join(ROOT, "skills", "codex", "scripts", "codex-companion.mjs");
@@ -62,4 +63,12 @@ test("the follow-up works as written: wait and result by id alone, from another 
 
   const result = run("node", [SCRIPT, "result", jobId], { cwd: elsewhere, env: buildEnv(binDir) });
   assert.equal(result.status, 0, result.stderr);
+});
+
+test("the follow-up says a non-10 exit has ended, and carries the data dir only when one is set", () => {
+  const plain = followUpHint("task-x", {});
+  assert.match(plain, /any other code means it ended \(0 done, 1 failed, 2 cancelled\)/);
+  assert.match(plain, /the answer or the reason it failed/);
+  assert.doesNotMatch(plain, /CODEX_COMPANION_DATA/);
+  assert.match(followUpHint("task-x", { CODEX_COMPANION_DATA: "/tmp/d" }), /Keep CODEX_COMPANION_DATA=\/tmp\/d set for both\./);
 });

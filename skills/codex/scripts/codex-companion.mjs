@@ -795,11 +795,16 @@ function buildTaskRunMetadata({ prompt, resumeLast = false }) {
 }
 
 // What to run after a background launch. Verbs and the id only: the caller just ran the
-// companion, so it knows the path, and an exact id is found from any checkout.
-export function followUpHint(jobId) {
+// companion, so it knows the path, and an exact id is found from any checkout under the
+// same data dir, which is why a launch with CODEX_COMPANION_DATA says to keep it.
+export function followUpHint(jobId, env = process.env) {
+  const dataDir = env.CODEX_COMPANION_DATA?.trim();
   return (
-    `Wait with \`wait ${jobId}\`: exit 10 means it is still running (not a failure), so run it again; 0 means done. ` +
-    `Then run \`result ${jobId} > <file>\` and read the whole file. Do not poll job files or pipe output into head or tail.`
+    `Wait with \`wait ${jobId}\`: exit 10 means it is still running (not a failure), so run it again; ` +
+    `any other code means it ended (0 done, 1 failed, 2 cancelled). ` +
+    `Then run \`result ${jobId} > <file>\` and read the whole file: it holds the answer or the reason it failed. ` +
+    `Do not poll job files or pipe output into head or tail.` +
+    (dataDir ? ` Keep CODEX_COMPANION_DATA=${dataDir} set for both.` : "")
   );
 }
 
