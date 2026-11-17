@@ -15,10 +15,10 @@ const SCRIPT = path.join(ROOT, "skills", "codex", "scripts", "codex-companion.mj
 // copied `signalFile` into `until [ -f … ]` loops and piped `result` into head/tail. The launch
 // output now says how to follow the job instead, and no longer hands out the signal file.
 
-function launch(args) {
+function launch(args, behavior = "slow-task") {
   const repo = makeTempDir();
   const binDir = makeTempDir();
-  installFakeCodex(binDir, "slow-task");
+  installFakeCodex(binDir, behavior);
   initGitRepo(repo);
   fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
   run("git", ["add", "README.md"], { cwd: repo });
@@ -35,7 +35,7 @@ test("a background launch's JSON says how to follow the job, last, and names no 
   assert.equal("signalFile" in payload, false);
   const keys = Object.keys(payload);
   assert.equal(keys[keys.length - 1], "next");
-  assert.match(payload.next, new RegExp(`\`wait ${payload.jobId}\``));
+  assert.match(payload.next, new RegExp(`\`wait ${payload.jobId} --timeout-ms 100000\``));
   assert.match(payload.next, /exit 10 means it is still running/);
   assert.match(payload.next, new RegExp(`\`result ${payload.jobId} > <file>\` and read the whole file`));
 
@@ -48,7 +48,7 @@ test("the plain-text launch line carries the same follow-up and keeps the dispat
   const { launched } = launch(["task", "--background", "investigate the failing test"]);
   const id = launched.stdout.match(/started in the background as (\S+)\./)?.[1];
   assert.ok(id, launched.stdout);
-  assert.match(launched.stdout, new RegExp(`Wait with \`wait ${id}\``));
+  assert.match(launched.stdout, new RegExp(`Wait with \`wait ${id} --timeout-ms 100000\``));
   assert.doesNotMatch(launched.stdout, /Check `status/);
   assert.match(launched.stdout, new RegExp(`\\[\\[codex-task status=dispatched id=${id}\\]\\]`));
 });
@@ -71,4 +71,16 @@ test("the follow-up says a non-10 exit has ended, and carries the data dir only 
   assert.match(plain, /the answer or the reason it failed/);
   assert.doesNotMatch(plain, /CODEX_COMPANION_DATA/);
   assert.match(followUpHint("task-x", { CODEX_COMPANION_DATA: "/tmp/d" }), /Keep CODEX_COMPANION_DATA=\/tmp\/d set for both\./);
+});
+
+test("as written for a failed job: wait exits 1 and result gives the reason", () => {
+  const { binDir, launched } = launch(["task", "--background", "--json", "investigate the failing test"], "terminal-error");
+  const { jobId } = JSON.parse(launched.stdout);
+  const elsewhere = makeTempDir();
+
+  const waited = run("node", [SCRIPT, "wait", jobId, "--timeout-ms", "15000"], { cwd: elsewhere, env: buildEnv(binDir) });
+  assert.equal(waited.status, 1, waited.stdout + waited.stderr);
+
+  const result = run("node", [SCRIPT, "result", jobId], { cwd: elsewhere, env: buildEnv(binDir) });
+  assert.match(result.stdout + result.stderr, /requires a newer version of Codex/);
 });

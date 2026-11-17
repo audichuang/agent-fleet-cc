@@ -800,7 +800,7 @@ function buildTaskRunMetadata({ prompt, resumeLast = false }) {
 export function followUpHint(jobId, env = process.env) {
   const dataDir = env.CODEX_COMPANION_DATA?.trim();
   return (
-    `Wait with \`wait ${jobId}\`: exit 10 means it is still running (not a failure), so run it again; ` +
+    `Wait with \`wait ${jobId} --timeout-ms 100000\`: exit 10 means it is still running (not a failure), so run it again; ` +
     `any other code means it ended (0 done, 1 failed, 2 cancelled). ` +
     `Then run \`result ${jobId} > <file>\` and read the whole file: it holds the answer or the reason it failed. ` +
     `Do not poll job files or pipe output into head or tail.` +
