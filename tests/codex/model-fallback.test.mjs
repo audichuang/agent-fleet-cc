@@ -24,7 +24,7 @@ test("e2e: a gated default model fails once and is not retried on gpt-6-sol", ()
   run("git", ["add", "README.md"], { cwd: repo });
   run("git", ["commit", "-m", "init"], { cwd: repo });
 
-  // buildEnv drops CODEX_*, so the default model resolves to gpt-6.1-sol; the fake
+  // buildEnv drops CODEX_*, so the default model resolves to gpt-6.2-sol; the fake
   // rejects that slug. The companion must surface the failure and stop.
   const result = run("node", [SCRIPT, "task", "do the thing", "--json"], {
     cwd: repo,

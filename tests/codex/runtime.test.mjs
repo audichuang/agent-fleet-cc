@@ -145,7 +145,7 @@ test("setup confirms the default model is supported by the account", () => {
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.model.checked, true);
-  assert.equal(payload.model.defaultModel, "gpt-6.1-sol");
+  assert.equal(payload.model.defaultModel, "gpt-6.2-sol");
   assert.equal(payload.model.supported, true);
   assert.ok(!payload.nextSteps.some((step) => step.includes("does not list the default model")));
 });
@@ -167,7 +167,7 @@ test("setup warns when the default model is not in the account catalog", () => {
   assert.equal(payload.model.supported, false);
   const warning = payload.nextSteps.find((step) => step.includes("does not list the default model"));
   assert.ok(warning, "expected a model-support warning in nextSteps");
-  assert.match(warning, /gpt-6\.1-sol/);
+  assert.match(warning, /gpt-6\.2-sol/);
   // Surfaces alternatives the account actually has, excluding hidden models.
   assert.match(warning, /gpt-5\.6-terra/);
   assert.doesNotMatch(warning, /codex-auto-review/, "a hidden model must never be suggested");
@@ -772,7 +772,7 @@ test("task does not alias 'spark' (the fabricated gpt-5.3-codex-spark slug is go
   assert.equal(fakeState.lastTurnStart.model, "spark");
 });
 
-test("task defaults the model to gpt-6.1-sol and reasoning effort to xhigh when unspecified", () => {
+test("task defaults the model to gpt-6.2-sol and reasoning effort to xhigh when unspecified", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   const statePath = path.join(binDir, "fake-codex-state.json");
@@ -789,7 +789,7 @@ test("task defaults the model to gpt-6.1-sol and reasoning effort to xhigh when 
 
   assert.equal(result.status, 0, result.stderr);
   const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  assert.equal(fakeState.lastTurnStart.model, "gpt-6.1-sol");
+  assert.equal(fakeState.lastTurnStart.model, "gpt-6.2-sol");
   assert.equal(fakeState.lastTurnStart.effort, "xhigh");
 });
 
@@ -1040,7 +1040,7 @@ test("adversarial review rejects staged-only scope to match review target select
   assert.match(result.stderr, /Use one of: auto, working-tree, branch, or pass --base <ref>/i);
 });
 
-test("review defaults the model to gpt-6.1-sol and reasoning effort to xhigh", () => {
+test("review defaults the model to gpt-6.2-sol and reasoning effort to xhigh", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
   const statePath = path.join(binDir, "fake-codex-state.json");
@@ -1058,7 +1058,7 @@ test("review defaults the model to gpt-6.1-sol and reasoning effort to xhigh", (
 
   assert.equal(result.status, 0, result.stderr);
   const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  assert.equal(fakeState.lastThreadStart.model, "gpt-6.1-sol");
+  assert.equal(fakeState.lastThreadStart.model, "gpt-6.2-sol");
   assert.equal(fakeState.lastThreadStart.effort, "xhigh");
 });
 
@@ -1080,7 +1080,7 @@ test("adversarial review defaults reasoning effort to xhigh on turn/start", () =
 
   assert.equal(result.status, 0, result.stderr);
   const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  assert.equal(fakeState.lastTurnStart.model, "gpt-6.1-sol");
+  assert.equal(fakeState.lastTurnStart.model, "gpt-6.2-sol");
   assert.equal(fakeState.lastTurnStart.effort, "xhigh");
 });
 

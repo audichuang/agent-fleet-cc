@@ -1,12 +1,12 @@
 > 共通規則(IRONCLAD、版本/同步、CI gate、attribution、autonomy 邊界)見 repo 根 `AGENTS.md`。
 
-# codex skill — the OpenAI Codex (GPT-6.1) engine (developer notes)
+# codex skill — the OpenAI Codex (GPT-6.x) engine (developer notes)
 
 > 改 `skills/codex/`、`tests/codex/` 前先讀這份。不放在 `skills/codex/` 裡:skill 目錄整包會被裝到使用者機器,
 > 那裡的 `AGENTS.md` / `CLAUDE.md` 會在 host 讀 references 時被載進使用者的 session。
 
 ## 定位
-把任務交給 **Codex**(GPT-6.1):獨立 code review / 第二意見、調查與修、帶寫實作。codex **不用 shared
+把任務交給 **Codex**(GPT-6.x):獨立 code review / 第二意見、調查與修、帶寫實作。codex **不用 shared
 runWorker** —— 它自己跑一顆 **app-server broker**(持久 net socket、Codex app-server protocol)驅動
 turn / review;job 持久化才用 shared core 的 **state-store / events / job / reconcile**(見 root gotcha)。
 
@@ -112,9 +112,9 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   什麼都沒關住。四個 prose surface 曾經同時把這件事寫錯(暗示省略 `--write` 就等於唯讀),所以改
   任何講 sandbox / 唯讀的文案前先看這條。真要強制:`CODEX_SANDBOX_MODE=read-only`,且只在 bwrap
   起得來的主機上。
-- **預設模型 `gpt-6.1-sol`。** 帳號還沒開通這個 slug 時,turn 會 400
+- **預設模型 `gpt-6.2-sol`(2026-11-18 從 `gpt-6.1-sol` 換過來)。** 帳號還沒開通這個 slug 時,turn 會 400
   (「requires a newer version of Codex」),失敗原樣交回,不換較弱的 slug。5.6 那個「同模型多數時候可用、偶發 400」是舊觀察,
-  沒有在 6.1 上重測。turn 失敗**是 RETURN 不是 throw**,失敗原因有**三種**形狀:獨立 `error`
+  沒有在 6.1／6.2 上重測。turn 失敗**是 RETURN 不是 throw**,失敗原因有**三種**形狀:獨立 `error`
   notification、terminal `turn/completed` 的 `turn.error`、以及 terminal turn **既非 completed
   也不帶 error**(`buildResultStatus` 把任何非 `"completed"` 都算失敗;第三種 1.6.2 才補上,
   fixture 的 `interrupted-no-error`)。三者都要灌進結構化 `errorMessage`(`failureReasonFor`,
@@ -137,8 +137,8 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   字面雙前綴)。理由見 `render.mjs` 的 `ponytail:` 註解:沒有資訊遺失,而放寬比對會有吞掉真正
   不同原因的風險。`tests/codex/turn-error-surfacing.test.mjs` 的 `decorated-turn-error` 把這個
   天花板釘成一條會咬的斷言,改比對邏輯它就會變。動 render 時**三種形狀都要各驗一次**。
-  **預設 `gpt-6.1-sol`,閘住就失敗,不降級。** 1.6.4 拿掉 `gpt-6-sol` 單次重試,也拿掉
-  `gpt-6-luna` ticket lane。使用者點名才傳 `--model`;`gpt-6-astra` 是 frontier,不是預設。
+  **預設 `gpt-6.2-sol`,閘住就失敗,不降級。** 1.6.4 拿掉 `gpt-6-sol` 單次重試,也拿掉
+  `gpt-6-luna` ticket lane。使用者點名才傳 `--model`;`gpt-6.2-astra` 是 frontier,不是預設。
   不傳 service tier(沒有 Fast)。`ultra` 仍拒絕。`review` / `adversarial-review` 與 `task` 一樣預設
   effort `xhigh`;`review/start` 沒有 effort 欄,所以寫在該 thread 的 `model_reasoning_effort`。
   這兩個 verb 的 `--background` 走同一個 detached worker。app-server 以 `--enable image_generation` 啟動,
@@ -156,5 +156,5 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
 - 交付路徑選型(直接 `task` · `--resume-last` · conversation fork)含 fork 命名
   陷阱:`skills/codex/references/delivery-paths.md`。
 - protocol / health sync 稽核 + 何時重跑:`docs/codex-protocol-sync-audit.md`(root 已指)。例行檢查(新版 codex-cli、upstream 有新 commit)走 `.claude/skills/codex-upstream-sync/`:腳本做 diff,agent 分類並寫 Audit log 列。
-- 寫 GPT-6.1 prompt:`skills/codex/references/prompting.md`;worktree 驗證合約見
+- 寫 GPT-6.x prompt:`skills/codex/references/prompting.md`;worktree 驗證合約見
   `lib/worktree-guard.mjs`。

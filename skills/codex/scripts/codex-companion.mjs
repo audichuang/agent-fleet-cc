@@ -88,14 +88,14 @@ const VALID_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "hi
 
 // Defaults applied when the caller does not pass --model / --effort. Overridable
 // via env so a workspace can pin a different model or dial reasoning effort
-// down. Default to the explicit `gpt-6.1-sol` slug (current workhorse). Use the
+// down. Default to the explicit `gpt-6.2-sol` slug (current workhorse). Use the
 // explicit slug — the old `gpt-5.6` family alias was not resolvable on
 // ChatGPT-account Codex (400), and this plugin does not rewrite names.
 // A gated default fails in place. Do not retry on gpt-6-sol or gpt-6-luna.
 // See skills/codex/references/prompting.md for model-selection guidance.
 function resolveDefaultModel() {
   const fromEnv = process.env.CODEX_DEFAULT_MODEL?.trim();
-  return fromEnv || "gpt-6.1-sol";
+  return fromEnv || "gpt-6.2-sol";
 }
 function resolveDefaultEffort() {
   const fromEnv = process.env.CODEX_DEFAULT_EFFORT?.trim().toLowerCase();

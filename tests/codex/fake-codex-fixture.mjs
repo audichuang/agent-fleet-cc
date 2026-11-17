@@ -16,7 +16,7 @@ const readline = require("node:readline");
 	const BEHAVIOR = ${JSON.stringify(behavior)};
 	// A terminal turn error whose .message is a JSON-ENCODED error envelope — the
 	// real HTTP-400 model-unavailable shape the silent-death fix must surface.
-	const TERMINAL_ERROR_ENVELOPE = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-6.1-sol' model requires a newer version of Codex." } });
+	const TERMINAL_ERROR_ENVELOPE = JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-6.2-sol' model requires a newer version of Codex." } });
 	// Real 0.146.0 sends the structured code alongside the message, and an upstream 400 is
 	// CodexErrorDetails::UnexpectedStatus, which maps to the "other" catch-all (verified
 	// against a live rejected turn). The error notifications below mirror that, or the
@@ -153,7 +153,7 @@ function buildModelListResult() {
   // suggestion text has something to name.
   const models = BEHAVIOR === "model-unsupported"
     ? [{ id: "gpt-5.4", hidden: false }, { id: "gpt-5.5", hidden: false }, { id: "gpt-5.6-terra", hidden: false }, { id: "codex-auto-review", hidden: true }]
-    : [{ id: "gpt-6.1-sol", hidden: false }, { id: "gpt-6-astra", hidden: false }, { id: "gpt-6-sol", hidden: false }, { id: "gpt-6-luna", hidden: false }];
+    : [{ id: "gpt-6.2-sol", hidden: false }, { id: "gpt-6.2-astra", hidden: false }, { id: "gpt-6.1-sol", hidden: false }, { id: "gpt-6-astra", hidden: false }, { id: "gpt-6-sol", hidden: false }, { id: "gpt-6-luna", hidden: false }];
   return { data: models, nextCursor: null };
 }
 

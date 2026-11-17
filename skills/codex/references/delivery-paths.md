@@ -1,6 +1,6 @@
 # Delivery paths — how to hand work to Codex
 
-Model selection (in [prompting.md](prompting.md)) decides *which* Codex runs the work: `gpt-6.1-sol` by default, `gpt-6-astra` only when the user asks. This file decides *how the work gets there*.
+Model selection (in [prompting.md](prompting.md)) decides *which* Codex runs the work: `gpt-6.2-sol` by default, `gpt-6.2-astra` only when the user asks. This file decides *how the work gets there*.
 
 The cost that matters is the one paid on the Claude side. Codex's own token spend is roughly
 the same whichever path you pick — the work is identical once it reaches the engine.

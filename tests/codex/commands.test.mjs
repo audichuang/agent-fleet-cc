@@ -24,7 +24,7 @@ test("slash commands are gone; the skill is how the host calls Codex", () => {
   assert.match(skill, /none dropped, merged or softened/i);
   assert.match(skill, /Do not pass `gpt-6-sol` or `gpt-6-luna`/);
   assert.match(skill, /Do not pass a service tier/);
-  assert.match(skill, /gpt-6-astra/);
+  assert.match(skill, /gpt-6\.2-astra/);
   assert.match(skill, /imageGenerations\[\]\.savedPath/);
   assert.match(skill, /Images:/);
   assert.match(skill, /do not turn a failed or incomplete Codex run into a Claude-side implementation attempt/i);
@@ -61,8 +61,8 @@ test("app-server is spawned with image generation enabled", () => {
 test("model guidance keeps the workhorse and does not route to sol or luna", () => {
   const promptingSkill = read("references/prompting.md");
 
-  assert.match(promptingSkill, /\|\s*\*\*gpt-6\.1-sol\*\*\s*\|/);
-  assert.match(promptingSkill, /\|\s*\*\*gpt-6-astra\*\*\s*\|/);
+  assert.match(promptingSkill, /\|\s*\*\*gpt-6\.2-sol\*\*\s*\|/);
+  assert.match(promptingSkill, /\|\s*\*\*gpt-6\.2-astra\*\*\s*\|/);
   assert.doesNotMatch(promptingSkill, /\|\s*\*\*gpt-6-luna\*\*\s*\|/);
   assert.doesNotMatch(promptingSkill, /\|\s*\*\*gpt-6-sol\*\*\s*\|/);
   assert.match(promptingSkill, /Do not pass `--model gpt-6-sol` or `--model gpt-6-luna`/);

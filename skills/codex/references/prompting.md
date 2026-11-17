@@ -1,25 +1,25 @@
-# GPT-6.1 Prompting
+# GPT-6.x Prompting
 
 Use this when composing a prompt for Codex, before the host calls the companion.
 
-GPT-6.1 works best outcome-first: name the outcome, the success criteria, the constraints, and the files, then leave the path open. A process script from an older model adds noise. The 6.1 harness already covers autonomy, skills, plugins, and apps, so restating those is noise.
+GPT-6.x works best outcome-first: name the outcome, the success criteria, the constraints, and the files, then leave the path open. A process script from an older model adds noise. The 6.x harness already covers autonomy, skills, plugins, and apps, so restating those is noise.
 
 ## Model selection
 
 **Route by which job it is, not by price.** This file quotes no prices. A written price table rots the first time OpenAI reprints it, and nothing here would go red. Slugs and effort levels come from the catalog: the companion `setup` verb probes `model/list`, and the offline read is `~/.codex/models_cache.json`.
 
-Pass an explicit slug. The companion does not rewrite names. The old family alias `gpt-5.6` was rejected with HTTP 400, so do not invent a `gpt-6.1` alias either.
+Pass an explicit slug. The companion does not rewrite names. The old family alias `gpt-5.6` was rejected with HTTP 400, so do not invent a `gpt-6.2` alias either.
 
 | Model | Job | Route here when |
 | --- | --- | --- |
-| **gpt-6.1-sol** | **workhorse** (default) | Everyday coding, planning, diagnosis, review, and long runs. The companion sends this when `--model` is omitted. |
-| **gpt-6-astra** | **frontier** | The most demanding work, and only when the user asks for it (`--model gpt-6-astra`). |
+| **gpt-6.2-sol** | **workhorse** (default) | Everyday coding, planning, diagnosis, review, and long runs. The companion sends this when `--model` is omitted. |
+| **gpt-6.2-astra** | **frontier** | The most demanding work, and only when the user asks for it (`--model gpt-6.2-astra`). |
 
-Delegation is for a stronger model to review and explain. Do not pass `--model gpt-6-sol` or `--model gpt-6-luna`. If `gpt-6.1-sol` is gated, the turn fails with the gate message; the companion does not retry on a weaker slug. Do not pass a service tier. The companion has no Fast path.
+Delegation is for a stronger model to review and explain. Do not pass `--model gpt-6-sol` or `--model gpt-6-luna`. If `gpt-6.2-sol` is gated, the turn fails with the gate message; the companion does not retry on a weaker slug. Do not pass a service tier. The companion has no Fast path.
 
-`gpt-6.1-sol` can generate images. The companion enables `image_generation` and returns each saved path. Say which slug you chose when it is not the default. `setup` warns, without blocking, when the configured default is missing from `model/list`.
+`gpt-6.2-sol` can generate images. The companion enables `image_generation` and returns each saved path. Say which slug you chose when it is not the default. `setup` warns, without blocking, when the configured default is missing from `model/list`.
 
-The companion defaults effort to `xhigh` for a task and for a review, once, at the start of the run. It does not change effort mid-turn. The catalog's own default for `gpt-6.1-sol` is `low`; the override is intentional. Keep delegated work in the `high` → `xhigh` → `max` band, and reserve `max` for the hardest pass. The catalog also advertises `ultra`. The companion rejects it, because that level hands the turn to agents this runner cannot observe.
+The companion defaults effort to `xhigh` for a task and for a review, once, at the start of the run. It does not change effort mid-turn. The catalog's own default for `gpt-6.2-sol` is `low`; the override is intentional. Keep delegated work in the `high` → `xhigh` → `max` band, and reserve `max` for the hardest pass. The catalog also advertises `ultra`. The companion rejects it, because that level hands the turn to agents this runner cannot observe.
 
 ## The reviewer role
 
@@ -32,10 +32,10 @@ When you do write one, name the lenses and require each to be weighed: correctne
 ## Core rules
 
 - State the goal and what done looks like. A numbered procedure narrows the search.
-- Add a line only to close a gap you have already seen. "Be concise" makes GPT-6.1 drop required content. Say "lead with the conclusion and keep the required facts" instead.
+- Add a line only to close a gap you have already seen. "Be concise" makes GPT-6.x drop required content. Say "lead with the conclusion and keep the required facts" instead.
 - Save `ALWAYS` / `NEVER` for invariants: required output fields, and actions that must not happen. Judgment calls get a decision rule.
 - Say the permission once, as what Codex may do and what is out of scope. A running job has nobody to answer a question, so "ask first" ends the run with the question as its answer. Codex already has full access and no approvals: name the boundary ("do not push; report the command instead") rather than asking it to wait for confirmation.
-- GPT-6.1 will loop, so include a stop rule. Copy the wording from [prompt-blocks.md](prompt-blocks.md) rather than inventing a longer one.
+- GPT-6.x will loop, so include a stop rule. Copy the wording from [prompt-blocks.md](prompt-blocks.md) rather than inventing a longer one.
 - Give absolute file paths and have Codex read them. When validation exists, name the check (tests, types, build, or a smoke run). Lines that reliably hurt are in [codex-prompt-antipatterns.md](codex-prompt-antipatterns.md).
 - A delegated run reads the target repo's `AGENTS.md` and skills, and GPT-6.x follows them closely, so a repo rule like "confirm before X" can stop the run. When the job needs X, say in the prompt that these instructions take precedence over the repo's `AGENTS.md` and skills for this task.
 

@@ -1,4 +1,4 @@
-# Reusable GPT-6.1 prompt blocks
+# Reusable GPT-6.x prompt blocks
 
 Drop these in where a task needs them. Keep each short.
 

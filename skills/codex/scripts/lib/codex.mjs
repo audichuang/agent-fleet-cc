@@ -1566,7 +1566,7 @@ export async function getCodexAuthStatus(cwd, options = {}) {
 
 // Ask the app-server which models THIS account/CLI can actually use, so setup can
 // warn when the configured default model isn't available (an older Codex that
-// predates gpt-6.1, or an account not yet gated into it). Best-effort: returns
+// predates the default model, or an account not yet gated into it). Best-effort: returns
 // checked:false on any failure so setup never breaks on a model probe. Needs an
 // authenticated session — callers should gate on login before calling.
 export async function listSupportedModels(cwd, options = {}) {
