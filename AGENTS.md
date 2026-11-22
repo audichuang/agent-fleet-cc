@@ -34,7 +34,7 @@ When **adding** a skill, the only existing files you may edit are:
 - **Read `verify`'s exit code, never its tail.** `npm run verify | tail -n` reports *tail's*
   exit code, so a chain that failed prints a plausible-looking tail and exits 0 — a red run
   reads as green, and it has been reported as green here more than once. Run
-  `npm run verify > <log>; echo $?` and grep the log, or read `${PIPESTATUS[0]}`.
+  `npm run verify > <log>; echo $?` and grep the log.
 - `npm test` — the test chain only; `package.json` says what it is made of. Run on **Node 24**:
   codex's unref'd-timer tests fail on Node 22.22–23.x (`engines` still says `>=22.3`, but CI
   pins 24 for this reason — see `.github/workflows/ci.yml`).
@@ -57,8 +57,6 @@ When **adding** a skill, the only existing files you may edit are:
   one fix for a test that was green for the wrong reason. A guard that has to *guess* — at shell
   syntax, at a heredoc spelling — fails both ways at once, so prefer an invariant with no grammar
   to get wrong.
-- Attribution: don't add `Co-Authored-By` trailers by hand — Claude Code's settings control
-  it, and this repo keeps them off. (Historical commits carry one; new ones must not.)
 - **Never enumerate an engine's runtime catalog in shipped prose** — models, effort levels, tool
   names. Point at the authority instead (codex: the offline recipe in its
   audit doc) and say the levels are per-model. A written-down list reads authoritative and rots
