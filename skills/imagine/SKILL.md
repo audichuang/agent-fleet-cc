@@ -1,6 +1,6 @@
 ---
 name: imagine
-description: Generates a still image with xAI Grok Imagine (default) or Google Antigravity (agy) and returns the path of the file that actually landed on disk. Use whenever the user wants a picture MADE rather than found or edited — posters, banners, thumbnails and other marketing visuals, product shots, covers, characters and mascots, avatars and icons, portraits, illustrations, illustrated diagrams, UI mockup images, or plainly a photo — including a one-line idea they expect expanded, even if they never say "prompt". Also use to diagnose a render that came back generic, mushy, badly lit, or carrying invented text.
+description: Generates a still image with xAI Grok Imagine and returns the path of the file that actually landed on disk. Use whenever the user wants a picture MADE rather than found or edited — posters, banners, thumbnails and other marketing visuals, product shots, covers, characters and mascots, avatars and icons, portraits, illustrations, illustrated diagrams, UI mockup images, or plainly a photo — including a one-line idea they expect expanded, even if they never say "prompt". Also use to diagnose a render that came back generic, mushy, badly lit, or carrying invented text.
 ---
 
 # Imagine
@@ -25,16 +25,15 @@ node "${CLAUDE_SKILL_DIR}/scripts/imagine.mjs" --prompt-file /abs/path/prompt.tx
 `${CLAUDE_SKILL_DIR}` is this skill's directory, the one holding this `SKILL.md`; where your
 harness does not fill it in, use that absolute path.
 
-Give the Bash call a 240 s timeout (300 s with `--engine agy`).
+Give the Bash call a 240 s timeout.
 
 - **Nothing from the prompt goes on the command line** — no heredoc, no shell argument. A shell
   argument silently strips the double quotes that on-image text needs, and a prompt containing
   a heredoc's delimiter line runs the rest of itself as shell. A file has no such escape.
 - **Omit `--out`** unless the user named a path; the script picks its own directory and prints
   where the image landed.
-- **`--engine grok`** (default) is billed to the user's SuperGrok login or `XAI_API_KEY`.
-  **`--engine agy`** renders on their Google account with no API key. Pick grok unless the user
-  asks for agy, has no xAI credential, or wants to spend Google quota instead.
+- Billed to the user's SuperGrok login or `XAI_API_KEY`. `--engine agy` was removed 2026-11-26
+  (Antigravity's terms do not allow driving agy from another agent) and exits 2; do not offer it.
 - Defaults: `--aspect 1:1`, `--resolution 1k`. Do not validate the aspect yourself: a bad value
   returns 422 listing every accepted ratio.
 
@@ -52,13 +51,13 @@ than re-diagnosing. Exit 2 is a usage error, and nothing was billed.
 
 ## 4. Cost
 
-One call is one image, on either engine. **Ask before generating a second.**
+One call is one image. **Ask before generating a second.**
 
 ## References
 
 | File | Read when |
 |---|---|
-| [references/prompt-craft.md](references/prompt-craft.md) | Writing or fixing a prompt: the recipe, anti-patterns, what changes on agy. |
+| [references/prompt-craft.md](references/prompt-craft.md) | Writing or fixing a prompt: the recipe, anti-patterns. |
 | [references/examples.md](references/examples.md) | You want a worked example for a common job (poster, product shot, diagram, …). |
 | [references/model-and-params.md](references/model-and-params.md) | Choosing a model, resolution or quality, or comparing their price. |
-| [references/running.md](references/running.md) | Using the agy engine, or reading a specific failure (401, 403, "already exists", a timeout, agy wrote no file). |
+| [references/running.md](references/running.md) | Reading a specific failure (401, 403, "already exists", a timeout). |

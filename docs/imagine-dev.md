@@ -9,10 +9,7 @@
 這顆是一個**能力**:生一張圖。所以它沒有 job 生命週期、沒有
 `launch/wait/logs/cancel`、**不用 codex 的 job store**(`scripts/lib/shared/` 不存在)。
 
-兩個引擎共用同一份契約 —— **磁碟上的檔案就是收據**:
-- `--engine grok`(預設):一個 HTTP POST 到 xAI,吃 SuperGrok。
-- `--engine agy`(0.2.0 加):spawn Antigravity CLI,用它內建的 `generate_image` tool,
-  吃使用者的 Google 帳號,**完全不需要 API key**。細節見下面「agy 引擎」。
+契約 —— **磁碟上的檔案就是收據**:一個 HTTP POST 到 xAI,吃 SuperGrok。
 
 ## 為什麼不走 grok CLI 的 `image_gen` tool
 0.7.0 之前生圖是 `/grok:image`,做法是驅動 grok companion 的 `task` verb 跑一段 canned prompt、
@@ -22,30 +19,10 @@ HTTP 那條回的是 bytes 或 HTTP status,所以整套 triage(`tool_call_update
 `SuperGrok` 子字串比對、`cp` 沒發生的補救分支)全部消失。`/grok:image` 已於此顆上線時從 grok
 plugin 移除,不留重複入口。
 
-## agy 引擎:驅動 agent,但不相信 agent 的話
-0.2.0 之前這顆只有 HTTP 一條路,理由是上面那段(驅動 agent + `cp`,失敗長得像成功)。agy 這條
-之所以能加進來而不重蹈覆轍,是因為**成功判準沒有變**:script 叫 agy 把圖存到一個絕對路徑,
-然後自己 `statSync` 那個路徑。agy 回 `status: SUCCESS` 但沒有檔案 = 失敗,錯誤訊息把 agy
-說的話原樣引回去。這條規則就是 `tests/imagine/agy-engine.test.mjs` 裡那個
-「a SUCCESS with no file is a failure」——拿掉 `statSync` 會有四個測試同時變紅。
-
-- **prompt 走 argv array,不經 shell。** `spawn(bin, [...])` 沒有 word splitting、沒有引號剝除、
-  沒有 here-document 可關 —— 這是 `--prompt-file` 那條規則的同一個理由,不是例外。
-- **agy 一律寫進 staging,不直接寫 `--out`。** 副檔名要看到位元組才知道,直接落地再改名等於
-  在 `reserveOut` 沒檢查過的路徑上覆寫;發布用 `COPYFILE_EXCL`(O_EXCL create,不可覆寫、
-  不可 race),保住 xAI 那條 `wx` 的同一個承諾。
-- **認不出的位元組 = 失敗的 render**,不是「型別意外的圖」。放行 HTML 或錯誤頁就等於在
-  `IMAGE_SAVED` 後面掛 exit 0 —— 這顆 skill 存在就是為了不做這件事。
-- **timeout 不搶在磁碟檢查前面,而且要殺整棵 process tree。** agy 會生完圖再卡在講話,所以
-  timeout 只負責殺、判定仍然看檔案;錯誤訊息不准說「什麼都沒存」,它不知道。殺要用
-  `detached` + 負 pid 送整個 group —— 只殺 leader 的話 descendant 還握著 pipe,`close` 可以
-  永遠不來(實測 100ms timeout 拖到 1087ms)。SIGKILL 之後仍要有自己的 deadline,而且
-  **沒確認整棵樹死掉就不准刪 staging** —— 那裡可能有使用者已經付過錢的圖。
-- **wrapper prompt 一定要給絕對路徑**。為什麼(agy 的落檔行為、`--dangerously-skip-permissions`
-  與 cwd 為何不是沙箱、tool 參數、無 key 實測、重跑 recipe)全在
-  `docs/imagine-agy-image-audit.md` —— 學到新東西改那份,別在此重抄。
-- **`--model` / `--resolution` / `--quality` 在 agy 上直接 exit 2**,不能默默吃掉:被丟掉的
-  `--model` 是一張使用者沒要求、卻照樣付錢的圖。
+## agy 引擎已移除(2026-11-26)
+Antigravity FAQ 寫明個人方案不支援「wrapping agy inside third-party coding agents」,條款可停權,
+所以 `--engine agy` 改成 exit 2。staging、`COPYFILE_EXCL`、殺整棵 process tree 的做法與實測在
+移除前的 git 歷史(`docs/imagine-agy-image-audit.md`、`tests/imagine/agy-engine.test.mjs`)。
 
 ## 認證:讀 grok CLI 的 token,永遠不寫
 `~/.grok/auth.json`(可用 `GROK_AUTH_FILE` 覆寫)是 grok CLI 的檔案。我們**只讀**兩個欄位:
@@ -76,12 +53,11 @@ plugin 移除,不留重複入口。
   mkdtemp),免得有人在一個 Bash call 算出路徑、再拼進下一個。這條由
   `tests/imagine/skill-structure.test.mjs` 強制:它走過每一份 shipped `.md`,禁 `<<`、要求每個
   提到 script 的 fence 都有 `--prompt-file`。改文件時別想繞過它 —— 它就是那個缺陷的疫苗。
-- 測試 hermetic:注入 `fetchImpl` / `authFile`(xAI)與 `spawnImpl`(agy),temp dir 假 auth.json、
-  假 agy 行程,不連網也不需要裝 agy。
+- 測試 hermetic:注入 `fetchImpl` / `authFile`,temp dir 假 auth.json,不連網。
 
 ## 細節指向
 - **入口只有一個 skill**:`skills/imagine/SKILL.md`(0.3.0 起;`/imagine:image` command 已併入)。
   它是 model-invocable,使用者說要一張圖時 Claude 會自己載入。body 保持 ≤80 行,細節放
   `references/`(one-hop 連結,測試要求連結集合 = 檔案集合)。
 - prompt 怎麼寫才生得出好圖(recipe / 反模式):`references/prompt-craft.md`;範例:`references/examples.md`;
-  選 model:`references/model-and-params.md`;agy 引擎與各種失敗訊息:`references/running.md`。
+  選 model:`references/model-and-params.md`;各種失敗訊息:`references/running.md`。

@@ -1,16 +1,9 @@
-# Running a render: flags, the agy engine, results, failures, cost
+# Running a render: flags, results, failures, cost
 
-Two engines, one contract — **the file on disk is the receipt**, and a failure always exits
-non-zero:
-
-| `--engine` | How it renders | Costs | Needs |
-|---|---|---|---|
-| `grok` (default) | POSTs xAI's `/v1/images/generations` — no job, no event stream, no log triage | the user's SuperGrok subscription | a grok login or `XAI_API_KEY` |
-| `agy` | spawns the Antigravity CLI and drives its built-in `generate_image` tool | the user's Google account | `agy` on PATH, logged in — **no API key at all** |
-
-Pick `grok` unless the user asks for agy, has no xAI credential, or wants to spend Google
-quota instead. `--model`, `--resolution` and `--quality` belong to the xAI endpoint and are
-refused (exit 2) with `--engine agy`, rather than silently dropped.
+One engine, xAI's `/v1/images/generations` (no job, no event stream, no log triage), billed to
+the user's SuperGrok subscription through a grok login or `XAI_API_KEY`. **The file on disk is
+the receipt**, and a failure always exits non-zero. `--engine agy` was removed 2026-11-26 and
+exits 2.
 
 ## Run it, with the prompt in a **file**
 
@@ -48,29 +41,6 @@ accepted only by some models — send it only if the user asks.
 every accepted ratio in the message, which is better than any list this skill could hold.
 `auto` is legal and genuinely adapts the frame to the prompt.
 
-### Rendering through agy instead
-
-```typescript
-Bash({
-  command: `node "${CLAUDE_SKILL_DIR}/scripts/imagine.mjs" --engine agy --prompt-file /abs/path/prompt.txt --aspect 16:9`,
-  description: "agy imagine",
-  timeout: 300000
-})
-```
-
-Same flags, same output line, same `--prompt-file` rule — the script hands the prompt to agy
-in an argv array, so nothing about it ever reaches a shell. `--aspect` is passed through to the
-tool's own `AspectRatio` parameter.
-
-agy renders into a private staging directory, never onto `--out`. The script then checks the
-bytes itself — size, then magic number — and only publishes to the destination if they are a
-real image, through a create that cannot overwrite. So an agy that reports success without
-rendering fails here with its own words quoted back, and a corrected extension can never land
-on top of a file you already had. Give it a longer timeout than the xAI path: it is a whole
-agent turn, ~30s in practice.
-
-`AGY_BIN` overrides the binary; otherwise it comes off PATH.
-
 ## Read the result
 
 On success the script prints one line and exits 0:
@@ -100,43 +70,13 @@ rather than re-diagnosing:
   extension was corrected ("generated and billed"), the bytes are gone unless you re-run with a
   different `--out`.
 - **exit 2** → a usage error (unknown flag, missing value, no prompt, an unreadable or empty
-  `--prompt-file`, a prompt given twice, an unknown `--engine`, or an xAI-only knob passed with
-  `--engine agy`). Nothing was billed.
-
-With `--engine agy` the model column reads `agy/generate_image` and the failures are different:
-
-- **"exited N but wrote no file"** → the run finished without producing the image. The message
-  quotes what agy said and names `~/.gemini/antigravity-cli/brain/<conversation-id>/`, where its
-  tool parks a render before moving it — a file may be sitting there. Relay it; do not re-run
-  blind.
-- **"agy is not installed"** → the Antigravity CLI is not on PATH. Install it, set `AGY_BIN`, or
-  drop `--engine agy`.
-- **"bytes that are not a JPEG or a PNG"** → agy wrote something else at the path (an error
-  page, prose). Treated as a failed render rather than reported as an image.
-- **a timeout** → the script's own backstop, after agy's `--print-timeout`. It kills the run
-  (SIGTERM, then SIGKILL) but **still checks the file first** — agy has been seen to finish the
-  render and then hang narrating it, so a timeout can still succeed. Only when there is no file
-  does it fail, and it says the render may still have cost quota rather than claiming nothing
-  was spent.
-- **"already exists — refusing to overwrite"** on the agy path → read which half of the line
-  applies. Caught before the spawn, nothing was generated or billed. Caught at publish time, the
-  render happened: the message names the staging path where the bytes were **kept**, because a
-  re-run costs quota and will not reproduce that image. Move it, or re-run with another `--out`.
-
-The agy path runs with `--dangerously-skip-permissions`, because a headless run has nobody to
-answer a permission prompt. It runs `detached` with `cwd` in a private staging directory, so a
-timeout can signal the whole process group and a relative path of agy's lands away from your
-files — but that is **not** a sandbox: skipped permissions are not fenced by cwd. Say so if a
-user asks what the flag costs them.
+  `--prompt-file`, a prompt given twice, or an unknown or removed `--engine`). Nothing was billed.
 
 ## Cost
 
-One call is one image. **No batching and no free re-rolls on either engine — ask before
+One call is one image. **No batching and no free re-rolls — ask before
 generating a second.**
 
-- `--engine grok`: billed to the user's SuperGrok subscription (verified 2026-08-23: generation
+- Billed to the user's SuperGrok subscription (verified 2026-08-23: generation
   succeeds with the OAuth bearer alone, no `XAI_API_KEY` present). Models differ in price by up
   to 3×; `model-and-params.md` has the grid.
-- `--engine agy`: spends the user's Google account quota, and costs an agent turn on top of the
-  render (verified 2026-09-05 with no `GEMINI_API_KEY` in the environment and none stored — agy
-  renders on its own login).

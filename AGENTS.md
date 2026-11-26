@@ -123,8 +123,8 @@ When **adding** a skill, the only existing files you may edit are:
 - **Engine ↔ CLI contract audits** — every flag/output field a skill depends on, pinned to a
   source anchor (or, for a closed binary, an evidence class) + the recipe to re-run the check.
   Update the audit doc, not the dev notes, when you learn something about an engine:
-  `docs/codex-protocol-sync-audit.md` · imagine has two, one per engine it renders on:
-  `docs/imagine-xai-image-api-audit.md` · `docs/imagine-agy-image-audit.md`. codex's desktop backend has its own:
+  `docs/codex-protocol-sync-audit.md` · imagine's:
+  `docs/imagine-xai-image-api-audit.md`. codex's desktop backend has its own:
   `docs/codex-desktop-ipc-audit.md` (the Codex desktop app's private IPC router).
 - **Is codex still compatible with the latest Codex CLI?** The repo-only `codex-upstream-sync`
   skill (`.claude/skills/`) runs the routine check and says when to escalate to the full audits.
