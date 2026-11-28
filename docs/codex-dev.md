@@ -35,13 +35,13 @@ turn / review;job 持久化才用 shared core 的 **state-store / events / job /
   收尾靠既有的層:broker idle 5s 自關、dead-pid reconcile、watchdog、job 硬上限。
 - `scripts/lib/codex.mjs` — 高層編排(turn / review、auth·availability、model list、structured
   output);app-server **client 與 direct/broker transport 在 `lib/app-server.mjs`**。
-- `scripts/lib/desktop-ipc.mjs` — **桌面版後端**:經 Codex 桌面版私有 IPC router(`$CODEX_HOME/ipc/ipc.sock`,
+- `scripts/lib/desktop-ipc.mjs` — **桌面版後端(2026-11-28 起失效)**:ChatGPT.app 內嵌的新版拿掉了 IPC router,新 socket 只放行 OpenAI 簽章的程序,技能敘述已不再提供這條路,程式碼仍在(見 audit 開頭的 Status)。原設計:經 Codex 桌面版私有 IPC router(`$CODEX_HOME/ipc/ipc.sock`,
   u32 LE 長度 + JSON)當 thread follower:owner discovery → 廣播 following → `load-complete-history` 拿快照
   → 套 JSON patch → `thread-follower-start-turn` / `interrupt-turn`。`lib/codex.mjs` 的 `runDesktopTurn` 回傳
   與 `runAppServerTurn` **同形**的結果,render/status/result 因此不分後端。`task --backend auto|cli|desktop`、
   `--thread <id>`;job 記錄帶 `backend: "desktop"`,cancel / hard timeout / watchdog 讀它改走 IPC 中斷、
   **永不 reap broker**。新 thread 兩條路:`--new-thread-via cli`(預設,一次性 app-server 跑 bootstrap)/
-  `app`(`codex://threads/new?prompt&path` 深層連結 + 在 App 視窗按 Enter,再從 rollout 檔以首則訊息找出 thread id)。使用者文件在 `skills/codex/references/desktop-backend.md`;
+  `app`(`codex://threads/new?prompt&path` 深層連結 + 在 App 視窗按 Enter,再從 rollout 檔以首則訊息找出 thread id)。使用者文件原為 `skills/codex/references/desktop-backend.md`(已刪);
   協定契約、實測證據與 app 更新後的重驗步驟在 `docs/codex-desktop-ipc-audit.md`,為何這樣設計在 `docs/adr/0004`。
 - `scripts/lib/worktree-guard.mjs` — **條件式** expected-triplet 驗證(給齊 expected-worktree /
   branch / base 才 assert;沒帶就是 no-op)。SKILL.md 與 `--help` 都教呼叫端:worktree 用 `--cwd`,

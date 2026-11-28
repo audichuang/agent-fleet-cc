@@ -92,23 +92,22 @@ run is still going.
    `~/.local/state/codex-companion`); a launch that set it is found only where it pointed. The
    launch JSON's `logFile` shows which directory that was.
 3. Still missing: the outcome is unknown. Say so, with the thread id from an earlier report,
-   and ask the user to look at that thread (a desktop turn shows in the app). Do not report it
+   and ask the user to look at that thread. Do not report it
    as running, finished or failed.
 4. Once the user has seen the thread end, collect its answer on the record with
-   `task --backend desktop --thread <id>` (or `--thread <id>` alone for a CLI thread) and a
+   `task --thread <id>` and a
    prompt that asks for the final report. A report file the prompt had Codex write can be
    relayed too: say it came from the file, not from `result`.
 
 Never relaunch the prompt as a fresh run: if the first one is still working, two runs on one
-screen or one checkout spoil each other.
+checkout spoil each other.
 
 ## Time cap
 
 A job still running after 3 hours (`10800000` ms) is stopped and recorded as failed. Only a
 dead job is reaped sooner, so a stuck-but-alive one runs to the cap; that is why you check in. To
 allow longer, set a larger `CODEX_JOB_TIMEOUT_MS` (milliseconds) in the environment you launch
-the job from; a smaller one only cuts a healthy run short. The cap is read once at launch: a running job cannot be extended. A desktop job's turn is
-interrupted in the app when the cap hits.
+the job from; a smaller one only cuts a healthy run short. The cap is read once at launch: a running job cannot be extended.
 
 ## Rules
 

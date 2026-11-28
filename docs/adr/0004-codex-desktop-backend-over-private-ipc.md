@@ -4,6 +4,9 @@
 commits `d928c2c`, `119cbd7`, `61e94be`). Evidence and the re-check recipe live in
 `docs/codex-desktop-ipc-audit.md`; this file records why the shape was chosen.
 
+**Superseded in practice 2026-11-28:** the ChatGPT.app build removed the router this design
+rests on, so the skill stopped offering the backend (see the audit's Status).
+
 ## Context
 
 The codex plugin drove only `codex app-server`, a process the companion spawns (or reaches

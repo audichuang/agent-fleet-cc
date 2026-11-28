@@ -4,7 +4,7 @@ Two skills, each a self-contained directory (`SKILL.md` plus the scripts it runs
 
 | Skill | How an agent reaches it | What it does |
 |---|---|---|
-| `codex` | ask for a Codex review, check, diagnosis, implementation or image, or for Codex to operate a real UI in the Codex desktop app; `/codex` in Claude Code | Delegates to OpenAI Codex (app-server, or the Codex desktop app over IPC with computer use) and tracks the job |
+| `codex` | ask for a Codex review, check, diagnosis, implementation or image; `/codex` in Claude Code | Delegates to OpenAI Codex (app-server) and tracks the job |
 | `imagine` | ask for an image; `/imagine` in Claude Code | Generates one image on xAI Grok Imagine (`POST /v1/images/generations`, reusing the grok CLI's OAuth login read-only, or `XAI_API_KEY`) The file on disk is the receipt |
 
 ## Install
@@ -16,8 +16,7 @@ npx skills add audichuang/agent-fleet-cc
 aghub-cli -g -a all source sync https://github.com/audichuang/agent-fleet-cc --skill codex,imagine --install-missing --yes
 ```
 
-Install only the ones you use. Requirements: Node ≥ 22; for codex, the `codex` CLI logged in (and
-the Codex desktop app for `--backend desktop`); for imagine, a grok login or `XAI_API_KEY`.
+Install only the ones you use. Requirements: Node ≥ 22; for codex, the `codex` CLI logged in; for imagine, a grok login or `XAI_API_KEY`.
 
 ## Migrating from the Claude Code plugins
 

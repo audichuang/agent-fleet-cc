@@ -4,7 +4,21 @@ Living record of what the **codex plugin's desktop backend** (`skills/codex/scri
 `runDesktopTurn` / `interruptDesktopTurn` in `lib/codex.mjs`) depends on in the **Codex desktop
 app's private IPC router**: what was verified, on which builds, by which evidence, and how to
 re-check after an app update. The *why* is in `docs/adr/0004-codex-desktop-backend-over-private-ipc.md`;
-the user-facing contract is `skills/codex/references/desktop-backend.md`.
+the user-facing contract was `skills/codex/references/desktop-backend.md` (deleted 2026-11-28).
+
+> **Status 2026-11-28: the router is gone, and the skill no longer offers this backend.** The
+> Codex desktop app now runs inside ChatGPT.app (observed build 158.0.8127.89, process started
+> 2026-11-25). Nothing listens on `~/.codex/ipc/ipc.sock` (a stale 11-19 file, `ECONNREFUSED`) or
+> `$TMPDIR/codex-ipc/ipc-<uid>.sock`, and the router's method and error strings
+> (`thread-owner-discovery`, `thread-follower-*`, `no-client-found`, `request-version-mismatch`)
+> are absent from `app.asar`. The app's remaining sockets (`/tmp/codex-app-tools/*.sock`, a
+> `codex_app` MCP with `create_thread` / `send_message_to_thread`) authorize the connecting
+> process's code-signing ancestry and reject anything not signed by OpenAI (app log:
+> `dynamic_app_tools_peer_rejected reason=untrusted-process-ancestry`), so an outside companion is
+> shut out by design. The last successful `--backend desktop` job was 2026-11-16. SKILL.md and
+> `references/desktop-backend.md` (deleted) no longer route anything here; the code below still
+> exists. Re-check: `lsof -U | grep codex-ipc` while the app runs, and search `app.asar` for
+> `thread-follower-start-turn`. The rest of this file records the old contract.
 
 > Scope: the router protocol, the conversation-state shape the plugin reads, and the app
 > behaviours the design rests on. Not covered: app-server JSON-RPC (that is
@@ -228,3 +242,4 @@ prompt sent to Codex.
 | Date | By | Scope | Result |
 | --- | --- | --- | --- |
 | 2026-10-03 | Claude Code session (with the user) | Initial contract discovery, implementation, live verification on macOS and Ubuntu, review fixes, skill eval | Shipped as codex 1.7.0 on `feature/codex-desktop-backend` (`d928c2c`, `119cbd7`, `61e94be`). Not yet merged. |
+| 2026-11-28 | Claude Code session (with the user) | Why `--backend desktop` stopped connecting after the ChatGPT.app update | Router removed; replacement socket is restricted to OpenAI-signed processes. Skill prose retired; code kept. See Status at the top. |
