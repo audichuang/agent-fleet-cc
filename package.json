@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Agent skills: codex (delegate to Codex CLI or the Codex desktop app) and imagine (image generation)",
+  "description": "Agent skills: codex (delegate to the Codex CLI) and imagine (image generation)",
   "engines": {
     "node": ">=22.3"
   },
